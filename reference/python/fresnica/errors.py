@@ -4,6 +4,10 @@
 class FresnicaError(Exception):
     """Base error for user-facing Fresnica failures."""
 
+    def __init__(self, message: str, details: str | None = None):
+        self.details = details
+        super().__init__(message)
+
 
 class WalletError(FresnicaError):
     pass
@@ -38,9 +42,7 @@ class NetworkError(FresnicaError):
 
 
 class TransactionError(FresnicaError):
-    def __init__(self, message: str, details: str | None = None):
-        self.details = details
-        super().__init__(message)
+    pass
 
 
 class InvalidAmountError(TransactionError):

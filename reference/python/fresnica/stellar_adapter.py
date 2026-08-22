@@ -19,7 +19,10 @@ class StellarAdapter:
         try:
             return self.server.accounts().account_id(address).call()
         except SdkError as exc:
-            raise NetworkError(f"Unable to load Stellar account {address}") from exc
+            raise NetworkError(
+                f"Unable to load Stellar account {address}",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     def account_exists(self, address: str) -> bool:
         try:
@@ -28,7 +31,10 @@ class StellarAdapter:
         except NotFoundError:
             return False
         except SdkError as exc:
-            raise NetworkError(f"Unable to check Stellar account {address}") from exc
+            raise NetworkError(
+                f"Unable to check Stellar account {address}",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     def get_balances(self, address: str) -> list[dict]:
         return self.get_account(address).get("balances", [])
@@ -43,13 +49,94 @@ class StellarAdapter:
                 .call()
             )
         except SdkError as exc:
-            raise NetworkError(f"Unable to load operations for {address}") from exc
+            raise NetworkError(
+                f"Unable to load operations for {address}",
+                details=_sdk_error_details(exc),
+            ) from exc
+
+    def get_orderbook(self, selling: Asset, buying: Asset) -> dict:
+        try:
+            return self.server.orderbook(
+                self.to_sdk_asset(selling),
+                self.to_sdk_asset(buying),
+            ).call()
+        except SdkError as exc:
+            raise NetworkError(
+                "Unable to load Stellar order book",
+                details=_sdk_error_details(exc),
+            ) from exc
+
+    def get_offers(self, address: str, limit: int = 20) -> dict:
+        try:
+            return (
+                self.server.offers()
+                .for_account(address)
+                .order(desc=True)
+                .limit(limit)
+                .call()
+            )
+        except SdkError as exc:
+            raise NetworkError(
+                f"Unable to load offers for {address}",
+                details=_sdk_error_details(exc),
+            ) from exc
+
+    def get_trades(self, base: Asset, counter: Asset, limit: int = 20) -> dict:
+        try:
+            return (
+                self.server.trades()
+                .for_asset_pair(
+                    self.to_sdk_asset(base),
+                    self.to_sdk_asset(counter),
+                )
+                .order(desc=True)
+                .limit(limit)
+                .call()
+            )
+        except SdkError as exc:
+            raise NetworkError(
+                "Unable to load Stellar trades",
+                details=_sdk_error_details(exc),
+            ) from exc
+
+    def get_trade_aggregations(
+        self,
+        base: Asset,
+        counter: Asset,
+        resolution: int,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        offset: int | None = None,
+        limit: int = 100,
+    ) -> dict:
+        try:
+            return (
+                self.server.trade_aggregations(
+                    self.to_sdk_asset(base),
+                    self.to_sdk_asset(counter),
+                    resolution,
+                    start_time=start_time,
+                    end_time=end_time,
+                    offset=offset,
+                )
+                .order(desc=True)
+                .limit(limit)
+                .call()
+            )
+        except SdkError as exc:
+            raise NetworkError(
+                "Unable to load Stellar trade aggregations",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     def fetch_base_fee(self) -> int:
         try:
             return int(self.server.fetch_base_fee())
         except SdkError as exc:
-            raise NetworkError("Unable to fetch Stellar base fee") from exc
+            raise NetworkError(
+                "Unable to fetch Stellar base fee",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     def get_latest_ledger(self) -> dict:
         try:
@@ -59,7 +146,10 @@ class StellarAdapter:
                 raise NetworkError("Horizon returned no ledger records")
             return records[0]
         except SdkError as exc:
-            raise NetworkError("Unable to fetch latest Stellar ledger") from exc
+            raise NetworkError(
+                "Unable to fetch latest Stellar ledger",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     def get_base_reserve_stroops(self) -> int:
         if self._base_reserve_stroops is None:

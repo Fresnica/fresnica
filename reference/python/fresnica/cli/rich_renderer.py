@@ -1,5 +1,7 @@
 """Rich presentation for Fresnica command mode."""
 
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import json
 
 from rich.console import Console
@@ -58,6 +60,79 @@ class RichRenderer:
         table.add_column("Summary")
         for item in operations:
             table.add_row(item.created_at or "", item.operation_type, item.summary)
+        self.console.print(table)
+
+    def render_orderbook(self, selling: str, buying: str, orderbook: dict, network: str) -> None:
+        table = Table(title=f"Order book  {selling} -> {buying}  [{network}]")
+        table.add_column("Side", style="bold")
+        table.add_column("Price", justify="right")
+        table.add_column("Amount", justify="right")
+        for row in orderbook.get("asks", []):
+            table.add_row("ASK", str(row.get("price", "?")), str(row.get("amount", "?")))
+        for row in orderbook.get("bids", []):
+            table.add_row("BID", str(row.get("price", "?")), str(row.get("amount", "?")))
+        self.console.print(table)
+
+    def render_offers(self, record, offers: list[dict]) -> None:
+        table = Table(title=f"Offers  {record.name}  [{record.network}]")
+        table.add_column("ID", style="dim")
+        table.add_column("Selling", style="bold")
+        table.add_column("Buying", style="bold")
+        table.add_column("Amount", justify="right")
+        table.add_column("Price", justify="right")
+        for offer in offers:
+            table.add_row(
+                str(offer.get("id", "?")),
+                _horizon_asset(offer.get("selling", {})),
+                _horizon_asset(offer.get("buying", {})),
+                str(offer.get("amount", "?")),
+                str(offer.get("price", "?")),
+            )
+        self.console.print(table)
+
+    def render_trades(self, base: str, counter: str, trades: list[dict], network: str) -> None:
+        table = Table(title=f"Trades  {base} / {counter}  [{network}]")
+        table.add_column("Time", style="dim")
+        table.add_column("Base", justify="right")
+        table.add_column("Counter", justify="right")
+        table.add_column("Price", justify="right")
+        table.add_column("Base side")
+        for trade in trades:
+            table.add_row(
+                str(trade.get("ledger_close_time", "")),
+                str(trade.get("base_amount", "?")),
+                str(trade.get("counter_amount", "?")),
+                _trade_price(trade),
+                "sell" if trade.get("base_is_seller") else "buy",
+            )
+        self.console.print(table)
+
+    def render_trade_aggregations(
+        self,
+        base: str,
+        counter: str,
+        resolution: str,
+        aggregations: list[dict],
+        network: str,
+    ) -> None:
+        table = Table(title=f"Candles  {base} / {counter}  {resolution}  [{network}]")
+        table.add_column("Time", style="dim")
+        table.add_column("Open", justify="right")
+        table.add_column("High", justify="right")
+        table.add_column("Low", justify="right")
+        table.add_column("Close", justify="right")
+        table.add_column("Base vol", justify="right")
+        table.add_column("Trades", justify="right")
+        for item in reversed(aggregations):
+            table.add_row(
+                _timestamp(item.get("timestamp")),
+                str(item.get("open", "?")),
+                str(item.get("high", "?")),
+                str(item.get("low", "?")),
+                str(item.get("close", "?")),
+                str(item.get("base_volume", "?")),
+                str(item.get("trade_count", "?")),
+            )
         self.console.print(table)
 
     def render_review(self, review) -> None:
@@ -166,3 +241,35 @@ def _decimal(value) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _horizon_asset(raw: dict) -> str:
+    if raw.get("asset_type") == "native":
+        return "XLM"
+    code = raw.get("asset_code", "?")
+    issuer = raw.get("asset_issuer")
+    return f"{code}:{short_address(issuer)}" if issuer else code
+
+
+def _trade_price(raw: dict) -> str:
+    try:
+        base = Decimal(str(raw.get("base_amount")))
+        counter = Decimal(str(raw.get("counter_amount")))
+        if base:
+            return _decimal(counter / base)
+    except (InvalidOperation, TypeError, ValueError):
+        pass
+    price = raw.get("price")
+    if isinstance(price, dict) and price.get("d") not in (None, "0", 0):
+        try:
+            return _decimal(Decimal(str(price["n"])) / Decimal(str(price["d"])))
+        except (InvalidOperation, KeyError):
+            pass
+    return "?"
+
+
+def _timestamp(value) -> str:
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        return str(value or "")
