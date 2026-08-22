@@ -72,3 +72,7 @@ class FresnicaApp(BaseFresnicaApp):
             self.call_from_thread(self._apply_wallet, None, [], [], [], ready_message, None)
         except (FresnicaError, ValueError) as exc:
             self.call_from_thread(self._apply_wallet, record, [], [], [], ready_message, exc)
+
+
+def run_tui(runtime):
+    return FresnicaApp(runtime).run()
