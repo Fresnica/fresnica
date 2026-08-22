@@ -63,7 +63,7 @@ class DataStore(ABC):
 class MemoryDataStore(DataStore):
     def __init__(self):
         self._balances: dict[tuple[str, str], list[dict]] = {}
-        self._operations: dict[tuple[str, str], list[dict]] = {}
+        self._operations: dict[tuple[str, str], dict[str, dict]] = {}
         self._offers: dict[tuple[str, str], list[dict]] = {}
         self._trades: dict[tuple[str, str], dict[str, dict]] = {}
         self._trade_aggregations: dict[tuple[str, str, int], dict[str, dict]] = {}
@@ -75,12 +75,21 @@ class MemoryDataStore(DataStore):
         return list(self._balances.get((network, account), []))
 
     def save_operations(self, network: str, account: str, operations) -> None:
-        self._operations[(network, account)] = _records(operations)
+        bucket = self._operations.setdefault((network, account), {})
+        for item in _records(operations):
+            token = str(item.get("paging_token", item.get("id", "")))
+            if token:
+                bucket[token] = item
 
     def get_operations(
         self, network: str, account: str, limit: int = 20
     ) -> list[dict]:
-        return list(self._operations.get((network, account), []))[:limit]
+        items = list(self._operations.get((network, account), {}).values())
+        items.sort(
+            key=lambda item: int(item.get("paging_token", item.get("id", 0)) or 0),
+            reverse=True,
+        )
+        return items[:limit]
 
     def save_offers(self, network: str, account: str, offers) -> None:
         self._offers[(network, account)] = _records(offers)
@@ -439,8 +448,11 @@ def _records(payload) -> list[dict]:
 
 
 def _asset_key(asset: dict) -> str:
-    if asset.get("asset_type") == "native":
+    asset_type = asset.get("asset_type")
+    if asset_type == "native":
         return "native"
+    if asset_type == "liquidity_pool_shares":
+        return f"pool:{asset.get('liquidity_pool_id', '')}"
     return f"{asset.get('asset_code', '')}:{asset.get('asset_issuer', '')}"
 
 
