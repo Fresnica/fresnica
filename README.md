@@ -1,45 +1,65 @@
 # Fresnica
 
-Fresnica is a self-custody Stellar wallet project.
+Fresnica is a self-custody Stellar wallet project focused on the layer that
+`stellar-sdk` intentionally does not provide: wallet lifecycle, encrypted local
+storage, user workflows, caching, CLI/TUI presentation, and later reusable Core
+bindings for Mobile/Desktop/SDK clients.
 
-## Vision
+## Direction
 
-Build a wallet engine that can power multiple interfaces:
+1. **Python reference** — define behavior, tests, CLI/TUI workflows, and storage formats.
+2. **Rust Core** — port the proven wallet/runtime behavior for production reuse.
 
-- Mobile
-- Desktop
-- CLI
-- TUI
-- SDK
-- Agent interfaces
+Stellar protocol primitives stay delegated to the official SDK wherever
+possible: mnemonic/key derivation, Keypair/StrKey, XDR, transaction building,
+signing primitives, and Horizon access.
 
-## Development Strategy
+## Python reference
 
-Phase 1: Python reference implementation.
-
-The Python version is used to validate wallet logic, create test vectors, and define behavior.
-
-Phase 2: Rust Fresnica Core.
-
-The Rust implementation will become the production wallet engine used by different clients.
-
-## Current First Goal
-
-Implement:
-
-```
-Mnemonic
-  -> Stellar HD derivation
-  -> Address generation
-  -> Wallet model
+```bash
+cd reference/python
+python -m pip install -e ".[dev]"
 ```
 
-Then extend to:
+Run the interactive TUI:
 
-- Balance
-- Asset management
-- Transaction building
-- Signing
-- Sending
-- TUI wallet interface
+```bash
+fresnica
+```
 
+Or use one-shot command mode:
+
+```bash
+fresnica wallet create main
+fresnica wallet watch observer G...
+fresnica wallet list
+fresnica balance
+fresnica history
+fresnica send 100 XLM to G...
+fresnica send 25 USDC:GISSUER... to G...
+```
+
+Sensitive mnemonic/secret material is encrypted at rest. Public metadata such
+as wallet name, address, and network remains readable. Chain-derived data is
+kept separately in a SQLite cache.
+
+## Current architecture
+
+```text
+CLI (Rich) / TUI (Textual)
+          |
+        Runtime
+          |
+   +------+-------+
+   |              |
+WalletManager   Services
+   |              |
+WalletStorage  DataStore
+                  |
+             StellarAdapter
+                  |
+              stellar-sdk
+```
+
+`Wallet` represents identity plus optional signing capability. A watch-only
+wallet therefore uses the same balance/history services but cannot sign.
