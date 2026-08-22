@@ -13,34 +13,28 @@ def main(argv=None, runtime=None) -> int:
 
     if not argv:
         from ..tui.app import run_tui
-
         run_tui(runtime or Runtime())
         return 0
 
     args = parse_args(argv)
-    runtime = runtime or Runtime()
+    runtime = runtime or Runtime(network=getattr(args, "network", "mainnet"))
     renderer = RichRenderer()
 
     try:
         if args.command == "balance":
             from .commands.balance import execute_balance
-
             execute_balance(runtime, args, renderer)
         elif args.command == "history":
             from .commands.history import execute_history
-
             execute_history(runtime, args, renderer)
         elif args.command == "send":
             from .commands.send import execute_send
-
             execute_send(runtime, args, renderer)
         elif args.command == "info":
             from .commands.info import execute_info
-
             execute_info(runtime, args, renderer)
         elif args.command == "wallet":
             from .commands.wallet import execute_wallet
-
             execute_wallet(runtime, args, renderer)
         else:
             parse_args(["--help"])
