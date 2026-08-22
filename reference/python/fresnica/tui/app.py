@@ -9,4 +9,9 @@ class FresnicaApp:
         self.context = context
 
     def run(self):
-        raise NotImplementedError("Textual UI implementation")
+        # Textual implementation will replace this placeholder.
+        return self.context
+
+
+def run_tui(context=None):
+    return FresnicaApp(context).run()
