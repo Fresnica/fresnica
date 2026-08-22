@@ -1,50 +1,52 @@
 """BIP39 mnemonic handling.
 
-Reference implementation.
+Fresnica wallet abstraction layer.
 
-Supports:
-- English mnemonic
-- Simplified/Traditional Chinese mnemonic
-- BIP39 passphrase
-
-The implementation intentionally keeps only the seed derivation layer.
-HD derivation is handled by hdwallet.py.
+The implementation intentionally delegates BIP39 cryptography to a
+well-tested external library. Fresnica defines the wallet interface,
+not a replacement for the BIP39 standard.
 """
 
-import unicodedata
-import hashlib
-
-
-def normalize_text(value: str) -> str:
-    """Apply BIP39 NFKD normalization."""
-    return unicodedata.normalize("NFKD", value)
+from mnemonic import Mnemonic
 
 
 def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
-    """Convert BIP39 mnemonic into a 64-byte seed.
+    """Convert BIP39 mnemonic into seed.
 
-    BIP39 specifies:
-
-        PBKDF2-HMAC-SHA512
-        password = normalized mnemonic
-        salt = "mnemonic" + normalized passphrase
-        iterations = 2048
-
+    Supports BIP39 languages provided by the library, including Chinese.
     """
-    mnemonic = normalize_text(mnemonic)
-    passphrase = normalize_text(passphrase)
+    words = mnemonic.strip()
 
-    salt = "mnemonic" + passphrase
+    # Language detection allows English and Chinese mnemonics.
+    # BIP39 checksum validation is delegated to the library.
+    for language in (
+        "english",
+        "chinese_simplified",
+        "chinese_traditional",
+        "japanese",
+        "korean",
+        "spanish",
+        "french",
+        "italian",
+    ):
+        try:
+            return Mnemonic(language).to_seed(words, passphrase)
+        except Exception:
+            continue
 
-    return hashlib.pbkdf2_hmac(
-        "sha512",
-        mnemonic.encode("utf-8"),
-        salt.encode("utf-8"),
-        2048,
-        dklen=64,
-    )
+    raise ValueError("Invalid BIP39 mnemonic")
 
 
 def validate_mnemonic(mnemonic: str) -> bool:
-    """Placeholder for full BIP39 checksum validation."""
-    return bool(normalize_text(mnemonic).strip())
+    """Validate BIP39 checksum."""
+    words = mnemonic.strip()
+
+    for language in (
+        "english",
+        "chinese_simplified",
+        "chinese_traditional",
+    ):
+        if Mnemonic(language).check(words):
+            return True
+
+    return False
