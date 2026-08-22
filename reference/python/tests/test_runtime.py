@@ -1,8 +1,16 @@
-"""Runtime integration tests.
+from fresnica.datastore import MemoryDataStore
+from fresnica.runtime import Runtime
+from fresnica.storage import MemoryWalletStorage
 
-Tests will verify that CLI/TUI share the same runtime composition.
-"""
 
+def test_runtime_composes_and_caches_network_services(tmp_path):
+    runtime = Runtime(
+        home=tmp_path,
+        wallet_storage=MemoryWalletStorage(),
+        datastore=MemoryDataStore(),
+    )
 
-def test_runtime_placeholder():
-    assert True
+    mainnet = runtime.services_for("mainnet")
+    assert mainnet is runtime.services_for("mainnet")
+    assert mainnet is not runtime.services_for("testnet")
+    assert runtime.wallet_manager.storage is runtime.wallet_storage
