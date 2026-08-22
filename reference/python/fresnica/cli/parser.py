@@ -17,6 +17,12 @@ LANGUAGES = (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fresnica")
+    parser.add_argument(
+        "--network",
+        default="mainnet",
+        choices=("mainnet", "testnet"),
+        help="Stellar network context",
+    )
     sub = parser.add_subparsers(dest="command")
 
     balance = sub.add_parser("balance", help="Show balances for a wallet")
