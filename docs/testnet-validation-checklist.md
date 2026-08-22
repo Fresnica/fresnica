@@ -6,14 +6,15 @@ Goal: validate the first end-to-end Fresnica wallet flow.
 
 ```bash
 cd reference/python
-pip install -e ".[dev]"
+uv sync --locked
+uv run pytest -q
 ```
 
 ## Wallet
 
 ```bash
-fresnica wallet create testnet-wallet --network testnet
-fresnica wallet list
+uv run fresnica --network testnet wallet create testnet-wallet
+uv run fresnica wallet list
 ```
 
 Verify:
@@ -25,7 +26,7 @@ Verify:
 ## Funding
 
 ```bash
-fresnica wallet fund
+uv run fresnica --network testnet wallet fund
 ```
 
 Verify:
@@ -36,7 +37,7 @@ Verify:
 ## Balance
 
 ```bash
-fresnica balance --network testnet
+uv run fresnica --network testnet balance
 ```
 
 Verify:
@@ -47,11 +48,11 @@ Verify:
 ## Payment
 
 ```bash
-fresnica send 1 XLM to G...
+uv run fresnica --network testnet send 1 XLM to G...
 ```
 
 Verify:
 
 - review is displayed before signing
-- transaction hash is stored
-- result can be queried later
+- transaction hash is returned
+- ledger is returned when Horizon provides it

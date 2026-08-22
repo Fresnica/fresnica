@@ -1,10 +1,14 @@
 # Fresnica Testnet CLI Flow
 
 ```bash
-fresnica wallet create --network testnet
-fresnica wallet fund
-fresnica balance --network testnet
-fresnica send 1 XLM G...
+cd reference/python
+uv sync --locked
+
+uv run fresnica --network testnet wallet create testnet-wallet
+uv run fresnica --network testnet wallet fund
+uv run fresnica --network testnet balance
+uv run fresnica --network testnet send 1 XLM to GDESTINATION...
 ```
 
-The testnet flow is for validating wallet lifecycle and transaction pipeline before mainnet use.
+The testnet flow validates wallet lifecycle and the transaction pipeline before
+mainnet use.

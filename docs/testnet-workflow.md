@@ -1,16 +1,15 @@
 # Fresnica Testnet Workflow
 
 ```bash
-fresnica wallet create --network testnet
-fresnica wallet fund
-fresnica balance
-fresnica send 1 XLM G...
+cd reference/python
+uv sync --locked
+
+uv run fresnica --network testnet wallet create testnet-wallet
+uv run fresnica --network testnet wallet fund
+uv run fresnica --network testnet balance
+uv run fresnica --network testnet send 1 XLM to GDESTINATION...
 ```
 
-The testnet flow should be completed before mainnet usage.
-
-Next steps:
-
-- connect Friendbot to the CLI
-- add network selection commands
-- persist selected network in config
+This flow exercises wallet creation, Friendbot funding, Horizon balance lookup,
+transaction construction, signing, submission, and transaction result handling
+on Stellar Testnet before mainnet use.
