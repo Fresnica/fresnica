@@ -1,5 +1,7 @@
 """Wallet-management UI organized around selection and context."""
 
+from collections.abc import Callable
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -31,22 +33,37 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
     WalletManagerDialog .section-label { text-style: bold; color: $text-muted; margin-top: 1; }
     WalletManagerDialog .action-row { height: auto; margin-top: 1; }
     WalletManagerDialog Button { margin-right: 1; }
-    WalletManagerDialog #library-actions { align-horizontal: left; }
     WalletManagerDialog #context-actions { align-horizontal: left; }
+    WalletManagerDialog #secondary-sections { height: auto; }
+    WalletManagerDialog .secondary-section { width: 1fr; height: auto; }
+    WalletManagerDialog #danger-section { padding-left: 2; }
+    WalletManagerDialog #library-actions { align-horizontal: left; }
     WalletManagerDialog #danger-actions { align-horizontal: left; }
     WalletManagerDialog #close-actions { align-horizontal: right; }
     """
 
-    def __init__(self, records, current_name: str | None, states: dict[str, WalletState]):
+    def __init__(
+        self,
+        records,
+        current_name: str | None,
+        states: dict[str, WalletState],
+        account_exists: dict[str, bool | None] | None = None,
+        on_select: Callable[[str], dict[str, WalletState] | None] | None = None,
+    ):
         super().__init__()
         self.records = list(records)
         self.current_name = current_name
-        self.states = states
+        self.states = dict(states)
+        self.account_exists = dict(account_exists or {})
+        self.on_select = on_select
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Wallets")
-            yield Static("Choose a wallet with Enter. Moving through the list only previews it.", id="wallet-hint")
+            yield Static(
+                "Move to preview. Press Enter to make a wallet current; this window stays open.",
+                id="wallet-hint",
+            )
             yield DataTable(id="wallet-list")
             yield Static("", id="wallet-detail")
 
@@ -55,13 +72,16 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
                 yield Button("Unlock", id="lock")
                 yield Button("Fund on testnet", id="fund")
 
-            yield Label("Wallet library", classes="section-label")
-            with Horizontal(id="library-actions", classes="action-row"):
-                yield Button("Add wallet", id="add", variant="primary")
+            with Horizontal(id="secondary-sections"):
+                with Vertical(id="library-section", classes="secondary-section"):
+                    yield Label("Wallet library", classes="section-label")
+                    with Horizontal(id="library-actions", classes="action-row"):
+                        yield Button("Add wallet", id="add", variant="primary")
 
-            yield Label("Danger zone", classes="section-label", id="danger-label")
-            with Horizontal(id="danger-actions", classes="action-row"):
-                yield Button("Remove wallet", id="delete", variant="error")
+                with Vertical(id="danger-section", classes="secondary-section"):
+                    yield Label("Danger zone", classes="section-label")
+                    with Horizontal(id="danger-actions", classes="action-row"):
+                        yield Button("Remove wallet", id="delete", variant="error")
 
             with Horizontal(id="close-actions", classes="action-row"):
                 yield Button("Close", id="cancel")
@@ -70,19 +90,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         table = self.query_one("#wallet-list", DataTable)
         table.add_columns("Name", "Network", "Access", "Status")
         table.cursor_type = "row"
-        current_row = 0
-        for index, record in enumerate(self.records):
-            state = self.states[record.name]
-            if record.name == self.current_name:
-                current_row = index
-            table.add_row(
-                ("● " if record.name == self.current_name else "  ") + record.name,
-                record.network.upper(),
-                _access_label(record, state),
-                _state_label(state),
-                key=record.name,
-            )
-        table.move_cursor(row=current_row)
+        self._populate_rows(self.current_name)
         self._refresh_selection()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -90,8 +98,34 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
             self._refresh_selection()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id == "wallet-list":
-            self.dismiss(WalletAction("use", self._selected_record().name))
+        if event.data_table.id != "wallet-list":
+            return
+        record = self._selected_record()
+        if record.name != self.current_name:
+            if self.on_select is not None:
+                states = self.on_select(record.name)
+                if states:
+                    self.states.update(states)
+            self.current_name = record.name
+            self._populate_rows(record.name)
+        self._refresh_selection()
+
+    def _populate_rows(self, selected_name: str | None) -> None:
+        table = self.query_one("#wallet-list", DataTable)
+        selected_row = 0
+        table.clear(columns=False)
+        for index, record in enumerate(self.records):
+            state = self.states[record.name]
+            if record.name == selected_name:
+                selected_row = index
+            table.add_row(
+                ("● " if record.name == self.current_name else "  ") + record.name,
+                record.network.upper(),
+                _access_label(record, state),
+                _state_label(state),
+                key=record.name,
+            )
+        table.move_cursor(row=selected_row)
 
     def _selected_record(self):
         table = self.query_one("#wallet-list", DataTable)
@@ -101,20 +135,41 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
     def _refresh_selection(self) -> None:
         record = self._selected_record()
         state = self.states[record.name]
-        active = "Current wallet" if record.name == self.current_name else "Press Enter to use this wallet"
-        self.query_one("#wallet-detail", Static).update(
-            f"{record.name}\n{record.address}\n{record.network.upper()} · {_detail_access(record, state)}\n{active}"
+        active = (
+            "Current wallet"
+            if record.name == self.current_name
+            else "Press Enter to make this wallet current"
         )
+        lines = [
+            record.name,
+            record.address,
+            f"{record.network.upper()} · {_detail_access(record, state)}",
+            active,
+        ]
+        if record.network == "testnet":
+            exists = self.account_exists.get(record.name)
+            if exists is True:
+                lines.append("Testnet account exists")
+            elif exists is False:
+                lines.append("Testnet account is not funded")
+            else:
+                lines.append("Checking testnet account...")
+        self.query_one("#wallet-detail", Static).update("\n".join(lines))
 
         lock = self.query_one("#lock", Button)
         lock.display = state is not WalletState.WATCH_ONLY
-        if state is WalletState.UNLOCKED:
-            lock.label = "Lock"
-        else:
-            lock.label = "Unlock"
+        lock.label = "Lock" if state is WalletState.UNLOCKED else "Unlock"
 
         fund = self.query_one("#fund", Button)
-        fund.display = record.network == "testnet"
+        fund.display = (
+            record.network == "testnet"
+            and self.account_exists.get(record.name) is False
+        )
+
+    def set_account_exists(self, wallet_name: str, exists: bool) -> None:
+        self.account_exists[wallet_name] = exists
+        if self._selected_record().name == wallet_name:
+            self._refresh_selection()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -133,7 +188,10 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
 
     def action_fund(self) -> None:
         record = self._selected_record()
-        if record.network == "testnet":
+        if (
+            record.network == "testnet"
+            and self.account_exists.get(record.name) is False
+        ):
             self.dismiss(WalletAction("fund", record.name))
 
     def action_delete(self) -> None:
