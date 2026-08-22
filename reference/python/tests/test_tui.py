@@ -349,7 +349,7 @@ def test_locked_send_unlocks_first_and_wallet_remains_unlocked_after_submit():
     asyncio.run(scenario())
 
 
-def test_wallet_management_keeps_selection_open_and_hides_unneeded_fund():
+def test_wallet_management_defers_dashboard_io_until_close():
     async def scenario():
         runtime = FakeRuntime()
         unfunded = Keypair.random()
@@ -363,22 +363,29 @@ def test_wallet_management_keeps_selection_open_and_hides_unneeded_fund():
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 46)) as pilot:
             await _settle(pilot, 8)
+            checks_before = sum(adapter.checks for adapter in runtime.adapters.values())
+            testnet_cached_before = runtime.balance_services["testnet"].cached_reads
+            mainnet_cached_before = runtime.balance_services["mainnet"].cached_reads
+            mainnet_history_before = runtime.history_services["mainnet"].refreshes
+
             await pilot.press("w")
             assert isinstance(app.screen, WalletManagerDialog)
+            await _settle(pilot, 4)
+            assert sum(adapter.checks for adapter in runtime.adapters.values()) == checks_before
 
             table = app.screen.query_one("#wallet-list", DataTable)
             assert table.row_count == 3
             assert app.screen.query_one("#library-section").parent.id == "secondary-sections"
             assert app.screen.query_one("#danger-section").parent.id == "secondary-sections"
 
-            # Alpha was loaded successfully on mount, so Friendbot is irrelevant.
+            # Alpha has a cached account, so Friendbot is irrelevant and hidden.
             assert app.screen.query_one("#lock", Button).display
             assert not app.screen.query_one("#fund", Button).display
             assert "Testnet account exists" in str(
                 app.screen.query_one("#wallet-detail", Static).render()
             )
 
-            # Moving previews beta; Enter selects it without closing management.
+            # Preview and Enter only change wallet identity and context actions.
             table.move_cursor(row=1)
             await _settle(pilot)
             detail = str(app.screen.query_one("#wallet-detail", Static).render())
@@ -388,37 +395,42 @@ def test_wallet_management_keeps_selection_open_and_hides_unneeded_fund():
             assert not app.screen.query_one("#fund", Button).display
 
             await pilot.press("enter")
-            await _settle(pilot, 8)
-            assert isinstance(app.screen, WalletManagerDialog)
-            assert runtime.wallet_manager.get_record().name == "beta"
-            assert "Current wallet" in str(
-                app.screen.query_one("#wallet-detail", Static).render()
-            )
-
-            # Switching back to a wallet already visited uses the local cache first.
-            table = app.screen.query_one("#wallet-list", DataTable)
-            table.move_cursor(row=0)
-            await pilot.press("enter")
-            await _settle(pilot, 2)
-            assert isinstance(app.screen, WalletManagerDialog)
-            assert runtime.wallet_manager.get_record().name == "alpha"
-            assert runtime.balance_services["testnet"].cached_reads >= 1
-            assert not app.screen.query_one("#fund", Button).display
-
-            # A conclusively missing Testnet account is the only case that exposes Fund.
-            table.move_cursor(row=2)
-            await _settle(pilot, 8)
-            assert app.screen.query_one("#fund", Button).display
-            assert "not funded" in str(
-                app.screen.query_one("#wallet-detail", Static).render()
-            )
-            await pilot.press("enter")
             await _settle(pilot, 4)
             assert isinstance(app.screen, WalletManagerDialog)
-            assert runtime.wallet_manager.get_record().name == "unfunded"
+            assert runtime.wallet_manager.get_record().name == "beta"
+            assert runtime.balance_services["testnet"].cached_reads == testnet_cached_before
+            assert runtime.balance_services["mainnet"].cached_reads == mainnet_cached_before
+            assert runtime.history_services["mainnet"].refreshes == mainnet_history_before
+            assert sum(adapter.checks for adapter in runtime.adapters.values()) == checks_before
+
+            # Close commits presentation: cache renders immediately, then network refreshes.
+            await pilot.click("#close")
+            await _settle(pilot, 8)
+            assert not isinstance(app.screen, WalletManagerDialog)
+            assert runtime.balance_services["mainnet"].cached_reads > mainnet_cached_before
+            assert runtime.history_services["mainnet"].refreshes > mainnet_history_before
+
+            # Unknown Testnet status does not trigger a background probe in management.
+            checks_before = sum(adapter.checks for adapter in runtime.adapters.values())
+            await pilot.press("w")
+            table = app.screen.query_one("#wallet-list", DataTable)
+            table.move_cursor(row=2)
+            await _settle(pilot, 4)
+            assert sum(adapter.checks for adapter in runtime.adapters.values()) == checks_before
             assert app.screen.query_one("#fund", Button).display
+            assert "status not cached" in str(
+                app.screen.query_one("#wallet-detail", Static).render()
+            )
+
+            await pilot.press("enter")
+            await _settle(pilot, 2)
+            assert runtime.wallet_manager.get_record().name == "unfunded"
+            assert sum(adapter.checks for adapter in runtime.adapters.values()) == checks_before
+
+            # Fund is an explicit network action: verify existence once, then Friendbot.
             await pilot.click("#fund")
             await _settle(pilot, 8)
+            assert runtime.adapters["testnet"].checks >= 1
             assert runtime.testnet_service.funded == [unfunded.public_key]
 
             await pilot.press("w")
