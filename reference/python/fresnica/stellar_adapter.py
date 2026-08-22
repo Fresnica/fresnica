@@ -2,7 +2,7 @@
 
 from stellar_sdk import Asset as StellarAsset
 from stellar_sdk import Server, TransactionBuilder
-from stellar_sdk.exceptions import SdkError
+from stellar_sdk.exceptions import NotFoundError, SdkError
 
 from .errors import NetworkError, TransactionError
 from .models import Asset
@@ -20,6 +20,15 @@ class StellarAdapter:
             return self.server.accounts().account_id(address).call()
         except SdkError as exc:
             raise NetworkError(f"Unable to load Stellar account {address}") from exc
+
+    def account_exists(self, address: str) -> bool:
+        try:
+            self.server.load_account(address)
+            return True
+        except NotFoundError:
+            return False
+        except SdkError as exc:
+            raise NetworkError(f"Unable to check Stellar account {address}") from exc
 
     def get_balances(self, address: str) -> list[dict]:
         return self.get_account(address).get("balances", [])
@@ -68,6 +77,7 @@ class StellarAdapter:
         base_fee: int,
         memo: str | None = None,
         timeout: int = 30,
+        create_destination: bool = False,
     ):
         try:
             source_account = self.server.load_account(source)
@@ -75,25 +85,56 @@ class StellarAdapter:
                 source_account=source_account,
                 network_passphrase=self.network.passphrase,
                 base_fee=base_fee,
-            ).append_payment_op(
-                destination=destination,
-                asset=self.to_sdk_asset(asset),
-                amount=amount,
             )
+            if create_destination:
+                builder = builder.append_create_account_op(
+                    destination=destination,
+                    starting_balance=amount,
+                )
+            else:
+                builder = builder.append_payment_op(
+                    destination=destination,
+                    asset=self.to_sdk_asset(asset),
+                    amount=amount,
+                )
             if memo:
                 builder = builder.add_text_memo(memo)
             return builder.set_timeout(timeout).build()
         except SdkError as exc:
-            raise TransactionError("Unable to build Stellar payment transaction") from exc
+            raise TransactionError(
+                "Unable to build Stellar payment transaction",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     def submit_transaction(self, transaction) -> dict:
         try:
             return self.server.submit_transaction(transaction)
         except SdkError as exc:
-            raise TransactionError("Stellar transaction submission failed") from exc
+            raise TransactionError(
+                "Stellar transaction submission failed",
+                details=_sdk_error_details(exc),
+            ) from exc
 
     @staticmethod
     def to_sdk_asset(asset: Asset):
         if asset.is_native:
             return StellarAsset.native()
         return StellarAsset(asset.code, asset.issuer)
+
+
+def _sdk_error_details(exc: SdkError) -> str:
+    parts = [type(exc).__name__]
+    status = getattr(exc, "status", None)
+    title = getattr(exc, "title", None)
+    detail = getattr(exc, "detail", None)
+    extras = getattr(exc, "extras", None)
+
+    if status is not None:
+        parts.append(f"status={status}")
+    if title:
+        parts.append(str(title))
+    if detail:
+        parts.append(str(detail))
+    if isinstance(extras, dict) and extras.get("result_codes") is not None:
+        parts.append(f"result_codes={extras['result_codes']}")
+    return "; ".join(parts)

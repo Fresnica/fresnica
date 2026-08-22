@@ -12,5 +12,6 @@ class TransactionReview:
     amount: str
     fee: str
     network: str
+    operation: str = "payment"
     memo: str | None = None
     contact_name: str | None = None

@@ -65,14 +65,21 @@ class RichRenderer:
         text.append("You (", style="dim")
         text.append(review.wallet_name, style="bold cyan")
         text.append(f", {short_address(review.source)})\n\n", style="dim")
-        text.append("will transfer\n", style="dim")
-        text.append(f"{review.amount} {review.asset}", style="bold green")
-        text.append("\n\nto\n", style="dim")
+        if review.operation == "create_account":
+            text.append("will create and fund a Stellar account with\n", style="dim")
+            text.append(f"{review.amount} XLM", style="bold green")
+            text.append("\n\nnew account\n", style="dim")
+        else:
+            text.append("will transfer\n", style="dim")
+            text.append(f"{review.amount} {review.asset}", style="bold green")
+            text.append("\n\nto\n", style="dim")
         if review.contact_name:
             text.append(review.contact_name + " ", style="bold cyan")
         text.append(review.destination, style="bold yellow")
         text.append(f"\n\nFee: {review.fee} XLM", style="dim")
         text.append(f"\nNetwork: {review.network}", style="dim")
+        if review.operation == "create_account":
+            text.append("\nOperation: CreateAccount", style="dim")
         if review.memo:
             text.append(f"\nMemo: {review.memo}", style="dim")
         self.console.print(Panel(text, title="Confirm transaction", border_style="yellow"))
@@ -136,10 +143,14 @@ class RichRenderer:
         text.append(message)
         self.console.print(text)
 
-    def error(self, message: str) -> None:
+    def error(self, message: str, details: str | None = None) -> None:
         text = Text("ERROR ", style="bold red")
         text.append(message)
         self.console.print(text)
+        if details:
+            dev = Text("DEV ", style="bold dim")
+            dev.append(details, style="dim")
+            self.console.print(dev)
 
 
 def short_address(address: str, head: int = 6, tail: int = 4) -> str:

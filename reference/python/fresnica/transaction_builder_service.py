@@ -28,6 +28,7 @@ class TransactionBuilderService:
         base_fee_stroops: int,
         memo: str | None = None,
         contact_name: str | None = None,
+        create_destination: bool = False,
     ) -> PreparedTransaction:
         envelope = self.adapter.build_payment(
             source=wallet.address(),
@@ -36,6 +37,7 @@ class TransactionBuilderService:
             amount=_amount_text(amount),
             base_fee=base_fee_stroops,
             memo=memo,
+            create_destination=create_destination,
         )
         fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
         review = TransactionReview(
@@ -46,6 +48,7 @@ class TransactionBuilderService:
             amount=_amount_text(amount),
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
+            operation="create_account" if create_destination else "payment",
             memo=memo,
             contact_name=contact_name,
         )

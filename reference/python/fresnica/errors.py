@@ -38,7 +38,9 @@ class NetworkError(FresnicaError):
 
 
 class TransactionError(FresnicaError):
-    pass
+    def __init__(self, message: str, details: str | None = None):
+        self.details = details
+        super().__init__(message)
 
 
 class InvalidAmountError(TransactionError):
