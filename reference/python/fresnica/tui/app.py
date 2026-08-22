@@ -58,20 +58,23 @@ class FresnicaApp(BaseFresnicaApp):
         )
         self.push_screen(dialog, self._on_wallet_action)
 
-        for record in records:
-            if record.network == "testnet" and account_exists.get(record.name) is None:
-                self.probe_testnet_account(record.name)
-
     def _select_wallet_from_manager(self, wallet_name: str):
+        """Change wallet identity only; dashboard I/O waits until the dialog closes."""
         manager = self.runtime.wallet_manager
         manager.set_default(wallet_name)
-        states = {
+        return {
             record.name: manager.state(record.name)
             for record in manager.list_wallets()
         }
-        self._apply_cached_wallet(wallet_name)
-        self._refresh_wallet(f"Selected wallet {wallet_name}")
-        return states
+
+    def _on_wallet_action(self, action) -> None:
+        if action is not None and action.action == "use" and action.wallet_name:
+            manager = self.runtime.wallet_manager
+            manager.set_default(action.wallet_name)
+            self._apply_cached_wallet(action.wallet_name)
+            self._refresh_wallet(f"Selected wallet {action.wallet_name}")
+            return
+        super()._on_wallet_action(action)
 
     def _apply_cached_wallet(self, wallet_name: str) -> None:
         """Render locally cached portfolio/activity before any Horizon request."""
@@ -113,26 +116,6 @@ class FresnicaApp(BaseFresnicaApp):
             # authoritative and will surface a real network/protocol error.
             return
 
-    @work(thread=True, exit_on_error=False)
-    def probe_testnet_account(self, wallet_name: str) -> None:
-        try:
-            record = self.runtime.wallet_manager.get_record(wallet_name)
-            services = self.runtime.services_for(record.network)
-            adapter = getattr(services.balance_service, "adapter", None)
-            checker = getattr(adapter, "account_exists", None)
-            if checker is None:
-                return
-            exists = bool(checker(record.address))
-            self.call_from_thread(self._update_wallet_account_exists, wallet_name, exists)
-        except (FresnicaError, ValueError):
-            # Unknown is intentionally different from "does not exist". Leave
-            # Fund hidden until Horizon can answer conclusively.
-            return
-
-    def _update_wallet_account_exists(self, wallet_name: str, exists: bool) -> None:
-        if isinstance(self.screen, WalletManagerDialog):
-            self.screen.set_account_exists(wallet_name, exists)
-
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _refresh_wallet(self, ready_message: str | None = None) -> None:
         record = None
@@ -144,8 +127,8 @@ class FresnicaApp(BaseFresnicaApp):
             balance_service = services.balance_service
 
             # A brand-new Testnet wallet is the one case where a full account
-            # load would otherwise fail noisily. Probe existence first when no
-            # successful account snapshot has ever been cached.
+            # load would otherwise fail noisily. Probe existence only during the
+            # final dashboard refresh, never while navigating Wallet Management.
             cache_checker = getattr(balance_service, "has_cached_account", None)
             has_cached_account = bool(cache_checker(session.wallet)) if cache_checker else False
             if record.network == "testnet" and not has_cached_account:
@@ -153,11 +136,6 @@ class FresnicaApp(BaseFresnicaApp):
                 exists_checker = getattr(adapter, "account_exists", None)
                 if exists_checker is not None:
                     exists = bool(exists_checker(record.address))
-                    self.call_from_thread(
-                        self._update_wallet_account_exists,
-                        record.name,
-                        exists,
-                    )
                     if not exists:
                         self.call_from_thread(
                             self._apply_unfunded_testnet,
@@ -214,7 +192,6 @@ class FresnicaApp(BaseFresnicaApp):
             return
         self._apply_wallet(record, [], [], [], ready_message, None)
         self._set_sync("Testnet account is not funded")
-        self._update_wallet_account_exists(record.name, False)
 
     def _apply_wallet_if_current(
         self,
@@ -226,6 +203,8 @@ class FresnicaApp(BaseFresnicaApp):
         ready_message,
         error,
     ) -> None:
+        # Keep only this final stale-result check. Wallet Management itself no
+        # longer starts competing dashboard refreshes while the user navigates.
         if not self._is_current_wallet(selected_name):
             return
         self._apply_wallet(
@@ -236,8 +215,6 @@ class FresnicaApp(BaseFresnicaApp):
             ready_message,
             error,
         )
-        if record is not None and record.network == "testnet" and error is None:
-            self._update_wallet_account_exists(record.name, True)
 
     def _is_current_wallet(self, wallet_name: str | None) -> bool:
         try:
