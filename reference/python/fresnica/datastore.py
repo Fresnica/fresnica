@@ -32,6 +32,14 @@ class DataStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_liquidity_pool(self, network: str, pool_id: str, pool: dict) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_liquidity_pool(self, network: str, pool_id: str) -> dict | None:
+        raise NotImplementedError
+
+    @abstractmethod
     def save_offers(self, network: str, account: str, offers) -> None:
         raise NotImplementedError
 
@@ -64,6 +72,7 @@ class MemoryDataStore(DataStore):
     def __init__(self):
         self._balances: dict[tuple[str, str], list[dict]] = {}
         self._operations: dict[tuple[str, str], dict[str, dict]] = {}
+        self._liquidity_pools: dict[tuple[str, str], dict] = {}
         self._offers: dict[tuple[str, str], list[dict]] = {}
         self._trades: dict[tuple[str, str], dict[str, dict]] = {}
         self._trade_aggregations: dict[tuple[str, str, int], dict[str, dict]] = {}
@@ -91,6 +100,13 @@ class MemoryDataStore(DataStore):
         )
         return items[:limit]
 
+    def save_liquidity_pool(self, network: str, pool_id: str, pool: dict) -> None:
+        self._liquidity_pools[(network, pool_id)] = dict(pool)
+
+    def get_liquidity_pool(self, network: str, pool_id: str) -> dict | None:
+        pool = self._liquidity_pools.get((network, pool_id))
+        return dict(pool) if pool is not None else None
+
     def save_offers(self, network: str, account: str, offers) -> None:
         self._offers[(network, account)] = _records(offers)
 
@@ -106,7 +122,13 @@ class MemoryDataStore(DataStore):
 
     def get_trades(self, network: str, pair_key: str, limit: int = 20) -> list[dict]:
         items = list(self._trades.get((network, pair_key), {}).values())
-        items.sort(key=lambda item: (item.get("ledger_close_time", ""), str(item.get("paging_token", ""))), reverse=True)
+        items.sort(
+            key=lambda item: (
+                item.get("ledger_close_time", ""),
+                str(item.get("paging_token", "")),
+            ),
+            reverse=True,
+        )
         return items[:limit]
 
     def save_trade_aggregations(
@@ -167,6 +189,14 @@ class SQLiteDataStore(DataStore):
                 );
                 CREATE INDEX IF NOT EXISTS operations_account_idx
                     ON operations(network, account);
+
+                CREATE TABLE IF NOT EXISTS liquidity_pools (
+                    network TEXT NOT NULL,
+                    pool_id TEXT NOT NULL,
+                    raw_json TEXT NOT NULL,
+                    cached_at TEXT NOT NULL,
+                    PRIMARY KEY (network, pool_id)
+                );
 
                 CREATE TABLE IF NOT EXISTS offers (
                     network TEXT NOT NULL,
@@ -298,6 +328,32 @@ class SQLiteDataStore(DataStore):
                 (network, account, limit),
             ).fetchall()
         return [json.loads(row["raw_json"]) for row in rows]
+
+    def save_liquidity_pool(self, network: str, pool_id: str, pool: dict) -> None:
+        with self._connect() as db:
+            db.execute(
+                """
+                INSERT OR REPLACE INTO liquidity_pools(network, pool_id, raw_json, cached_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    network,
+                    pool_id,
+                    json.dumps(pool, separators=(",", ":")),
+                    _now(),
+                ),
+            )
+
+    def get_liquidity_pool(self, network: str, pool_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT raw_json FROM liquidity_pools
+                WHERE network = ? AND pool_id = ?
+                """,
+                (network, pool_id),
+            ).fetchone()
+        return json.loads(row["raw_json"]) if row is not None else None
 
     def save_offers(self, network: str, account: str, offers) -> None:
         now = _now()

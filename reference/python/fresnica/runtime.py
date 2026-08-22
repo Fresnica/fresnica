@@ -10,6 +10,7 @@ from .dex_service import DexService
 from .history_service import HistoryService
 from .manager import WalletManager
 from .network import get_network
+from .settings import SettingsStore
 from .stellar_adapter import StellarAdapter
 from .storage import FileWalletStorage
 from .submit_service import SubmitService
@@ -41,6 +42,8 @@ class Runtime:
         self.home.mkdir(parents=True, exist_ok=True)
         self.wallet_storage = wallet_storage or FileWalletStorage(self.home / "wallets")
         self.datastore = datastore or SQLiteDataStore(self.home / "chain-data.sqlite3")
+        self.settings_store = SettingsStore(self.home / "settings.json")
+        self.settings = self.settings_store.load()
         self.wallet_manager = WalletManager(self.wallet_storage)
         self._services: dict[str, NetworkServices] = {}
 

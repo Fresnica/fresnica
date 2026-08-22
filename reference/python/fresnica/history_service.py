@@ -1,6 +1,6 @@
 """Account activity with local caching and human-readable summaries."""
 
-from .models import OperationView
+from .models import ActivityView, OperationView
 from .presentation import format_amount, short_address
 
 
@@ -61,6 +61,25 @@ class HistoryService:
             for item in self.get_operations(wallet, limit=limit, refresh=refresh)
         ]
 
+    def get_activity_views(
+        self,
+        wallet,
+        limit: int = 20,
+        refresh: bool = True,
+    ) -> list[ActivityView]:
+        """Group cached account operations into transaction-level activities."""
+        address = wallet.address()
+        if refresh:
+            self.sync_recent(wallet)
+        operation_limit = max(limit * 4, SYNC_PAGE_LIMIT)
+        raw_operations = self.datastore.get_operations(
+            self.network_name,
+            address,
+            limit=operation_limit,
+        )
+        operations = [self._view(item, address) for item in raw_operations]
+        return _group_activities(operations)[:limit]
+
     @staticmethod
     def _view(raw: dict, account: str) -> OperationView:
         operation_type = raw.get("type", "unknown")
@@ -70,6 +89,50 @@ class HistoryService:
             summary=_summary(raw, account),
             raw=raw,
         )
+
+
+def _group_activities(operations: list[OperationView]) -> list[ActivityView]:
+    buckets: dict[str, list[OperationView]] = {}
+    order: list[str] = []
+    for operation in operations:
+        transaction_hash = operation.raw.get("transaction_hash")
+        if transaction_hash:
+            key = f"tx:{transaction_hash}"
+        else:
+            token = operation.raw.get("paging_token") or operation.raw.get("id")
+            key = f"op:{token if token is not None else len(order)}"
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(operation)
+
+    activities = []
+    for key in order:
+        grouped = buckets[key]
+        first = grouped[0]
+        transaction_hash = first.raw.get("transaction_hash")
+        count = len(grouped)
+        activities.append(
+            ActivityView(
+                operation_type=first.operation_type if count == 1 else "transaction",
+                created_at=first.created_at,
+                summary=_activity_summary(grouped),
+                transaction_hash=str(transaction_hash) if transaction_hash else None,
+                operation_count=count,
+                operations=grouped,
+                raw=[item.raw for item in grouped],
+            )
+        )
+    return activities
+
+
+def _activity_summary(operations: list[OperationView]) -> str:
+    if len(operations) == 1:
+        return operations[0].summary
+    summaries = [item.summary for item in operations]
+    if len(summaries) == 2:
+        return " · ".join(summaries)
+    return f"{len(summaries)} actions · {summaries[0]} · {summaries[1]} · +{len(summaries) - 2} more"
 
 
 def _summary(raw: dict, account: str) -> str:

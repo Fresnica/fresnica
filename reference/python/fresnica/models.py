@@ -99,3 +99,16 @@ class OperationView:
     created_at: str | None
     summary: str
     raw: dict = field(default_factory=dict)
+
+
+@dataclass
+class ActivityView:
+    """One user-facing activity, usually one Stellar transaction."""
+
+    operation_type: str
+    created_at: str | None
+    summary: str
+    transaction_hash: str | None = None
+    operation_count: int = 1
+    operations: list[OperationView] = field(default_factory=list)
+    raw: list[dict] = field(default_factory=list)
