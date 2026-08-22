@@ -10,6 +10,9 @@ on:
       - "reference/python/**"
       - ".github/workflows/python-reference.yml"
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,10 +28,12 @@ jobs:
           enable-cache: true
       - run: uv python install 3.11
       - run: uv lock
+      - name: Commit generated lockfile
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git diff --cached --quiet || (git commit -m "Lock Python dependencies with uv" && git push)
       - run: uv sync --locked
       - run: uv run pytest -q
-      - name: Upload generated lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: uv-lock
-          path: reference/python/uv.lock
