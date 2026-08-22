@@ -10,13 +10,14 @@ from .hdwallet import (
     SUPPORTED_LANGUAGES,
     detect_mnemonic_language,
     generate_mnemonic_phrase,
+    normalize_language,
 )
 
 
 def validate_mnemonic(mnemonic: str, language: Language | str | None = None) -> bool:
     words = mnemonic.strip()
     if language is not None:
-        return StellarMnemonic(language).check(words)
+        return StellarMnemonic(normalize_language(language)).check(words)
     try:
         detect_mnemonic_language(words)
     except ValueError:
@@ -28,5 +29,6 @@ __all__ = [
     "SUPPORTED_LANGUAGES",
     "detect_mnemonic_language",
     "generate_mnemonic_phrase",
+    "normalize_language",
     "validate_mnemonic",
 ]
