@@ -1,52 +1,32 @@
-"""BIP39 mnemonic handling.
+"""Compatibility helpers for Stellar mnemonic phrases.
 
-Fresnica wallet abstraction layer.
-
-The implementation intentionally delegates BIP39 cryptography to a
-well-tested external library. Fresnica defines the wallet interface,
-not a replacement for the BIP39 standard.
+Fresnica delegates mnemonic validation, generation, and SEP-0005 derivation to
+Stellar Python SDK instead of maintaining a second BIP39 implementation.
 """
 
-from mnemonic import Mnemonic
+from stellar_sdk.sep.mnemonic import Language, StellarMnemonic
+
+from .hdwallet import (
+    SUPPORTED_LANGUAGES,
+    detect_mnemonic_language,
+    generate_mnemonic_phrase,
+)
 
 
-def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
-    """Convert BIP39 mnemonic into seed.
-
-    Supports BIP39 languages provided by the library, including Chinese.
-    """
+def validate_mnemonic(mnemonic: str, language: Language | str | None = None) -> bool:
     words = mnemonic.strip()
-
-    # Language detection allows English and Chinese mnemonics.
-    # BIP39 checksum validation is delegated to the library.
-    for language in (
-        "english",
-        "chinese_simplified",
-        "chinese_traditional",
-        "japanese",
-        "korean",
-        "spanish",
-        "french",
-        "italian",
-    ):
-        try:
-            return Mnemonic(language).to_seed(words, passphrase)
-        except Exception:
-            continue
-
-    raise ValueError("Invalid BIP39 mnemonic")
+    if language is not None:
+        return StellarMnemonic(language).check(words)
+    try:
+        detect_mnemonic_language(words)
+    except ValueError:
+        return False
+    return True
 
 
-def validate_mnemonic(mnemonic: str) -> bool:
-    """Validate BIP39 checksum."""
-    words = mnemonic.strip()
-
-    for language in (
-        "english",
-        "chinese_simplified",
-        "chinese_traditional",
-    ):
-        if Mnemonic(language).check(words):
-            return True
-
-    return False
+__all__ = [
+    "SUPPORTED_LANGUAGES",
+    "detect_mnemonic_language",
+    "generate_mnemonic_phrase",
+    "validate_mnemonic",
+]
