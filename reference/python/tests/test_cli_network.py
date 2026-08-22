@@ -41,6 +41,10 @@ class Manager:
         self.created = kwargs
         return Record(name=name, network=kwargs["network"])
 
+    def create_mnemonic(self, name, password, **kwargs):
+        self.created = kwargs
+        return Record(name=name, network=kwargs["network"]), "generated mnemonic"
+
     def current(self):
         return None
 
@@ -109,14 +113,10 @@ class Runtime:
         return self.services
 
 
-def test_wallet_create_uses_runtime_network(monkeypatch):
+def test_wallet_create_uses_runtime_network():
     runtime = Runtime("testnet")
     args = parse_args(["--network", "testnet", "wallet", "create", "demo"])
     renderer = Renderer()
-    monkeypatch.setattr(
-        "fresnica.cli.commands.wallet.generate_mnemonic_phrase",
-        lambda **kwargs: "generated mnemonic",
-    )
     secrets = iter(["", "password", "password"])
 
     execute_wallet(
@@ -127,6 +127,7 @@ def test_wallet_create_uses_runtime_network(monkeypatch):
     )
 
     assert runtime.wallet_manager.created["network"] == "testnet"
+    assert renderer.created[1] == "generated mnemonic"
 
 
 def test_wallet_fund_uses_default_testnet_wallet():
