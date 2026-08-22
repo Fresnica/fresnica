@@ -2,45 +2,70 @@
 
 ## Runtime
 
-- [ ] Compose Runtime dependencies
-- [ ] Add application configuration
-- [ ] Add dependency injection pattern
+- [x] Compose Runtime dependencies
+- [x] Per-network service composition
+- [x] Application home/config root (`FRESNICA_HOME`)
+- [ ] User configuration file
 
 ## Wallet
 
 - [x] Account model
 - [x] Signer abstraction
-- [ ] Encrypted wallet storage
-- [ ] Wallet import/export
-- [ ] Lock/unlock lifecycle
+- [x] Watch-only wallet
+- [x] Encrypted mnemonic/secret storage
+- [x] File wallet storage
+- [x] Lock/unlock lifecycle
+- [x] Wallet create/import/list/use/delete commands
+- [ ] Export/backup workflow
+- [ ] Hardware/external signer implementations
 
 ## Data
 
 - [x] DataStore abstraction
-- [ ] SQLite implementation
-- [ ] Horizon raw data cache
-- [ ] Index tables
+- [x] SQLite implementation
+- [x] Network-isolated raw balance cache
+- [x] Raw operation/history cache
+- [ ] Offers cache
+- [ ] Trades cache
+- [ ] Fex-style trade aggregation / market data
 
 ## CLI
 
-- [x] Parser skeleton
-- [ ] balance command implementation
-- [ ] send command implementation
-- [ ] wallet commands
+- [x] `fresnica` -> TUI
+- [x] Rich renderer
+- [x] `balance`
+- [x] `history`
+- [x] `send AMOUNT ASSET to DESTINATION`
+- [x] `info`
+- [x] wallet lifecycle commands
+- [x] Human transaction review + Y/n confirmation
+- [x] `--json` balance output
+- [ ] Contact/address book integration
 
 ## TUI
 
-- [x] Application skeleton
-- [ ] Dashboard screen
-- [ ] Balance screen
-- [ ] Send confirmation screen
+- [x] Textual application entry
+- [x] Wallet/balance dashboard
+- [x] Background balance refresh
+- [ ] Wallet switcher
+- [ ] History screen
+- [ ] Send/unlock/review modal flow
 - [ ] SDEX screen
 
 ## Transaction
 
-- [x] Intent model
-- [x] Review model
-- [ ] Transaction build
-- [ ] Sign flow
-- [ ] Submit flow
-- [ ] Result persistence
+- [x] Asset parsing
+- [x] Reserve/liability-aware available amount
+- [x] Transaction build via Stellar SDK
+- [x] Sign flow
+- [x] Submit flow
+- [x] User-facing transaction result
+- [ ] Result/history refresh after submit
+- [ ] Memo-required account handling
+
+## Quality
+
+- [x] Unit tests for storage, encryption, cache, CLI parsing, availability, runtime, and transfer orchestration
+- [x] GitHub Actions test workflow
+- [ ] Real Horizon integration tests on Testnet
+- [ ] Cross-language test vectors for future Rust Core
