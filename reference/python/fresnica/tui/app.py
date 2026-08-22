@@ -6,7 +6,13 @@ from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
 from ..errors import FresnicaError, WatchOnlyError
-from .screens import ReviewDialog, SendDialog, WalletPicker
+from .screens import (
+    ReviewDialog,
+    SendDialog,
+    WalletAction,
+    WalletManagerDialog,
+    WatchWalletDialog,
+)
 
 
 class FresnicaApp(App[None]):
@@ -14,7 +20,7 @@ class FresnicaApp(App[None]):
     SUB_TITLE = "Stellar Wallet"
     BINDINGS = [
         ("r", "refresh", "Refresh"),
-        ("w", "switch_wallet", "Wallet"),
+        ("w", "manage_wallets", "Wallets"),
         ("h", "refresh_history", "History"),
         ("s", "send", "Send"),
         ("q", "quit", "Quit"),
@@ -61,24 +67,49 @@ class FresnicaApp(App[None]):
     def action_refresh_history(self) -> None:
         self.refresh_wallet()
 
-    def action_switch_wallet(self) -> None:
+    def action_manage_wallets(self) -> None:
         manager = self.runtime.wallet_manager
         records = manager.list_wallets()
         if not records:
-            self._set_status("No wallets available", error=True)
+            self.push_screen(WatchWalletDialog(self.runtime.network), self._on_watch_request)
             return
         try:
             current_name = manager.get_record().name
         except FresnicaError:
             current_name = records[0].name
-        self.push_screen(WalletPicker(records, current_name), self._on_wallet_selected)
+        self.push_screen(
+            WalletManagerDialog(records, current_name),
+            self._on_wallet_action,
+        )
 
-    def _on_wallet_selected(self, name: str | None) -> None:
-        if not name:
+    def _on_wallet_action(self, action: WalletAction | None) -> None:
+        if action is None:
             return
-        self.runtime.wallet_manager.set_default(name)
-        self.runtime.wallet_manager.lock()
-        self.refresh_wallet(f"Selected wallet {name}")
+        if action.action == "switch" and action.wallet_name:
+            self.runtime.wallet_manager.set_default(action.wallet_name)
+            self.runtime.wallet_manager.lock()
+            self.refresh_wallet(f"Selected wallet {action.wallet_name}")
+            return
+        if action.action == "add-watch":
+            try:
+                network = self.runtime.wallet_manager.get_record().network
+            except FresnicaError:
+                network = self.runtime.network
+            self.push_screen(WatchWalletDialog(network), self._on_watch_request)
+
+    def _on_watch_request(self, request) -> None:
+        if request is None:
+            return
+        try:
+            record = self.runtime.wallet_manager.add_watch(
+                request.name,
+                request.address,
+                network=request.network,
+            )
+        except (FresnicaError, ValueError) as exc:
+            self._set_error(exc)
+            return
+        self.refresh_wallet(f'Added watch-only wallet "{record.name}"')
 
     def action_send(self) -> None:
         manager = self.runtime.wallet_manager

@@ -10,7 +10,12 @@ from fresnica.models import Asset, BalanceView, OperationView, TransactionResult
 from fresnica.review import TransactionReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
-from fresnica.tui.screens import ReviewDialog, SendDialog, WalletPicker
+from fresnica.tui.screens import (
+    ReviewDialog,
+    SendDialog,
+    WalletManagerDialog,
+    WatchWalletDialog,
+)
 
 
 class FakeBalanceService:
@@ -67,6 +72,7 @@ class FakeTransferService:
 
 class FakeRuntime:
     def __init__(self):
+        self.network = "mainnet"
         storage = MemoryWalletStorage()
         self.wallet_manager = WalletManager(storage)
         self.secret = Keypair.random()
@@ -102,7 +108,7 @@ async def _settle(pilot, rounds=3):
         await pilot.pause(0.02)
 
 
-def test_tui_wallet_switch_and_history():
+def test_tui_wallet_management_switch_shortcut_and_cancel():
     async def scenario():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
@@ -112,13 +118,47 @@ def test_tui_wallet_switch_and_history():
             assert app.query_one("#history").row_count == 1
 
             await pilot.press("w")
-            assert isinstance(app.screen, WalletPicker)
+            assert isinstance(app.screen, WalletManagerDialog)
             app.screen.query_one("#wallet-select", Select).value = "beta"
-            await pilot.click("#switch")
+            await pilot.press("escape")
+            await _settle(pilot)
+            assert runtime.wallet_manager.get_record().name == "alpha"
+
+            await pilot.press("w")
+            assert isinstance(app.screen, WalletManagerDialog)
+            app.screen.query_one("#wallet-select", Select).value = "beta"
+            await pilot.press("s")
             await _settle(pilot)
 
             assert runtime.wallet_manager.get_record().name == "beta"
             assert "beta" in str(app.query_one("#wallet", Static).render())
+
+    asyncio.run(scenario())
+
+
+def test_tui_wallet_management_add_watch_only():
+    async def scenario():
+        runtime = FakeRuntime()
+        app = FresnicaApp(runtime)
+        address = Keypair.random().public_key
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _settle(pilot)
+            await pilot.press("w")
+            assert isinstance(app.screen, WalletManagerDialog)
+            await pilot.press("a")
+            assert isinstance(app.screen, WatchWalletDialog)
+
+            app.screen.query_one("#watch-name", Input).value = "gamma"
+            app.screen.query_one("#watch-address", Input).value = address
+            app.screen.query_one("#watch-network", Select).value = "mainnet"
+            await pilot.click("#add")
+            await _settle(pilot)
+
+            record = runtime.wallet_manager.get_record("gamma")
+            assert record.watch_only
+            assert record.address == address
+            assert record.network == "mainnet"
+            assert "Added watch-only wallet" in str(app.query_one("#status", Static).render())
 
     asyncio.run(scenario())
 

@@ -19,7 +19,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         renderer.success(f'Default wallet is now "{args.name}"')
         return manager.get_record(args.name)
 
-    if command == "watch":
+    if command in {"import-watch", "watch"}:
         record = manager.add_watch(args.name, args.address, network=runtime.network)
         renderer.success(f'Added watch-only wallet "{record.name}"')
         return record
@@ -75,7 +75,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         renderer.render_created_mnemonic(record, mnemonic)
         return record
 
-    if command == "fund":
+    if command in {"testnet-fund", "fund"}:
         from .fund import execute_fund
 
         return execute_fund(runtime, args, renderer)
