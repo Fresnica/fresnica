@@ -1,33 +1,21 @@
-"""Transaction service layer.
+"""Generic transaction signing and submission workflow."""
 
-Builds the bridge between user intent and Stellar SDK transactions.
-Fresnica does not replace Stellar SDK transaction logic.
-"""
-
-from dataclasses import dataclass
-
-
-@dataclass
-class TransactionIntent:
-    source: str
-    destination: str
-    asset: str
-    amount: str
+from .models import TransactionResult
 
 
 class TransactionService:
-    def __init__(self, adapter):
-        self.adapter = adapter
+    def __init__(self, submit_service):
+        self.submit_service = submit_service
 
-    def prepare(self, intent: TransactionIntent):
-        """Prepare a transaction request.
+    def sign(self, wallet, prepared):
+        wallet.sign(prepared.envelope)
+        return prepared
 
-        Transaction building and signing will delegate to Stellar SDK.
-        """
-        return intent
-
-    def sign(self, wallet, transaction):
-        return wallet.sign(transaction)
-
-    def submit(self, transaction):
-        return self.adapter.submit_transaction(transaction)
+    def submit(self, prepared) -> TransactionResult:
+        response = self.submit_service.submit(prepared.envelope)
+        return TransactionResult(
+            hash=response.get("hash", ""),
+            ledger=response.get("ledger"),
+            successful=bool(response.get("successful", True)),
+            raw=response,
+        )
