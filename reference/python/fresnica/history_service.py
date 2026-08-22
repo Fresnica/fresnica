@@ -71,7 +71,7 @@ class HistoryService:
         address = wallet.address()
         if refresh:
             self.sync_recent(wallet)
-        operation_limit = max(limit * 4, SYNC_PAGE_LIMIT if limit >= SYNC_PAGE_LIMIT else limit)
+        operation_limit = max(limit * 4, SYNC_PAGE_LIMIT)
         raw_operations = self.datastore.get_operations(
             self.network_name,
             address,
