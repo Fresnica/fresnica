@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "Python reference implementation of the Fresnica Stellar wallet runtime"
 requires-python = ">=3.11"
 dependencies = [
-    "stellar-sdk>=14.1,<16",
+    "stellar-sdk>=15,<16",
     "cryptography>=42",
     "rich>=13",
-    "textual>=0.80",
+    "textual>=8.2,<9",
 ]
 
 [project.optional-dependencies]
