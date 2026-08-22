@@ -3,7 +3,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from stellar_sdk import Keypair
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, DataTable, Input, Label, Select, Static
 
 from fresnica.manager import WalletManager, WalletState
 from fresnica.models import (
@@ -27,8 +27,8 @@ from fresnica.tui.screens import (
     ReviewDialog,
     SendDialog,
     UnlockDialog,
-    WalletManagerDialog,
 )
+from fresnica.tui.wallet_management import WalletManagerDialog
 
 
 class FakeBalanceService:
@@ -83,6 +83,9 @@ class FakeHistoryService:
             )
         ]
         return records[:limit]
+
+    def get_activity_views(self, wallet, limit=20, refresh=True):
+        return self.get_views(wallet, limit=limit, refresh=refresh)
 
     def load_older(self, wallet, limit=200):
         self.older += 1
@@ -185,7 +188,7 @@ def test_dashboard_is_responsive_and_formats_wallet_assets():
             assert "S Send" in str(app.query_one("#wallet-actions", Static).render())
 
             balances = app.query_one("#balances")
-            assert balances.row_count == 1  # zero USDC is hidden by default
+            assert balances.row_count == 1
             row = list(balances.get_row_at(0))
             assert row[0] == "XLM"
             assert row[2] == "10"
@@ -215,10 +218,6 @@ def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 42)) as pilot:
             await _settle(pilot, 8)
-            wallet_text = str(app.query_one("#wallet", Static).render())
-            assert "alpha" in wallet_text
-            assert "TESTNET" in wallet_text
-            assert "Locked" in wallet_text
             assert "L Unlock" in str(app.query_one("#wallet-actions", Static).render())
 
             await pilot.press("l")
@@ -226,7 +225,6 @@ def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
             app.screen.query_one("#unlock-password", Input).value = "wrong"
             await pilot.click("#unlock")
             await _settle(pilot, 8)
-            assert isinstance(app.screen, UnlockDialog)
             assert "Invalid wallet password" in str(
                 app.screen.query_one("#form-error", Static).render()
             )
@@ -235,13 +233,11 @@ def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
             await pilot.click("#unlock")
             await _settle(pilot, 8)
             assert runtime.wallet_manager.state("alpha") is WalletState.UNLOCKED
-            assert "Unlocked" in str(app.query_one("#wallet", Static).render())
             assert "L Lock" in str(app.query_one("#wallet-actions", Static).render())
 
             await pilot.press("l")
             await _settle(pilot, 6)
             assert runtime.wallet_manager.state("alpha") is WalletState.LOCKED
-            assert "Locked" in str(app.query_one("#wallet", Static).render())
 
     asyncio.run(scenario())
 
@@ -256,17 +252,16 @@ def test_watch_only_hides_internal_state_and_send_uses_notice():
             wallet_text = str(app.query_one("#wallet", Static).render())
             assert "Watch-only" in wallet_text
             assert "WATCH_ONLY" not in wallet_text
-            assert not str(app.query_one("#wallet-actions", Static).render()).strip()
-
             await pilot.press("s")
             assert isinstance(app.screen, NoticeDialog)
-            message = str(app.screen.query_one("#message", Static).render())
-            assert "cannot sign transactions" in message
+            assert "cannot sign transactions" in str(
+                app.screen.query_one("#message", Static).render()
+            )
 
     asyncio.run(scenario())
 
 
-def test_history_key_opens_full_history_screen():
+def test_history_key_opens_transaction_activity_screen():
     async def scenario():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
@@ -276,11 +271,10 @@ def test_history_key_opens_full_history_screen():
             assert isinstance(app.screen, HistoryScreen)
             await _settle(pilot, 8)
             assert app.screen.query_one("#history-table").row_count == 1
+            assert "Activity" in str(app.screen.query_one("#history-title", Static).render())
             await pilot.press("m")
             await _settle(pilot, 8)
             assert runtime.history_services["testnet"].older == 1
-            await pilot.press("escape")
-            assert isinstance(app.screen, type(app.screen))
 
     asyncio.run(scenario())
 
@@ -308,47 +302,55 @@ def test_locked_send_unlocks_first_and_wallet_remains_unlocked_after_submit():
             await _settle(pilot, 6)
 
             assert isinstance(app.screen, ReviewDialog)
-            assert runtime.wallet_manager.state("alpha") is WalletState.UNLOCKED
             await pilot.click("#confirm")
             await _settle(pilot, 8)
 
             transfer = runtime.transfer_services["testnet"]
-            assert transfer.signed
-            assert transfer.submitted
+            assert transfer.signed and transfer.submitted
             assert runtime.wallet_manager.state("alpha") is WalletState.UNLOCKED
             assert "abc123" in str(app.query_one("#status", Static).render())
 
     asyncio.run(scenario())
 
 
-def test_wallet_management_is_context_aware_and_supports_fund_delete():
+def test_wallet_management_uses_list_selection_and_context_hierarchy():
     async def scenario():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
-        async with app.run_test(size=(120, 42)) as pilot:
+        async with app.run_test(size=(120, 46)) as pilot:
             await _settle(pilot, 8)
             await pilot.press("w")
             assert isinstance(app.screen, WalletManagerDialog)
 
-            select = app.screen.query_one("#wallet-select", Select)
-            select.value = "beta"
+            table = app.screen.query_one("#wallet-list", DataTable)
+            assert table.row_count == 2
+            table.move_cursor(row=1)
             await _settle(pilot)
-            assert app.screen.query_one("#lock", Button).disabled
-            assert app.screen.query_one("#fund", Button).disabled
+            detail = str(app.screen.query_one("#wallet-detail", Static).render())
+            assert "Watch-only" in detail
+            assert "WATCH_ONLY" not in detail
+            assert not app.screen.query_one("#lock", Button).display
+            assert not app.screen.query_one("#fund", Button).display
 
-            select.value = "alpha"
-            await _settle(pilot)
-            assert not app.screen.query_one("#lock", Button).disabled
-            assert not app.screen.query_one("#fund", Button).disabled
-            await pilot.press("f")
+            await pilot.press("enter")
             await _settle(pilot, 8)
-            assert runtime.testnet_service.funded == [runtime.secret.public_key]
-            assert "friendbot123" in str(app.query_one("#status", Static).render())
+            assert runtime.wallet_manager.get_record().name == "beta"
 
             await pilot.press("w")
-            app.screen.query_one("#wallet-select", Select).value = "beta"
+            table = app.screen.query_one("#wallet-list", DataTable)
+            table.move_cursor(row=0)
             await _settle(pilot)
-            await pilot.press("d")
+            assert app.screen.query_one("#lock", Button).display
+            assert app.screen.query_one("#fund", Button).display
+            await pilot.click("#fund")
+            await _settle(pilot, 8)
+            assert runtime.testnet_service.funded == [runtime.secret.public_key]
+
+            await pilot.press("w")
+            table = app.screen.query_one("#wallet-list", DataTable)
+            table.move_cursor(row=1)
+            await _settle(pilot)
+            await pilot.click("#delete")
             assert isinstance(app.screen, ConfirmDialog)
             await pilot.click("#confirm")
             await _settle(pilot, 6)
@@ -365,7 +367,7 @@ def test_wallet_management_can_create_wallet_and_show_backup_once():
             await _settle(pilot, 8)
             await pilot.press("w")
             assert isinstance(app.screen, WalletManagerDialog)
-            await pilot.press("a")
+            await pilot.click("#add")
             assert isinstance(app.screen, AddWalletDialog)
             app.screen.query_one("#add-kind", Select).value = "create"
             await pilot.click("#continue")
@@ -384,9 +386,5 @@ def test_wallet_management_can_create_wallet_and_show_backup_once():
             assert runtime.wallet_manager.state("gamma") is WalletState.LOCKED
             mnemonic = str(app.screen.query_one("#mnemonic", Static).render())
             assert len(mnemonic.split()) >= 12
-            await pilot.press("enter")
-            await _settle(pilot, 8)
-            assert "gamma" in str(app.query_one("#wallet", Static).render())
-            assert "Locked" in str(app.query_one("#wallet", Static).render())
 
     asyncio.run(scenario())

@@ -64,8 +64,24 @@ class BalanceService:
                 raw=balance_view.raw,
             )
 
+        pool = None
+        lookup_error = None
         try:
             pool = self.adapter.get_liquidity_pool(pool_id)
+            self.datastore.save_liquidity_pool(self.network_name, pool_id, pool)
+        except (FresnicaError, ValueError, ArithmeticError) as exc:
+            lookup_error = exc
+            pool = self.datastore.get_liquidity_pool(self.network_name, pool_id)
+
+        if pool is None:
+            return LiquidityPositionView(
+                pool_id=pool_id,
+                shares=shares,
+                error=str(lookup_error) if lookup_error is not None else "Liquidity pool details unavailable",
+                raw=balance_view.raw,
+            )
+
+        try:
             total_shares = Decimal(str(pool.get("total_shares", "0")))
             ratio = shares / total_shares if total_shares > 0 else Decimal("0")
             reserves = []
@@ -79,13 +95,12 @@ class BalanceService:
                 reserves=reserves,
                 raw=pool,
             )
-        except (FresnicaError, ValueError, ArithmeticError) as exc:
-            # A failed pool lookup should not hide the rest of the wallet dashboard.
+        except (ValueError, ArithmeticError) as exc:
             return LiquidityPositionView(
                 pool_id=pool_id,
                 shares=shares,
                 error=str(exc),
-                raw=balance_view.raw,
+                raw=pool,
             )
 
 

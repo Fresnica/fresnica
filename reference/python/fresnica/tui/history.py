@@ -1,4 +1,4 @@
-"""Full account history screen backed by the local operation cache."""
+"""Full account activity screen backed by the local operation cache."""
 
 from textual import work
 from textual.app import ComposeResult
@@ -36,8 +36,8 @@ class HistoryScreen(ModalScreen[None]):
         self.limit = initial_limit
 
     def compose(self) -> ComposeResult:
-        yield Static(f"History · {self.wallet_name}", id="history-title")
-        yield Static("Loading local history...", id="history-status")
+        yield Static(f"Activity · {self.wallet_name}", id="history-title")
+        yield Static("Loading local activity...", id="history-status")
         yield DataTable(id="history-table")
         yield Footer()
 
@@ -61,24 +61,24 @@ class HistoryScreen(ModalScreen[None]):
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _load_cached(self) -> None:
         try:
-            views = self.history_service.get_views(
+            views = self.history_service.get_activity_views(
                 self.wallet,
                 limit=self.limit,
                 refresh=False,
             )
-            self.app.call_from_thread(self._apply, views, "Local history", None)
+            self.app.call_from_thread(self._apply, views, "Local activity", None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], "", exc)
 
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _refresh_history(self) -> None:
         try:
-            views = self.history_service.get_views(
+            views = self.history_service.get_activity_views(
                 self.wallet,
                 limit=self.limit,
                 refresh=True,
             )
-            self.app.call_from_thread(self._apply, views, "History updated", None)
+            self.app.call_from_thread(self._apply, views, "Activity updated", None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], "", exc)
 
@@ -87,7 +87,7 @@ class HistoryScreen(ModalScreen[None]):
         try:
             added = self.history_service.load_older(self.wallet, limit=200)
             self.limit += 200
-            views = self.history_service.get_views(
+            views = self.history_service.get_activity_views(
                 self.wallet,
                 limit=self.limit,
                 refresh=False,
@@ -110,4 +110,4 @@ class HistoryScreen(ModalScreen[None]):
                 text += f" · DEV {details}"
             status.update(text)
             return
-        status.update(f"{message} · {len(views)} cached shown")
+        status.update(f"{message} · {len(views)} cached activities shown")
