@@ -1,0 +1,11 @@
+[project]
+name = "fresnica-reference"
+version = "0.1.0"
+dependencies = [
+    "mnemonic",
+    "stellar-sdk"
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
