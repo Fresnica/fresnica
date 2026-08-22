@@ -1,24 +1,22 @@
 """Fresnica wallet model.
 
-A wallet is a higher-level abstraction above Stellar SDK Keypair.
+Wallet manages accounts and signers.
 
-Stellar terminology is slightly different from many chains:
-- account
-- address
-- public key
-
-all refer to the same identity in normal wallet usage.
-Fresnica keeps a clear API while preserving Stellar semantics.
+Account represents identity.
+Signer represents ownership proof.
 """
 
 from dataclasses import dataclass
 
+from stellar_sdk import Keypair
+
 from .hdwallet import derive_account
+from .signer import StellarKeypairSigner
 
 
 @dataclass
 class Account:
-    """A Stellar account representation."""
+    """A Stellar account identity."""
 
     index: int
     address: str
@@ -26,29 +24,37 @@ class Account:
 
 
 class Wallet:
-    """Mnemonic based Stellar wallet."""
+    """Stellar wallet abstraction."""
 
-    def __init__(self, mnemonic: str, passphrase: str = ""):
-        self.mnemonic = mnemonic
-        self.passphrase = passphrase
-        self._accounts = {}
+    def __init__(self, signer: StellarKeypairSigner):
+        self.signer = signer
+        self._account = Account(
+            index=0,
+            address=signer.public_key,
+            public_key=signer.public_key,
+        )
 
-    def account(self, index: int = 0) -> Account:
-        """Get or derive an account."""
-        if index not in self._accounts:
-            keypair = derive_account(
-                self.mnemonic,
-                self.passphrase,
-                index,
-            )
+    @classmethod
+    def from_mnemonic(
+        cls,
+        mnemonic: str,
+        passphrase: str = "",
+        index: int = 0,
+    ):
+        keypair = derive_account(
+            mnemonic,
+            passphrase,
+            index,
+        )
+        return cls(StellarKeypairSigner(keypair))
 
-            self._accounts[index] = Account(
-                index=index,
-                address=keypair.public_key,
-                public_key=keypair.public_key,
-            )
+    @classmethod
+    def from_secret(cls, secret: str):
+        keypair = Keypair.from_secret(secret)
+        return cls(StellarKeypairSigner(keypair))
 
-        return self._accounts[index]
+    def account(self) -> Account:
+        return self._account
 
-    def address(self, index: int = 0) -> str:
-        return self.account(index).address
+    def address(self) -> str:
+        return self._account.address
