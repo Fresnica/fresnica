@@ -1,0 +1,1 @@
+"""Fresnica Textual TUI package."""
