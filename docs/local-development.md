@@ -10,6 +10,19 @@ uv sync --locked
 The project pins Python 3.11 in `.python-version` and commits `uv.lock`. Run
 commands through `uv run` so the managed `.venv` is used automatically.
 
+## Local data
+
+By default Fresnica stores local state in `~/.fresnica`. Set `FRESNICA_HOME`
+to use another root directory.
+
+```text
+~/.fresnica/
+  wallets/             wallet metadata and encrypted signing material
+  chain-data.sqlite3   chain and SDEX cache
+```
+
+Watch-only records do not contain signing material.
+
 ## Interactive TUI
 
 ```bash
@@ -20,15 +33,39 @@ Keys:
 
 ```text
 r  refresh balances and history
-w  switch wallet
+w  wallet management
 h  refresh history
 s  send
 q  quit
 ```
 
+Inside Wallet Management:
+
+```text
+S    switch to the selected wallet
+A    add a watch-only wallet
+Esc  close without changing wallet
+```
+
 The TUI derives network services from the selected wallet. The send flow keeps
 password entry, transaction review, confirmation, signing, submission, and
 re-locking inside one interaction.
+
+## Wallet CLI
+
+```bash
+uv run fresnica wallet --help
+```
+
+Commands are grouped as lifecycle, create/import, and testnet utilities. The
+canonical watch-only and Friendbot commands are:
+
+```bash
+uv run fresnica --network mainnet wallet import-watch observer G...
+uv run fresnica --network testnet wallet testnet-fund
+```
+
+`watch` and `fund` remain accepted as compatibility aliases.
 
 ## Network selection
 
@@ -47,7 +84,7 @@ used after verifying the complete flow.
 
 ```bash
 uv run fresnica --network testnet wallet create testnet-wallet
-uv run fresnica --network testnet wallet fund
+uv run fresnica --network testnet wallet testnet-fund
 uv run fresnica --network testnet balance
 uv run fresnica --network testnet send 1 XLM to GDESTINATION...
 ```

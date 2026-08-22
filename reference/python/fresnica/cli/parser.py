@@ -15,6 +15,25 @@ LANGUAGES = (
 NETWORKS = ("mainnet", "testnet")
 RESOLUTIONS = ("1m", "5m", "15m", "1h", "1d", "1w")
 
+WALLET_HELP = """Wallet commands:
+
+  Selection / lifecycle
+    list                         List local wallets
+    use NAME                     Select the default wallet
+    delete NAME                  Delete wallet metadata and encrypted secret
+
+  Create / import
+    create NAME                  Create a new mnemonic wallet
+    import-secret NAME           Import an S... secret
+    import-mnemonic NAME         Import a BIP39 mnemonic
+    import-watch NAME G...       Add a watch-only account
+
+  Testnet
+    testnet-fund [--wallet NAME] Fund a testnet wallet with Friendbot
+
+Compatibility aliases: watch -> import-watch, fund -> testnet-fund
+"""
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fresnica")
@@ -48,26 +67,30 @@ def build_parser() -> argparse.ArgumentParser:
     info = sub.add_parser("info", help="Show wallet identity and state")
     info.add_argument("--wallet")
 
-    wallet = sub.add_parser("wallet", help="Manage wallets")
-    wallet_sub = wallet.add_subparsers(dest="wallet_command", required=True)
-    wallet_sub.add_parser("list", help="List wallets")
+    wallet = sub.add_parser(
+        "wallet",
+        help="Manage wallets",
+        description="Manage local wallet identities and watch-only accounts.",
+        epilog=WALLET_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    wallet_sub = wallet.add_subparsers(
+        dest="wallet_command",
+        required=True,
+        metavar="COMMAND",
+    )
+    wallet_sub.add_parser("list", description="List local wallets")
 
-    use = wallet_sub.add_parser("use", help="Select default wallet")
+    use = wallet_sub.add_parser("use", description="Select the default wallet")
     use.add_argument("name")
 
-    watch = wallet_sub.add_parser("watch", help="Add a watch-only wallet")
-    watch.add_argument("name")
-    watch.add_argument("address")
+    delete = wallet_sub.add_parser(
+        "delete",
+        description="Delete wallet metadata and encrypted signing material",
+    )
+    delete.add_argument("name")
 
-    secret = wallet_sub.add_parser("import-secret", help="Import an S... secret")
-    secret.add_argument("name")
-
-    mnemonic = wallet_sub.add_parser("import-mnemonic", help="Import a mnemonic")
-    mnemonic.add_argument("name")
-    mnemonic.add_argument("--index", type=int, default=0)
-    mnemonic.add_argument("--language", choices=LANGUAGES)
-
-    create = wallet_sub.add_parser("create", help="Create a new mnemonic wallet")
+    create = wallet_sub.add_parser("create", description="Create a new mnemonic wallet")
     create.add_argument("name")
     create.add_argument("--index", type=int, default=0)
     create.add_argument("--language", default="english", choices=LANGUAGES)
@@ -78,11 +101,34 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(128, 160, 192, 224, 256),
     )
 
-    fund = wallet_sub.add_parser("fund", help="Fund a testnet wallet with Friendbot")
-    fund.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    secret = wallet_sub.add_parser(
+        "import-secret",
+        description="Import a Stellar S... secret",
+    )
+    secret.add_argument("name")
 
-    delete = wallet_sub.add_parser("delete", help="Delete a wallet")
-    delete.add_argument("name")
+    mnemonic = wallet_sub.add_parser(
+        "import-mnemonic",
+        description="Import a BIP39 mnemonic",
+    )
+    mnemonic.add_argument("name")
+    mnemonic.add_argument("--index", type=int, default=0)
+    mnemonic.add_argument("--language", choices=LANGUAGES)
+
+    watch = wallet_sub.add_parser(
+        "import-watch",
+        aliases=["watch"],
+        description="Add a watch-only Stellar account",
+    )
+    watch.add_argument("name")
+    watch.add_argument("address")
+
+    fund = wallet_sub.add_parser(
+        "testnet-fund",
+        aliases=["fund"],
+        description="Fund a testnet wallet with Friendbot",
+    )
+    fund.add_argument("--wallet", help="Wallet name; defaults to active wallet")
 
     dex = sub.add_parser("dex", help="Read Stellar DEX market data")
     dex_sub = dex.add_subparsers(dest="dex_command", required=True)

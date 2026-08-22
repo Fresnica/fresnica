@@ -17,13 +17,33 @@ class SendRequest:
     password: str
 
 
-class WalletPicker(ModalScreen[str | None]):
+@dataclass(frozen=True)
+class WalletAction:
+    action: str
+    wallet_name: str | None = None
+
+
+@dataclass(frozen=True)
+class WatchWalletRequest:
+    name: str
+    address: str
+    network: str
+
+
+class WalletManagerDialog(ModalScreen[WalletAction | None]):
+    BINDINGS = [
+        ("escape", "cancel", "Close"),
+        ("s", "switch", "Switch"),
+        ("a", "add_watch", "Add watch"),
+    ]
+
     CSS = """
-    WalletPicker { align: center middle; }
-    WalletPicker > #dialog { width: 72; height: auto; padding: 1 2; border: round $accent; background: $surface; }
-    WalletPicker Select { width: 1fr; margin: 1 0; }
-    WalletPicker #actions { height: auto; align-horizontal: right; }
-    WalletPicker Button { margin-left: 1; }
+    WalletManagerDialog { align: center middle; }
+    WalletManagerDialog > #dialog { width: 76; height: auto; padding: 1 2; border: round $accent; background: $surface; }
+    WalletManagerDialog Select { width: 1fr; margin: 1 0; }
+    WalletManagerDialog #shortcut-help { margin-bottom: 1; color: $text-muted; }
+    WalletManagerDialog #actions { height: auto; align-horizontal: right; }
+    WalletManagerDialog Button { margin-left: 1; }
     """
 
     def __init__(self, records, current_name: str | None):
@@ -38,19 +58,81 @@ class WalletPicker(ModalScreen[str | None]):
         ]
         value = self.current_name if self.current_name else options[0][1]
         with Vertical(id="dialog"):
-            yield Label("Switch wallet")
+            yield Label("Wallet management")
             yield Select(options, value=value, allow_blank=False, id="wallet-select")
+            yield Static("S: switch   A: add watch-only   Esc: close", id="shortcut-help")
             with Horizontal(id="actions"):
-                yield Button("Cancel", id="cancel")
+                yield Button("Add watch-only", id="add-watch")
+                yield Button("Close", id="cancel")
                 yield Button("Switch", id="switch", variant="primary")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_switch(self) -> None:
+        value = self.query_one("#wallet-select", Select).value
+        self.dismiss(WalletAction("switch", str(value)))
+
+    def action_add_watch(self) -> None:
+        self.dismiss(WalletAction("add-watch"))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
-            self.dismiss(None)
+            self.action_cancel()
+        elif event.button.id == "switch":
+            self.action_switch()
+        elif event.button.id == "add-watch":
+            self.action_add_watch()
+
+
+class WatchWalletDialog(ModalScreen[WatchWalletRequest | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    CSS = """
+    WatchWalletDialog { align: center middle; }
+    WatchWalletDialog > #dialog { width: 82; height: auto; padding: 1 2; border: round $accent; background: $surface; }
+    WatchWalletDialog Input, WatchWalletDialog Select { margin-top: 1; }
+    WatchWalletDialog #actions { height: auto; margin-top: 1; align-horizontal: right; }
+    WatchWalletDialog Button { margin-left: 1; }
+    """
+
+    def __init__(self, network: str):
+        super().__init__()
+        self.network = network
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Add watch-only wallet")
+            yield Input(placeholder="Wallet name", id="watch-name")
+            yield Input(placeholder="Stellar G... address", id="watch-address")
+            yield Select(
+                [("Mainnet", "mainnet"), ("Testnet", "testnet")],
+                value=self.network,
+                allow_blank=False,
+                id="watch-network",
+            )
+            yield Static("", id="form-error")
+            with Horizontal(id="actions"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Add", id="add", variant="primary")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.action_cancel()
             return
-        if event.button.id == "switch":
-            value = self.query_one("#wallet-select", Select).value
-            self.dismiss(str(value))
+        if event.button.id != "add":
+            return
+
+        name = self.query_one("#watch-name", Input).value.strip()
+        address = self.query_one("#watch-address", Input).value.strip()
+        network = str(self.query_one("#watch-network", Select).value)
+        if not name or not address:
+            self.query_one("#form-error", Static).update("Wallet name and address are required.")
+            return
+        self.dismiss(WatchWalletRequest(name, address, network))
 
 
 class SendDialog(ModalScreen[SendRequest | None]):

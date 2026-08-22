@@ -34,11 +34,15 @@ TUI keys:
 
 ```text
 r  refresh balances and recent activity
-w  switch the default wallet
+w  wallet management
 h  refresh recent activity
 s  send a payment
 q  quit
 ```
+
+Wallet Management lists local wallets in one modal. `S` switches to the selected
+wallet, `A` opens the watch-only import form, and `Esc` closes without changing
+the active wallet.
 
 The TUI follows the selected wallet's stored network. Sending opens a password
 prompt, then a transaction review, then submits only after confirmation. Signing
@@ -57,6 +61,42 @@ Run tests with the locked environment:
 uv run pytest -q
 ```
 
+### Local data
+
+Fresnica stores local state under `~/.fresnica` by default. Set
+`FRESNICA_HOME` to move the whole data root.
+
+```text
+~/.fresnica/
+  wallets/             public wallet metadata + encrypted signing material
+  chain-data.sqlite3   balances, history, offers, trades, and aggregations cache
+```
+
+Watch-only wallets contain only public metadata such as name, G-address,
+network, type, and timestamps. No secret or mnemonic is stored for them.
+
+### Wallet CLI
+
+`wallet --help` groups commands by purpose. Canonical command names are:
+
+```text
+Selection / lifecycle
+  list
+  use NAME
+  delete NAME
+
+Create / import
+  create NAME
+  import-secret NAME
+  import-mnemonic NAME
+  import-watch NAME G...
+
+Testnet
+  testnet-fund [--wallet NAME]
+```
+
+The older `watch` and `fund` names remain compatibility aliases.
+
 ### Testnet smoke flow
 
 Create a disposable testnet wallet, fund it with Stellar Friendbot, inspect the
@@ -64,15 +104,15 @@ balance, then send a payment:
 
 ```bash
 uv run fresnica --network testnet wallet create testnet-demo
-uv run fresnica --network testnet wallet fund
+uv run fresnica --network testnet wallet testnet-fund
 uv run fresnica --network testnet balance
 uv run fresnica --network testnet send 1 XLM to GDESTINATION...
 ```
 
 `wallet create` displays the generated mnemonic once and stores only encrypted
-signing material. `wallet fund` is rejected outside testnet. Balance, history,
-and send commands also verify that the selected runtime network matches the
-wallet record, preventing accidental cross-network use.
+signing material. `wallet testnet-fund` is rejected outside testnet. Balance,
+history, and send commands also verify that the selected runtime network matches
+the wallet record, preventing accidental cross-network use.
 
 If an XLM destination does not exist, `send` reviews and submits a Stellar
 `CreateAccount` operation instead of a `Payment`. Issued assets still require an
@@ -109,7 +149,7 @@ pipeline rather than introducing a separate signing path.
 Other one-shot commands:
 
 ```bash
-uv run fresnica wallet watch observer G...
+uv run fresnica --network mainnet wallet import-watch observer G...
 uv run fresnica wallet list
 uv run fresnica history
 uv run fresnica send 100 XLM to G...
