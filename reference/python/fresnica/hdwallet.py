@@ -10,6 +10,15 @@ from stellar_sdk.sep.mnemonic import Language, StellarMnemonic
 SUPPORTED_LANGUAGES = tuple(Language)
 
 
+def normalize_language(language: Language | str) -> Language:
+    if isinstance(language, Language):
+        return language
+    try:
+        return Language(language)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported mnemonic language: {language}") from exc
+
+
 def detect_mnemonic_language(mnemonic: str) -> Language:
     words = mnemonic.strip()
     matches = [
@@ -33,6 +42,8 @@ def derive_account(
     """Derive a Stellar Keypair using the SDK's SEP-0005 implementation."""
     if language is None:
         language = detect_mnemonic_language(mnemonic)
+    else:
+        language = normalize_language(language)
 
     return Keypair.from_mnemonic_phrase(
         mnemonic.strip(),
@@ -46,4 +57,7 @@ def generate_mnemonic_phrase(
     language: Language | str = Language.ENGLISH,
     strength: int = 256,
 ) -> str:
-    return Keypair.generate_mnemonic_phrase(language=language, strength=strength)
+    return Keypair.generate_mnemonic_phrase(
+        language=normalize_language(language),
+        strength=strength,
+    )
