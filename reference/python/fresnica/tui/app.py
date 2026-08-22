@@ -78,8 +78,7 @@ class FresnicaApp(App[None]):
             return
         self.runtime.wallet_manager.set_default(name)
         self.runtime.wallet_manager.lock()
-        self._set_status(f"Selected wallet {name}")
-        self.refresh_wallet()
+        self.refresh_wallet(f"Selected wallet {name}")
 
     def action_send(self) -> None:
         manager = self.runtime.wallet_manager
@@ -99,7 +98,7 @@ class FresnicaApp(App[None]):
         self.prepare_send(request)
 
     @work(exclusive=True, thread=True, exit_on_error=False)
-    def refresh_wallet(self) -> None:
+    def refresh_wallet(self, ready_message: str | None = None) -> None:
         try:
             session = self.runtime.wallet_manager.view()
             services = self.runtime.services_for(session.record.network)
@@ -110,10 +109,11 @@ class FresnicaApp(App[None]):
                 session.record,
                 balances,
                 history,
+                ready_message,
                 None,
             )
         except (FresnicaError, ValueError) as exc:
-            self.call_from_thread(self._apply_wallet, None, [], [], exc)
+            self.call_from_thread(self._apply_wallet, None, [], [], None, exc)
 
     @work(thread=True, exit_on_error=False)
     def prepare_send(self, request) -> None:
@@ -175,13 +175,13 @@ class FresnicaApp(App[None]):
         if error is not None:
             self._set_error(error)
             return
-        self._set_status(
+        message = (
             f"Submitted on {network}: {result.hash}"
             + (f"  ledger {result.ledger}" if result.ledger is not None else "")
         )
-        self.refresh_wallet()
+        self.refresh_wallet(message)
 
-    def _apply_wallet(self, record, balances, history, error) -> None:
+    def _apply_wallet(self, record, balances, history, ready_message, error) -> None:
         wallet_widget = self.query_one("#wallet", Static)
         balance_table = self.query_one("#balances", DataTable)
         history_table = self.query_one("#history", DataTable)
@@ -197,7 +197,7 @@ class FresnicaApp(App[None]):
         wallet_widget.update(
             f"{record.name}  {record.address}  [{record.network}]  {record.wallet_type}"
         )
-        self._set_status("Ready")
+        self._set_status(ready_message or "Ready")
         for item in balances:
             balance_table.add_row(
                 item.asset.display,
