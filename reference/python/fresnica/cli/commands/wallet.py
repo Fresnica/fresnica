@@ -2,8 +2,6 @@
 
 from getpass import getpass
 
-from ...hdwallet import generate_mnemonic_phrase
-
 
 def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass):
     manager = runtime.wallet_manager
@@ -55,21 +53,17 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         return record
 
     if command == "create":
-        mnemonic = generate_mnemonic_phrase(
-            language=args.language,
-            strength=args.strength,
-        )
         mnemonic_passphrase = secret_input(
             "BIP39 passphrase (optional; leave empty if none): "
         )
         password = _new_password(secret_input)
-        record = manager.import_mnemonic(
+        record, mnemonic = manager.create_mnemonic(
             args.name,
-            mnemonic,
             password,
             mnemonic_passphrase=mnemonic_passphrase,
             index=args.index,
             language=args.language,
+            strength=args.strength,
             network=runtime.network,
         )
         renderer.render_created_mnemonic(record, mnemonic)

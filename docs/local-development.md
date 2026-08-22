@@ -29,27 +29,43 @@ Watch-only records do not contain signing material.
 uv run fresnica
 ```
 
-Keys:
+The TUI presents wallet session state explicitly:
 
 ```text
-r  refresh balances and history
+WATCH_ONLY
+LOCKED
+UNLOCKED
+```
+
+Main keys:
+
+```text
 w  wallet management
+s  send when the wallet has signing capability
+l  lock / unlock
+r  refresh balances and history
 h  refresh history
-s  send
 q  quit
 ```
 
-Inside Wallet Management:
+Wallet Management supports use, add, lock/unlock, testnet funding, and delete.
+Add Wallet branches into create, import-secret, import-mnemonic, and import-watch
+flows. Actions are capability-aware: watch-only wallets cannot unlock, mainnet
+wallets do not expose Friendbot funding, and switching wallets releases any
+unlocked signing session.
+
+Unlock is a separate workflow from Send. A write action may request unlock as a
+prerequisite, but the password never appears in the payment form. An unlocked
+wallet remains unlocked until explicit lock, wallet switch, or TUI exit.
+
+Feedback is also separated by type:
 
 ```text
-S    switch to the selected wallet
-A    add a watch-only wallet
-Esc  close without changing wallet
+field validation              inline in the form
+expected capability limits    notice modal
+network/protocol failures      error modal (+ optional DEV diagnostics)
+success/progress               main status line
 ```
-
-The TUI derives network services from the selected wallet. The send flow keeps
-password entry, transaction review, confirmation, signing, submission, and
-re-locking inside one interaction.
 
 ## Wallet CLI
 

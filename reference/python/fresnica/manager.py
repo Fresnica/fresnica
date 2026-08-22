@@ -1,10 +1,11 @@
-"""User-facing wallet lifecycle management."""
+"""User-facing wallet lifecycle and session state management."""
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 
 from .errors import WalletLockedError, WalletNotFoundError, WatchOnlyError
-from .hdwallet import detect_mnemonic_language
+from .hdwallet import detect_mnemonic_language, generate_mnemonic_phrase
 from .network import get_network
 from .secret_store import decrypt_secret, encrypt_secret
 from .storage import WalletRecord, WalletStorage
@@ -15,6 +16,21 @@ from .wallet import Wallet
 class WalletSession:
     record: WalletRecord
     wallet: Wallet
+
+
+class WalletState(str, Enum):
+    WATCH_ONLY = "WATCH_ONLY"
+    LOCKED = "LOCKED"
+    UNLOCKED = "UNLOCKED"
+
+
+@dataclass(frozen=True)
+class WalletCapabilities:
+    state: WalletState
+    can_send: bool
+    can_unlock: bool
+    can_lock: bool
+    can_fund_testnet: bool
 
 
 class WalletManager:
@@ -38,6 +54,27 @@ class WalletManager:
 
     def set_default(self, name: str) -> None:
         self.storage.set_default(name)
+        if self._session and self._session.record.name != name:
+            self.lock()
+
+    def state(self, name: str | None = None) -> WalletState:
+        record = self.get_record(name)
+        if record.watch_only:
+            return WalletState.WATCH_ONLY
+        if self._session and self._session.record.name == record.name:
+            return WalletState.UNLOCKED
+        return WalletState.LOCKED
+
+    def capabilities(self, name: str | None = None) -> WalletCapabilities:
+        record = self.get_record(name)
+        state = self.state(record.name)
+        return WalletCapabilities(
+            state=state,
+            can_send=state is not WalletState.WATCH_ONLY,
+            can_unlock=state is WalletState.LOCKED,
+            can_lock=state is WalletState.UNLOCKED,
+            can_fund_testnet=record.network == "testnet",
+        )
 
     def add_watch(
         self,
@@ -132,6 +169,30 @@ class WalletManager:
         self._maybe_default(record.name, make_default)
         return record
 
+    def create_mnemonic(
+        self,
+        name: str,
+        wallet_password: str,
+        mnemonic_passphrase: str = "",
+        index: int = 0,
+        language="english",
+        strength: int = 256,
+        network: str = "mainnet",
+        make_default: bool | None = None,
+    ) -> tuple[WalletRecord, str]:
+        mnemonic = generate_mnemonic_phrase(language=language, strength=strength)
+        record = self.import_mnemonic(
+            name,
+            mnemonic,
+            wallet_password,
+            mnemonic_passphrase=mnemonic_passphrase,
+            index=index,
+            language=language,
+            network=network,
+            make_default=make_default,
+        )
+        return record, mnemonic
+
     def view(self, name: str | None = None) -> WalletSession:
         record = self.get_record(name)
         return WalletSession(record, Wallet.from_address(record.address))
@@ -171,9 +232,14 @@ class WalletManager:
     close = lock
 
     def delete(self, name: str) -> None:
+        was_default = self.storage.get_default() == name
         if self._session and self._session.record.name == name:
             self.lock()
         self.storage.delete(name)
+        if was_default:
+            records = self.storage.list()
+            if records:
+                self.storage.set_default(records[0].name)
 
     def _maybe_default(self, name: str, make_default: bool | None) -> None:
         if make_default is True or (
