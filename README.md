@@ -30,23 +30,44 @@ Run the interactive TUI:
 uv run fresnica
 ```
 
-TUI keys:
+### TUI product model
+
+The TUI is state-driven rather than a graphical copy of CLI commands. A wallet
+is always presented as one of three signing states:
 
 ```text
-r  refresh balances and recent activity
+WATCH_ONLY   public account data only; cannot sign
+LOCKED       encrypted signing material exists but is not in memory
+UNLOCKED     signing material is available for the current TUI session
+```
+
+The main screen shows wallet name, network, wallet type, state, address, assets,
+recent activity, and only the actions relevant to the current state. Core keys:
+
+```text
 w  wallet management
+s  send (signing wallets only)
+l  lock / unlock
+r  refresh balances and recent activity
 h  refresh recent activity
-s  send a payment
 q  quit
 ```
 
-Wallet Management lists local wallets in one modal. `S` switches to the selected
-wallet, `A` opens the watch-only import form, and `Esc` closes without changing
-the active wallet.
+`w` opens Wallet Management. From there the TUI can use, create, import, unlock,
+lock, testnet-fund, or delete wallets. Add Wallet contains the same lifecycle
+choices as the CLI: create mnemonic, import secret, import mnemonic, or import
+watch-only.
 
-The TUI follows the selected wallet's stored network. Sending opens a password
-prompt, then a transaction review, then submits only after confirmation. Signing
-material is released again after submission or cancellation.
+Expected capability restrictions are shown as modal notices rather than being
+written into the main status line. Form validation remains next to the field,
+while network/protocol failures use an error dialog that can include `DEV`
+diagnostics.
+
+Unlocking is independent from sending. If a locked wallet starts a write action,
+Fresnica opens an Unlock dialog first. Once unlocked, the wallet stays unlocked
+for the TUI session until the user explicitly locks it, switches wallets, or
+quits. The Send form therefore contains only payment fields; the wallet password
+is not a payment parameter.
 
 A network can be selected for a one-shot CLI invocation. Put the global option
 before the command:
@@ -95,7 +116,9 @@ Testnet
   testnet-fund [--wallet NAME]
 ```
 
-The older `watch` and `fund` names remain compatibility aliases.
+The older `watch` and `fund` names remain compatibility aliases. Wallet creation
+uses the same `WalletManager` lifecycle model as the TUI rather than duplicating
+mnemonic creation logic in the presentation layer.
 
 ### Testnet smoke flow
 
@@ -143,8 +166,9 @@ Offers, trades, and trade aggregations retain their raw Horizon JSON in the loca
 SQLite cache while indexing fields useful for wallet and market views.
 
 Manage-offer and cancel-offer write operations are deliberately deferred until
-the read path is stable; they will reuse the existing review/sign/submit
-pipeline rather than introducing a separate signing path.
+the state-driven wallet/session UX is stable; they will reuse the same
+unlock/review/sign/submit pipeline rather than introducing a separate signing
+path.
 
 Other one-shot commands:
 
@@ -166,6 +190,8 @@ signer before returning.
 ```text
 CLI (Rich) / TUI (Textual)
           |
+     Wallet model/state
+          |
         Runtime
           |
    +------+-------+
@@ -181,5 +207,6 @@ WalletStorage Balance History  DEX
                 stellar-sdk
 ```
 
-`Wallet` represents identity plus optional signing capability. A watch-only
-wallet therefore uses the same balance/history/market services but cannot sign.
+`WalletManager` owns lifecycle and session state. `Wallet` represents identity
+plus optional signing capability. A watch-only wallet therefore uses the same
+balance/history/market services but cannot enter a signing state.

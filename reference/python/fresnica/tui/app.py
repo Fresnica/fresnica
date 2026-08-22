@@ -1,14 +1,25 @@
-"""Textual wallet shell for interactive Fresnica mode."""
+"""State-driven Textual wallet shell for interactive Fresnica mode."""
 
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
-from ..errors import FresnicaError, WatchOnlyError
+from ..errors import FresnicaError, NetworkError, WalletLockedError, WalletNotFoundError
+from ..manager import WalletState
 from .screens import (
+    AddWalletDialog,
+    ConfirmDialog,
+    CreateWalletDialog,
+    ErrorDialog,
+    ImportMnemonicDialog,
+    ImportSecretDialog,
+    MnemonicBackupDialog,
+    NoticeDialog,
     ReviewDialog,
     SendDialog,
+    UnlockDialog,
     WalletAction,
     WalletManagerDialog,
     WatchWalletDialog,
@@ -19,15 +30,17 @@ class FresnicaApp(App[None]):
     TITLE = "Fresnica"
     SUB_TITLE = "Stellar Wallet"
     BINDINGS = [
-        ("r", "refresh", "Refresh"),
-        ("w", "manage_wallets", "Wallets"),
-        ("h", "refresh_history", "History"),
-        ("s", "send", "Send"),
-        ("q", "quit", "Quit"),
+        Binding("r", "refresh", "Refresh"),
+        Binding("w", "manage_wallets", "Wallets"),
+        Binding("h", "refresh_history", "History"),
+        Binding("s", "send", "Send", show=False),
+        Binding("l", "toggle_lock", "Lock / Unlock", show=False),
+        Binding("q", "quit", "Quit"),
     ]
 
     CSS = """
-    #wallet { padding: 1 2 0 2; text-style: bold; }
+    #wallet { padding: 1 2 0 2; height: auto; text-style: bold; }
+    #actions { padding: 0 2; height: auto; color: $text-muted; }
     #status { padding: 0 2 1 2; height: auto; }
     .section-title { padding: 0 2; text-style: bold; }
     #balances { height: 2fr; min-height: 8; }
@@ -42,8 +55,9 @@ class FresnicaApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("Loading wallet...", id="wallet")
+        yield Static("", id="actions")
         yield Static("", id="status")
-        yield Label("Balances", classes="section-title")
+        yield Label("Assets", classes="section-title")
         yield DataTable(id="balances")
         yield Label("Recent activity", classes="section-title")
         yield DataTable(id="history")
@@ -62,40 +76,159 @@ class FresnicaApp(App[None]):
         self.runtime.wallet_manager.lock()
 
     def action_refresh(self) -> None:
-        self.refresh_wallet()
+        self.refresh_wallet("Refreshed")
 
     def action_refresh_history(self) -> None:
-        self.refresh_wallet()
+        self.refresh_wallet("History refreshed")
 
     def action_manage_wallets(self) -> None:
+        self._open_wallet_manager()
+
+    def _open_wallet_manager(self) -> None:
         manager = self.runtime.wallet_manager
         records = manager.list_wallets()
         if not records:
-            self.push_screen(WatchWalletDialog(self.runtime.network), self._on_watch_request)
+            self._open_add_wallet()
             return
-        try:
-            current_name = manager.get_record().name
-        except FresnicaError:
-            current_name = records[0].name
+        states = {record.name: manager.state(record.name) for record in records}
         self.push_screen(
-            WalletManagerDialog(records, current_name),
+            WalletManagerDialog(records, manager.storage.get_default(), states),
             self._on_wallet_action,
         )
 
     def _on_wallet_action(self, action: WalletAction | None) -> None:
         if action is None:
             return
-        if action.action == "switch" and action.wallet_name:
-            self.runtime.wallet_manager.set_default(action.wallet_name)
-            self.runtime.wallet_manager.lock()
-            self.refresh_wallet(f"Selected wallet {action.wallet_name}")
+        manager = self.runtime.wallet_manager
+        if action.action == "add":
+            self._open_add_wallet()
             return
-        if action.action == "add-watch":
-            try:
-                network = self.runtime.wallet_manager.get_record().network
-            except FresnicaError:
-                network = self.runtime.network
-            self.push_screen(WatchWalletDialog(network), self._on_watch_request)
+        if not action.wallet_name:
+            return
+        if action.action == "use":
+            manager.set_default(action.wallet_name)
+            self.refresh_wallet(f"Selected wallet {action.wallet_name}")
+        elif action.action == "unlock":
+            manager.set_default(action.wallet_name)
+            self._request_unlock(action.wallet_name)
+        elif action.action == "lock":
+            manager.lock()
+            self.refresh_wallet(f"Locked wallet {action.wallet_name}")
+        elif action.action == "fund":
+            self._set_status(f"Funding {action.wallet_name} on testnet...")
+            self.fund_wallet(action.wallet_name)
+        elif action.action == "delete":
+            record = manager.get_record(action.wallet_name)
+            extra = " and encrypted signing material" if not record.watch_only else ""
+            self.push_screen(
+                ConfirmDialog(
+                    "Delete wallet",
+                    f'Delete "{record.name}" metadata{extra}? This cannot be undone.',
+                    "Delete",
+                ),
+                lambda confirmed: self._delete_wallet(record.name, confirmed),
+            )
+
+    def _delete_wallet(self, name: str, confirmed: bool) -> None:
+        if not confirmed:
+            return
+        try:
+            self.runtime.wallet_manager.delete(name)
+        except FresnicaError as exc:
+            self._show_error(exc)
+            return
+        self.refresh_wallet(f'Deleted wallet "{name}"')
+
+    def _open_add_wallet(self) -> None:
+        self.push_screen(AddWalletDialog(), self._on_add_wallet_kind)
+
+    def _on_add_wallet_kind(self, kind: str | None) -> None:
+        if kind is None:
+            return
+        try:
+            network = self.runtime.wallet_manager.get_record().network
+        except FresnicaError:
+            network = self.runtime.network
+        dialogs = {
+            "create": CreateWalletDialog,
+            "import-secret": ImportSecretDialog,
+            "import-mnemonic": ImportMnemonicDialog,
+            "import-watch": WatchWalletDialog,
+        }
+        dialog = dialogs[kind](network)
+        callbacks = {
+            "create": self._on_create_request,
+            "import-secret": self._on_secret_import_request,
+            "import-mnemonic": self._on_mnemonic_import_request,
+            "import-watch": self._on_watch_request,
+        }
+        self.push_screen(dialog, callbacks[kind])
+
+    def _on_create_request(self, request) -> None:
+        if request is None:
+            return
+        self._set_status(f'Creating wallet "{request.name}"...')
+        self.create_wallet(request)
+
+    @work(thread=True, exit_on_error=False)
+    def create_wallet(self, request) -> None:
+        try:
+            record, mnemonic = self.runtime.wallet_manager.create_mnemonic(
+                request.name,
+                request.password,
+                mnemonic_passphrase=request.mnemonic_passphrase,
+                index=request.index,
+                language=request.language,
+                strength=request.strength,
+                network=request.network,
+            )
+            self.runtime.wallet_manager.set_default(record.name)
+            self.call_from_thread(self._finish_wallet_add, record, mnemonic, None)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._finish_wallet_add, None, None, exc)
+
+    def _on_secret_import_request(self, request) -> None:
+        if request is None:
+            return
+        self._set_status(f'Importing wallet "{request.name}"...')
+        self.import_secret_wallet(request)
+
+    @work(thread=True, exit_on_error=False)
+    def import_secret_wallet(self, request) -> None:
+        try:
+            record = self.runtime.wallet_manager.import_secret(
+                request.name,
+                request.secret,
+                request.password,
+                network=request.network,
+            )
+            self.runtime.wallet_manager.set_default(record.name)
+            self.call_from_thread(self._finish_wallet_add, record, None, None)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._finish_wallet_add, None, None, exc)
+
+    def _on_mnemonic_import_request(self, request) -> None:
+        if request is None:
+            return
+        self._set_status(f'Importing wallet "{request.name}"...')
+        self.import_mnemonic_wallet(request)
+
+    @work(thread=True, exit_on_error=False)
+    def import_mnemonic_wallet(self, request) -> None:
+        try:
+            record = self.runtime.wallet_manager.import_mnemonic(
+                request.name,
+                request.mnemonic,
+                request.password,
+                mnemonic_passphrase=request.mnemonic_passphrase,
+                index=request.index,
+                language=request.language,
+                network=request.network,
+            )
+            self.runtime.wallet_manager.set_default(record.name)
+            self.call_from_thread(self._finish_wallet_add, record, None, None)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._finish_wallet_add, None, None, exc)
 
     def _on_watch_request(self, request) -> None:
         if request is None:
@@ -106,20 +239,80 @@ class FresnicaApp(App[None]):
                 request.address,
                 network=request.network,
             )
+            self.runtime.wallet_manager.set_default(record.name)
         except (FresnicaError, ValueError) as exc:
-            self._set_error(exc)
+            self._show_error(exc)
             return
-        self.refresh_wallet(f'Added watch-only wallet "{record.name}"')
+        self._finish_wallet_add(record, None, None)
+
+    def _finish_wallet_add(self, record, mnemonic: str | None, error) -> None:
+        if error is not None:
+            self._show_error(error)
+            return
+        self.refresh_wallet(f'Added wallet "{record.name}"')
+        if mnemonic:
+            self.push_screen(MnemonicBackupDialog(record.name, mnemonic))
+
+    def action_toggle_lock(self) -> None:
+        manager = self.runtime.wallet_manager
+        try:
+            record = manager.get_record()
+            state = manager.state(record.name)
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before unlocking.")
+            return
+        if state is WalletState.WATCH_ONLY:
+            self._show_notice(
+                "Watch-only wallet",
+                "This wallet has no signing material, so it cannot be unlocked or sign transactions.",
+            )
+        elif state is WalletState.UNLOCKED:
+            manager.lock()
+            self.refresh_wallet(f"Locked wallet {record.name}")
+        else:
+            self._request_unlock(record.name)
+
+    def _request_unlock(self, wallet_name: str, after: str | None = None, error: str | None = None) -> None:
+        self.push_screen(
+            UnlockDialog(wallet_name, error),
+            lambda password: self._on_unlock_response(wallet_name, after, password),
+        )
+
+    def _on_unlock_response(self, wallet_name: str, after: str | None, password: str | None) -> None:
+        if password is None:
+            return
+        manager = self.runtime.wallet_manager
+        try:
+            manager.set_default(wallet_name)
+            manager.unlock(wallet_name, password)
+        except (FresnicaError, ValueError) as exc:
+            self._request_unlock(wallet_name, after, str(exc))
+            return
+        self.refresh_wallet(f"Unlocked wallet {wallet_name}")
+        if after == "send":
+            self._open_send()
 
     def action_send(self) -> None:
         manager = self.runtime.wallet_manager
         try:
             record = manager.get_record()
-            if record.watch_only:
-                raise WatchOnlyError(f'Wallet "{record.name}" is watch-only')
-        except FresnicaError as exc:
-            self._set_error(exc)
+            state = manager.state(record.name)
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before sending.")
             return
+        if state is WalletState.WATCH_ONLY:
+            self._show_notice(
+                "Watch-only wallet",
+                "This wallet can view balances, history, offers, and market data, but it cannot sign transactions.",
+            )
+            return
+        if state is WalletState.LOCKED:
+            self._request_unlock(record.name, after="send")
+            return
+        self._open_send()
+
+    def _open_send(self) -> None:
+        record = self.runtime.wallet_manager.get_record()
         self.push_screen(SendDialog(record.name), self._on_send_request)
 
     def _on_send_request(self, request) -> None:
@@ -130,28 +323,45 @@ class FresnicaApp(App[None]):
 
     @work(exclusive=True, thread=True, exit_on_error=False)
     def refresh_wallet(self, ready_message: str | None = None) -> None:
+        record = None
         try:
             session = self.runtime.wallet_manager.view()
-            services = self.runtime.services_for(session.record.network)
+            record = session.record
+            services = self.runtime.services_for(record.network)
             balances = services.balance_service.get_views(session.wallet)
             history = services.history_service.get_views(session.wallet, limit=20)
-            self.call_from_thread(
-                self._apply_wallet,
-                session.record,
-                balances,
-                history,
-                ready_message,
-                None,
-            )
+            self.call_from_thread(self._apply_wallet, record, balances, history, ready_message, None)
+        except WalletNotFoundError:
+            self.call_from_thread(self._apply_wallet, None, [], [], ready_message, None)
         except (FresnicaError, ValueError) as exc:
-            self.call_from_thread(self._apply_wallet, None, [], [], None, exc)
+            self.call_from_thread(self._apply_wallet, record, [], [], ready_message, exc)
+
+    @work(thread=True, exit_on_error=False)
+    def fund_wallet(self, wallet_name: str) -> None:
+        try:
+            record = self.runtime.wallet_manager.get_record(wallet_name)
+            if record.network != "testnet":
+                raise NetworkError("Friendbot is only available on testnet")
+            services = self.runtime.services_for("testnet")
+            if services.testnet_service is None:
+                raise NetworkError("Friendbot is unavailable for testnet")
+            result = services.testnet_service.fund(record.address)
+            tx_hash = result.get("hash") if isinstance(result, dict) else None
+            message = f'Funded wallet "{record.name}" on testnet'
+            if tx_hash:
+                message += f"; transaction {tx_hash}"
+            self.call_from_thread(self.refresh_wallet, message)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._show_error, exc)
 
     @work(thread=True, exit_on_error=False)
     def prepare_send(self, request) -> None:
         manager = self.runtime.wallet_manager
         try:
             record = manager.get_record()
-            session = manager.unlock(record.name, request.password)
+            session = manager.current()
+            if session is None or session.record.name != record.name:
+                raise WalletLockedError(f'Wallet "{record.name}" is locked')
             services = self.runtime.services_for(record.network)
             prepared = services.transfer_service.prepare(
                 wallet_name=record.name,
@@ -169,8 +379,7 @@ class FresnicaApp(App[None]):
                 record.network,
             )
         except (FresnicaError, ValueError) as exc:
-            manager.lock()
-            self.call_from_thread(self._set_error, exc)
+            self.call_from_thread(self._show_error, exc)
 
     def _show_review(self, wallet, services, prepared, network: str) -> None:
         self._pending_send = (wallet, services, prepared, network)
@@ -179,9 +388,8 @@ class FresnicaApp(App[None]):
 
     def _on_review(self, confirmed: bool) -> None:
         if not confirmed:
-            self.runtime.wallet_manager.lock()
             self._pending_send = None
-            self._set_status("Transaction cancelled")
+            self._set_status("Transaction cancelled; wallet remains unlocked")
             return
         self._set_status("Submitting transaction...")
         self.submit_pending()
@@ -199,12 +407,11 @@ class FresnicaApp(App[None]):
         except (FresnicaError, ValueError) as exc:
             self.call_from_thread(self._finish_send, None, network, exc)
         finally:
-            self.runtime.wallet_manager.lock()
             self._pending_send = None
 
     def _finish_send(self, result, network: str, error) -> None:
         if error is not None:
-            self._set_error(error)
+            self._show_error(error)
             return
         message = (
             f"Submitted on {network}: {result.hash}"
@@ -214,20 +421,25 @@ class FresnicaApp(App[None]):
 
     def _apply_wallet(self, record, balances, history, ready_message, error) -> None:
         wallet_widget = self.query_one("#wallet", Static)
+        actions_widget = self.query_one("#actions", Static)
         balance_table = self.query_one("#balances", DataTable)
         history_table = self.query_one("#history", DataTable)
         balance_table.clear()
         history_table.clear()
 
         if record is None:
-            wallet_widget.update("No wallet selected")
+            wallet_widget.update("No wallet configured")
+            actions_widget.update("W Add wallet   Q Quit")
+            self._set_status(ready_message or "Use W to create or import a wallet")
             if error is not None:
-                self._set_error(error)
+                self._show_error(error)
             return
 
+        state = self.runtime.wallet_manager.state(record.name)
         wallet_widget.update(
-            f"{record.name}  {record.address}  [{record.network}]  {record.wallet_type}"
+            f"{record.name}\n{record.network.upper()} · {_wallet_type(record.wallet_type)} · {state.value}\n{record.address}"
         )
+        actions_widget.update(_actions_for(state))
         self._set_status(ready_message or "Ready")
         for item in balances:
             balance_table.add_row(
@@ -237,24 +449,34 @@ class FresnicaApp(App[None]):
                 str(item.available),
             )
         for item in history:
-            history_table.add_row(
-                item.created_at or "",
-                item.operation_type,
-                item.summary,
-            )
+            history_table.add_row(item.created_at or "", item.operation_type, item.summary)
+        if error is not None:
+            self._show_error(error)
 
-    def _set_error(self, exc) -> None:
-        self._set_status(
-            str(exc),
-            error=True,
-            details=getattr(exc, "details", None),
-        )
+    def _show_notice(self, title: str, message: str) -> None:
+        self.push_screen(NoticeDialog(title, message))
 
-    def _set_status(self, message: str, error: bool = False, details: str | None = None) -> None:
-        status = Text(message, style="red" if error else "green")
-        if details:
-            status.append(f"\nDEV {details}", style="dim")
-        self.query_one("#status", Static).update(status)
+    def _show_error(self, exc) -> None:
+        self.push_screen(ErrorDialog(str(exc), getattr(exc, "details", None)))
+
+    def _set_status(self, message: str) -> None:
+        self.query_one("#status", Static).update(Text(message, style="green"))
+
+
+def _wallet_type(value: str) -> str:
+    return {
+        "watch-only": "Watch-only",
+        "mnemonic": "Mnemonic wallet",
+        "secret": "Secret-key wallet",
+    }.get(value, value)
+
+
+def _actions_for(state: WalletState) -> str:
+    if state is WalletState.WATCH_ONLY:
+        return "W Wallets   R Refresh   H History   Q Quit"
+    if state is WalletState.LOCKED:
+        return "W Wallets   S Send   L Unlock   R Refresh   H History   Q Quit"
+    return "W Wallets   S Send   L Lock   R Refresh   H History   Q Quit"
 
 
 def run_tui(runtime=None):
