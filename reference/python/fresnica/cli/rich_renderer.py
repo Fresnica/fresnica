@@ -10,6 +10,8 @@ from rich.prompt import Confirm
 from rich.table import Table
 from rich.text import Text
 
+from ..presentation import asset_source, format_amount, short_address
+
 
 class RichRenderer:
     def __init__(self, console: Console | None = None):
@@ -19,15 +21,17 @@ class RichRenderer:
         title = f"{record.name}  {short_address(record.address)}  [{record.network}]"
         table = Table(title=title)
         table.add_column("Asset", style="bold")
+        table.add_column("Issuer / source", style="dim")
         table.add_column("Balance", justify="right")
-        table.add_column("Liabilities", justify="right")
         table.add_column("Available", justify="right", style="bold green")
+        table.add_column("In offers", justify="right")
         for item in balances:
             table.add_row(
                 item.asset.display,
-                _decimal(item.balance),
-                _decimal(item.selling_liabilities),
-                _decimal(item.available),
+                asset_source(item.asset),
+                format_amount(item.balance),
+                format_amount(item.available),
+                format_amount(item.selling_liabilities),
             )
         self.console.print(table)
 
@@ -40,6 +44,7 @@ class RichRenderer:
                 {
                     "asset": item.asset.display,
                     "issuer": item.asset.issuer,
+                    "liquidity_pool_id": item.asset.liquidity_pool_id,
                     "balance": str(item.balance),
                     "selling_liabilities": str(item.selling_liabilities),
                     "buying_liabilities": str(item.buying_liabilities),
@@ -56,10 +61,9 @@ class RichRenderer:
             title=f"History  {record.name}  {short_address(record.address)}  [{record.network}]"
         )
         table.add_column("Time", style="dim")
-        table.add_column("Type", style="bold")
-        table.add_column("Summary")
+        table.add_column("Activity")
         for item in operations:
-            table.add_row(item.created_at or "", item.operation_type, item.summary)
+            table.add_row(item.created_at or "", item.summary)
         self.console.print(table)
 
     def render_orderbook(self, selling: str, buying: str, orderbook: dict, network: str) -> None:
@@ -228,21 +232,6 @@ class RichRenderer:
             self.console.print(dev)
 
 
-def short_address(address: str, head: int = 6, tail: int = 4) -> str:
-    if len(address) <= head + tail + 3:
-        return address
-    return f"{address[:head]}...{address[-tail:]}"
-
-
-def _decimal(value) -> str:
-    if value is None:
-        return "-"
-    text = format(value, "f")
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return text or "0"
-
-
 def _horizon_asset(raw: dict) -> str:
     if raw.get("asset_type") == "native":
         return "XLM"
@@ -256,13 +245,13 @@ def _trade_price(raw: dict) -> str:
         base = Decimal(str(raw.get("base_amount")))
         counter = Decimal(str(raw.get("counter_amount")))
         if base:
-            return _decimal(counter / base)
+            return format_amount(counter / base)
     except (InvalidOperation, TypeError, ValueError):
         pass
     price = raw.get("price")
     if isinstance(price, dict) and price.get("d") not in (None, "0", 0):
         try:
-            return _decimal(Decimal(str(price["n"])) / Decimal(str(price["d"])))
+            return format_amount(Decimal(str(price["n"])) / Decimal(str(price["d"])))
         except (InvalidOperation, KeyError):
             pass
     return "?"

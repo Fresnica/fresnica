@@ -32,26 +32,61 @@ uv run fresnica
 
 ### TUI product model
 
-The TUI is state-driven rather than a graphical copy of CLI commands. A wallet
-is always presented as one of three signing states:
+The TUI is state-driven rather than a graphical copy of CLI commands. Internally
+a wallet session is watch-only, locked, or unlocked; the UI presents those as
+capabilities instead of leaking implementation enum names.
+
+The dashboard shows wallet identity, portfolio, liquidity positions, and recent
+activity. Layout follows terminal width rather than device type:
 
 ```text
-WATCH_ONLY   public account data only; cannot sign
-LOCKED       encrypted signing material exists but is not in memory
-UNLOCKED     signing material is available for the current TUI session
+wide terminal (>= 120 columns)
++---------------- portfolio ----------------+------ recent activity ------+
+| Assets                                    |                            |
+| Liquidity positions                       |                            |
++-------------------------------------------+----------------------------+
+
+narrow terminal
++---------------- portfolio ----------------+
+| Assets                                    |
+| Liquidity positions                       |
++-------------------------------------------+
+| Recent activity                           |
++-------------------------------------------+
 ```
 
-The main screen shows wallet name, network, wallet type, state, address, assets,
-recent activity, and only the actions relevant to the current state. Core keys:
+Core keys:
 
 ```text
 w  wallet management
 s  send (signing wallets only)
 l  lock / unlock
-r  refresh balances and recent activity
-h  refresh recent activity
+r  refresh dashboard data
+h  open full History
+z  show / hide zero-balance assets
 q  quit
 ```
+
+The footer is the canonical shortcut guide. The wallet header only shows
+signing-context actions such as `S Send` and `L Unlock`; it does not duplicate
+`W/R/H/Q`. Refresh progress appears beside dashboard data and ends with an
+`Updated HH:MM:SS` timestamp.
+
+Assets are presented as holdings rather than raw Horizon balances. XLM is always
+first. Issued assets include issuer/source identity so two assets with the same
+code remain distinguishable. Amounts are normalized for humans (`0E-7` -> `0`),
+and the selling-liability column is labelled `In offers`. Zero-balance
+trustlines are hidden by default and can be toggled with `Z`.
+
+Liquidity-pool shares are not shown as anonymous normal assets. Fresnica resolves
+the pool and displays a separate liquidity position with pool assets, share
+balance, and the underlying reserve amounts represented by those shares.
+
+`H` opens a dedicated History view backed by the local operation cache. Initial
+sync stores up to 200 recent operations; later refreshes request newer operations
+from the latest local cursor, while `M` in History loads an older page. Activity
+summaries are written from the current account's point of view, for example
+`Sent`, `Received`, `Sell offer`, `Added liquidity`, or `Removed trustline`.
 
 `w` opens Wallet Management. From there the TUI can use, create, import, unlock,
 lock, testnet-fund, or delete wallets. Add Wallet contains the same lifecycle
@@ -119,6 +154,10 @@ Testnet
 The older `watch` and `fund` names remain compatibility aliases. Wallet creation
 uses the same `WalletManager` lifecycle model as the TUI rather than duplicating
 mnemonic creation logic in the presentation layer.
+
+CLI balance/history presentation consumes the same portfolio/activity semantics
+as the TUI: issuer/source identity, human amount formatting, `Available`,
+`In offers`, and human-readable activity summaries.
 
 ### Testnet smoke flow
 
@@ -190,7 +229,7 @@ signer before returning.
 ```text
 CLI (Rich) / TUI (Textual)
           |
-     Wallet model/state
+  wallet / portfolio / activity models
           |
         Runtime
           |
