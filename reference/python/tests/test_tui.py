@@ -31,11 +31,26 @@ from fresnica.tui.screens import (
 from fresnica.tui.wallet_management import WalletManagerDialog
 
 
+class FakeAdapter:
+    def __init__(self, existing=None):
+        self.existing = dict(existing or {})
+        self.checks = 0
+
+    def account_exists(self, address):
+        self.checks += 1
+        return bool(self.existing.get(address, False))
+
+
 class FakeBalanceService:
+    def __init__(self, adapter):
+        self.adapter = adapter
+        self.cached_accounts = set()
+        self.cached_reads = 0
+
     def get_views(self, wallet):
         return self.get_portfolio_views(wallet)[0]
 
-    def get_portfolio_views(self, wallet):
+    def _portfolio(self):
         issuer = Keypair.random().public_key
         return (
             [
@@ -65,6 +80,19 @@ class FakeBalanceService:
                 )
             ],
         )
+
+    def get_portfolio_views(self, wallet):
+        self.cached_accounts.add(wallet.address())
+        return self._portfolio()
+
+    def get_cached_portfolio_views(self, wallet):
+        self.cached_reads += 1
+        if wallet.address() not in self.cached_accounts:
+            return [], []
+        return self._portfolio()
+
+    def has_cached_account(self, wallet):
+        return wallet.address() in self.cached_accounts
 
 
 class FakeHistoryService:
@@ -149,6 +177,14 @@ class FakeRuntime:
             network="mainnet",
             make_default=False,
         )
+        self.adapters = {
+            "testnet": FakeAdapter({self.secret.public_key: True}),
+            "mainnet": FakeAdapter({self.watch.public_key: True}),
+        }
+        self.balance_services = {
+            network: FakeBalanceService(adapter)
+            for network, adapter in self.adapters.items()
+        }
         self.transfer_services = {
             "testnet": FakeTransferService("testnet"),
             "mainnet": FakeTransferService("mainnet"),
@@ -161,7 +197,7 @@ class FakeRuntime:
 
     def services_for(self, network):
         return SimpleNamespace(
-            balance_service=FakeBalanceService(),
+            balance_service=self.balance_services[network],
             history_service=self.history_services[network],
             transfer_service=self.transfer_services[network],
             testnet_service=self.testnet_service if network == "testnet" else None,
@@ -313,9 +349,17 @@ def test_locked_send_unlocks_first_and_wallet_remains_unlocked_after_submit():
     asyncio.run(scenario())
 
 
-def test_wallet_management_uses_list_selection_and_context_hierarchy():
+def test_wallet_management_keeps_selection_open_and_hides_unneeded_fund():
     async def scenario():
         runtime = FakeRuntime()
+        unfunded = Keypair.random()
+        runtime.wallet_manager.import_secret(
+            "unfunded",
+            unfunded.secret,
+            "pw",
+            network="testnet",
+            make_default=False,
+        )
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 46)) as pilot:
             await _settle(pilot, 8)
@@ -323,7 +367,18 @@ def test_wallet_management_uses_list_selection_and_context_hierarchy():
             assert isinstance(app.screen, WalletManagerDialog)
 
             table = app.screen.query_one("#wallet-list", DataTable)
-            assert table.row_count == 2
+            assert table.row_count == 3
+            assert app.screen.query_one("#library-section").parent.id == "secondary-sections"
+            assert app.screen.query_one("#danger-section").parent.id == "secondary-sections"
+
+            # Alpha was loaded successfully on mount, so Friendbot is irrelevant.
+            assert app.screen.query_one("#lock", Button).display
+            assert not app.screen.query_one("#fund", Button).display
+            assert "Testnet account exists" in str(
+                app.screen.query_one("#wallet-detail", Static).render()
+            )
+
+            # Moving previews beta; Enter selects it without closing management.
             table.move_cursor(row=1)
             await _settle(pilot)
             detail = str(app.screen.query_one("#wallet-detail", Static).render())
@@ -334,17 +389,37 @@ def test_wallet_management_uses_list_selection_and_context_hierarchy():
 
             await pilot.press("enter")
             await _settle(pilot, 8)
+            assert isinstance(app.screen, WalletManagerDialog)
             assert runtime.wallet_manager.get_record().name == "beta"
+            assert "Current wallet" in str(
+                app.screen.query_one("#wallet-detail", Static).render()
+            )
 
-            await pilot.press("w")
+            # Switching back to a wallet already visited uses the local cache first.
             table = app.screen.query_one("#wallet-list", DataTable)
             table.move_cursor(row=0)
-            await _settle(pilot)
-            assert app.screen.query_one("#lock", Button).display
+            await pilot.press("enter")
+            await _settle(pilot, 2)
+            assert isinstance(app.screen, WalletManagerDialog)
+            assert runtime.wallet_manager.get_record().name == "alpha"
+            assert runtime.balance_services["testnet"].cached_reads >= 1
+            assert not app.screen.query_one("#fund", Button).display
+
+            # A conclusively missing Testnet account is the only case that exposes Fund.
+            table.move_cursor(row=2)
+            await _settle(pilot, 8)
+            assert app.screen.query_one("#fund", Button).display
+            assert "not funded" in str(
+                app.screen.query_one("#wallet-detail", Static).render()
+            )
+            await pilot.press("enter")
+            await _settle(pilot, 4)
+            assert isinstance(app.screen, WalletManagerDialog)
+            assert runtime.wallet_manager.get_record().name == "unfunded"
             assert app.screen.query_one("#fund", Button).display
             await pilot.click("#fund")
             await _settle(pilot, 8)
-            assert runtime.testnet_service.funded == [runtime.secret.public_key]
+            assert runtime.testnet_service.funded == [unfunded.public_key]
 
             await pilot.press("w")
             table = app.screen.query_one("#wallet-list", DataTable)
@@ -354,7 +429,10 @@ def test_wallet_management_uses_list_selection_and_context_hierarchy():
             assert isinstance(app.screen, ConfirmDialog)
             await pilot.click("#confirm")
             await _settle(pilot, 6)
-            assert [record.name for record in runtime.wallet_manager.list_wallets()] == ["alpha"]
+            assert [record.name for record in runtime.wallet_manager.list_wallets()] == [
+                "alpha",
+                "unfunded",
+            ]
 
     asyncio.run(scenario())
 
