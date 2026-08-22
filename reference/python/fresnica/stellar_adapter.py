@@ -39,18 +39,39 @@ class StellarAdapter:
     def get_balances(self, address: str) -> list[dict]:
         return self.get_account(address).get("balances", [])
 
-    def get_operations(self, address: str, limit: int = 20) -> dict:
+    def get_operations(
+        self,
+        address: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        desc: bool = True,
+    ) -> dict:
         try:
-            return (
+            builder = (
                 self.server.operations()
                 .for_account(address)
-                .order(desc=True)
+                .order(desc=desc)
                 .limit(limit)
+            )
+            if cursor is not None:
+                builder = builder.cursor(cursor)
+            return builder.call()
+        except SdkError as exc:
+            raise NetworkError(
+                f"Unable to load operations for {address}",
+                details=_sdk_error_details(exc),
+            ) from exc
+
+    def get_liquidity_pool(self, liquidity_pool_id: str) -> dict:
+        try:
+            return (
+                self.server.liquidity_pools()
+                .liquidity_pool(liquidity_pool_id)
                 .call()
             )
         except SdkError as exc:
             raise NetworkError(
-                f"Unable to load operations for {address}",
+                f"Unable to load liquidity pool {liquidity_pool_id}",
                 details=_sdk_error_details(exc),
             ) from exc
 
@@ -209,6 +230,8 @@ class StellarAdapter:
     def to_sdk_asset(asset: Asset):
         if asset.is_native:
             return StellarAsset.native()
+        if asset.is_liquidity_pool:
+            raise ValueError("Liquidity pool shares are not payment assets")
         return StellarAsset(asset.code, asset.issuer)
 
 

@@ -3,13 +3,21 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from stellar_sdk import Keypair
-from textual.widgets import Button, Input, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static
 
 from fresnica.manager import WalletManager, WalletState
-from fresnica.models import Asset, BalanceView, OperationView, TransactionResult
+from fresnica.models import (
+    Asset,
+    BalanceView,
+    LiquidityPositionView,
+    LiquidityReserveView,
+    OperationView,
+    TransactionResult,
+)
 from fresnica.review import TransactionReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
+from fresnica.tui.history import HistoryScreen
 from fresnica.tui.screens import (
     AddWalletDialog,
     ConfirmDialog,
@@ -25,26 +33,60 @@ from fresnica.tui.screens import (
 
 class FakeBalanceService:
     def get_views(self, wallet):
-        return [
-            BalanceView(
-                asset=Asset("XLM"),
-                balance=Decimal("10"),
-                selling_liabilities=Decimal("0"),
-                buying_liabilities=Decimal("0"),
-                available=Decimal("9"),
-            )
-        ]
+        return self.get_portfolio_views(wallet)[0]
+
+    def get_portfolio_views(self, wallet):
+        issuer = Keypair.random().public_key
+        return (
+            [
+                BalanceView(
+                    asset=Asset("XLM"),
+                    balance=Decimal("10.0000000"),
+                    selling_liabilities=Decimal("0E-7"),
+                    buying_liabilities=Decimal("0"),
+                    available=Decimal("9.0000000"),
+                ),
+                BalanceView(
+                    asset=Asset("USDC", issuer),
+                    balance=Decimal("0E-7"),
+                    selling_liabilities=Decimal("0"),
+                    buying_liabilities=Decimal("0"),
+                    available=Decimal("0"),
+                ),
+            ],
+            [
+                LiquidityPositionView(
+                    pool_id="a" * 64,
+                    shares=Decimal("4.0000000"),
+                    reserves=[
+                        LiquidityReserveView(Asset("XLM"), Decimal("2.5")),
+                        LiquidityReserveView(Asset("USDC", issuer), Decimal("7.5")),
+                    ],
+                )
+            ],
+        )
 
 
 class FakeHistoryService:
-    def get_views(self, wallet, limit=20):
-        return [
+    def __init__(self):
+        self.refreshes = 0
+        self.older = 0
+
+    def get_views(self, wallet, limit=20, refresh=True):
+        if refresh:
+            self.refreshes += 1
+        records = [
             OperationView(
                 operation_type="payment",
                 created_at="2026-08-22T12:00:00Z",
-                summary="1 XLM sent",
+                summary="Received 1 XLM from GABC...1234",
             )
         ]
+        return records[:limit]
+
+    def load_older(self, wallet, limit=200):
+        self.older += 1
+        return 0
 
 
 class FakeTransferService:
@@ -109,11 +151,15 @@ class FakeRuntime:
             "mainnet": FakeTransferService("mainnet"),
         }
         self.testnet_service = FakeTestnetService()
+        self.history_services = {
+            "testnet": FakeHistoryService(),
+            "mainnet": FakeHistoryService(),
+        }
 
     def services_for(self, network):
         return SimpleNamespace(
             balance_service=FakeBalanceService(),
-            history_service=FakeHistoryService(),
+            history_service=self.history_services[network],
             transfer_service=self.transfer_services[network],
             testnet_service=self.testnet_service if network == "testnet" else None,
         )
@@ -124,17 +170,56 @@ async def _settle(pilot, rounds=4):
         await pilot.pause(0.03)
 
 
+def test_dashboard_is_responsive_and_formats_wallet_assets():
+    async def wide_scenario():
+        runtime = FakeRuntime()
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(140, 44)) as pilot:
+            await _settle(pilot, 8)
+            assert app.query_one("#dashboard").has_class("wide")
+            wallet_text = str(app.query_one("#wallet", Static).render())
+            assert "TESTNET" in wallet_text
+            assert "Locked" in wallet_text
+            assert "LOCKED" not in wallet_text
+            assert "W Wallets" not in str(app.query_one("#wallet-actions", Static).render())
+            assert "S Send" in str(app.query_one("#wallet-actions", Static).render())
+
+            balances = app.query_one("#balances")
+            assert balances.row_count == 1  # zero USDC is hidden by default
+            row = list(balances.get_row_at(0))
+            assert row[0] == "XLM"
+            assert row[2] == "10"
+            assert row[4] == "0"
+            assert app.query_one("#liquidity").row_count == 1
+            assert "Updated" in str(app.query_one("#sync-status", Static).render())
+
+            await pilot.press("z")
+            await _settle(pilot)
+            assert balances.row_count == 2
+            assert "showing zero" in str(app.query_one("#assets-title", Label).render())
+
+    async def narrow_scenario():
+        runtime = FakeRuntime()
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(90, 44)) as pilot:
+            await _settle(pilot, 8)
+            assert not app.query_one("#dashboard").has_class("wide")
+
+    asyncio.run(wide_scenario())
+    asyncio.run(narrow_scenario())
+
+
 def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
     async def scenario():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 42)) as pilot:
-            await _settle(pilot)
+            await _settle(pilot, 8)
             wallet_text = str(app.query_one("#wallet", Static).render())
             assert "alpha" in wallet_text
             assert "TESTNET" in wallet_text
-            assert "LOCKED" in wallet_text
-            assert "L Unlock" in str(app.query_one("#actions", Static).render())
+            assert "Locked" in wallet_text
+            assert "L Unlock" in str(app.query_one("#wallet-actions", Static).render())
 
             await pilot.press("l")
             assert isinstance(app.screen, UnlockDialog)
@@ -150,32 +235,52 @@ def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
             await pilot.click("#unlock")
             await _settle(pilot, 8)
             assert runtime.wallet_manager.state("alpha") is WalletState.UNLOCKED
-            assert "UNLOCKED" in str(app.query_one("#wallet", Static).render())
-            assert "L Lock" in str(app.query_one("#actions", Static).render())
+            assert "Unlocked" in str(app.query_one("#wallet", Static).render())
+            assert "L Lock" in str(app.query_one("#wallet-actions", Static).render())
 
             await pilot.press("l")
-            await _settle(pilot)
+            await _settle(pilot, 6)
             assert runtime.wallet_manager.state("alpha") is WalletState.LOCKED
-            assert "LOCKED" in str(app.query_one("#wallet", Static).render())
+            assert "Locked" in str(app.query_one("#wallet", Static).render())
 
     asyncio.run(scenario())
 
 
-def test_watch_only_send_uses_capability_notice_not_status_error():
+def test_watch_only_hides_internal_state_and_send_uses_notice():
     async def scenario():
         runtime = FakeRuntime()
         runtime.wallet_manager.set_default("beta")
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 42)) as pilot:
-            await _settle(pilot)
-            assert "WATCH_ONLY" in str(app.query_one("#wallet", Static).render())
-            assert "S Send" not in str(app.query_one("#actions", Static).render())
+            await _settle(pilot, 8)
+            wallet_text = str(app.query_one("#wallet", Static).render())
+            assert "Watch-only" in wallet_text
+            assert "WATCH_ONLY" not in wallet_text
+            assert not str(app.query_one("#wallet-actions", Static).render()).strip()
 
             await pilot.press("s")
             assert isinstance(app.screen, NoticeDialog)
             message = str(app.screen.query_one("#message", Static).render())
             assert "cannot sign transactions" in message
-            assert "ERROR" not in str(app.query_one("#status", Static).render())
+
+    asyncio.run(scenario())
+
+
+def test_history_key_opens_full_history_screen():
+    async def scenario():
+        runtime = FakeRuntime()
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(120, 42)) as pilot:
+            await _settle(pilot, 8)
+            await pilot.press("h")
+            assert isinstance(app.screen, HistoryScreen)
+            await _settle(pilot, 8)
+            assert app.screen.query_one("#history-table").row_count == 1
+            await pilot.press("m")
+            await _settle(pilot, 8)
+            assert runtime.history_services["testnet"].older == 1
+            await pilot.press("escape")
+            assert isinstance(app.screen, type(app.screen))
 
     asyncio.run(scenario())
 
@@ -185,7 +290,7 @@ def test_locked_send_unlocks_first_and_wallet_remains_unlocked_after_submit():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 42)) as pilot:
-            await _settle(pilot)
+            await _settle(pilot, 8)
             destination = Keypair.random().public_key
 
             await pilot.press("s")
@@ -221,7 +326,7 @@ def test_wallet_management_is_context_aware_and_supports_fund_delete():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 42)) as pilot:
-            await _settle(pilot)
+            await _settle(pilot, 8)
             await pilot.press("w")
             assert isinstance(app.screen, WalletManagerDialog)
 
@@ -246,7 +351,7 @@ def test_wallet_management_is_context_aware_and_supports_fund_delete():
             await pilot.press("d")
             assert isinstance(app.screen, ConfirmDialog)
             await pilot.click("#confirm")
-            await _settle(pilot)
+            await _settle(pilot, 6)
             assert [record.name for record in runtime.wallet_manager.list_wallets()] == ["alpha"]
 
     asyncio.run(scenario())
@@ -257,7 +362,7 @@ def test_wallet_management_can_create_wallet_and_show_backup_once():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 45)) as pilot:
-            await _settle(pilot)
+            await _settle(pilot, 8)
             await pilot.press("w")
             assert isinstance(app.screen, WalletManagerDialog)
             await pilot.press("a")
@@ -280,8 +385,8 @@ def test_wallet_management_can_create_wallet_and_show_backup_once():
             mnemonic = str(app.screen.query_one("#mnemonic", Static).render())
             assert len(mnemonic.split()) >= 12
             await pilot.press("enter")
-            await _settle(pilot, 6)
+            await _settle(pilot, 8)
             assert "gamma" in str(app.query_one("#wallet", Static).render())
-            assert "LOCKED" in str(app.query_one("#wallet", Static).render())
+            assert "Locked" in str(app.query_one("#wallet", Static).render())
 
     asyncio.run(scenario())

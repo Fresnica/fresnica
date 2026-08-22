@@ -15,14 +15,24 @@ from .errors import InvalidAssetError
 class Asset:
     code: str
     issuer: str | None = None
+    liquidity_pool_id: str | None = None
 
     @property
     def is_native(self) -> bool:
-        return self.code.upper() == "XLM" and self.issuer is None
+        return self.code.upper() == "XLM" and self.issuer is None and self.liquidity_pool_id is None
+
+    @property
+    def is_liquidity_pool(self) -> bool:
+        return self.liquidity_pool_id is not None
 
     @property
     def display(self) -> str:
-        return "XLM" if self.is_native else self.code
+        if self.is_native:
+            return "XLM"
+        if self.is_liquidity_pool:
+            pool_id = self.liquidity_pool_id or ""
+            return f"LP:{pool_id[:8]}" if pool_id else "LP"
+        return self.code
 
     @classmethod
     def parse(cls, value: str) -> "Asset":
@@ -42,6 +52,13 @@ class Asset:
             raise InvalidAssetError("Invalid asset. Expected CODE:ISSUER")
         return cls(code, issuer)
 
+    @classmethod
+    def from_horizon_string(cls, value: str) -> "Asset":
+        text = value.strip()
+        if text.lower() == "native" or text.upper() == "XLM":
+            return cls("XLM")
+        return cls.parse(text)
+
 
 @dataclass
 class BalanceView:
@@ -51,6 +68,21 @@ class BalanceView:
     buying_liabilities: Decimal = Decimal("0")
     available: Decimal | None = None
     raw: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LiquidityReserveView:
+    asset: Asset
+    amount: Decimal
+
+
+@dataclass
+class LiquidityPositionView:
+    pool_id: str
+    shares: Decimal
+    reserves: list[LiquidityReserveView] = field(default_factory=list)
+    raw: dict = field(default_factory=dict)
+    error: str | None = None
 
 
 @dataclass
