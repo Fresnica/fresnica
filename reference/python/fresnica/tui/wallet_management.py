@@ -14,7 +14,7 @@ from .screens import WalletAction
 
 class WalletManagerDialog(ModalScreen[WalletAction | None]):
     BINDINGS = [
-        Binding("escape", "cancel", "Close", show=False),
+        Binding("escape", "close", "Close", show=False),
         Binding("a", "add", "Add wallet", show=False),
         Binding("l", "toggle_lock", "Lock / Unlock", show=False),
         Binding("f", "fund", "Fund testnet", show=False),
@@ -52,6 +52,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
     ):
         super().__init__()
         self.records = list(records)
+        self.initial_name = current_name
         self.current_name = current_name
         self.states = dict(states)
         self.account_exists = dict(account_exists or {})
@@ -61,7 +62,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         with Vertical(id="dialog"):
             yield Label("Wallets")
             yield Static(
-                "Move to preview. Press Enter to make a wallet current; this window stays open.",
+                "Move to preview. Enter chooses the current wallet; Dashboard updates after Close.",
                 id="wallet-hint",
             )
             yield DataTable(id="wallet-list")
@@ -84,7 +85,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
                         yield Button("Remove wallet", id="delete", variant="error")
 
             with Horizontal(id="close-actions", classes="action-row"):
-                yield Button("Close", id="cancel")
+                yield Button("Close", id="close")
 
     def on_mount(self) -> None:
         table = self.query_one("#wallet-list", DataTable)
@@ -153,7 +154,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
             elif exists is False:
                 lines.append("Testnet account is not funded")
             else:
-                lines.append("Checking testnet account...")
+                lines.append("Testnet account status not cached")
         self.query_one("#wallet-detail", Static).update("\n".join(lines))
 
         lock = self.query_one("#lock", Button)
@@ -163,16 +164,14 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         fund = self.query_one("#fund", Button)
         fund.display = (
             record.network == "testnet"
-            and self.account_exists.get(record.name) is False
+            and self.account_exists.get(record.name) is not True
         )
 
-    def set_account_exists(self, wallet_name: str, exists: bool) -> None:
-        self.account_exists[wallet_name] = exists
-        if self._selected_record().name == wallet_name:
-            self._refresh_selection()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+    def action_close(self) -> None:
+        if self.current_name != self.initial_name and self.current_name is not None:
+            self.dismiss(WalletAction("use", self.current_name))
+        else:
+            self.dismiss(None)
 
     def action_add(self) -> None:
         self.dismiss(WalletAction("add"))
@@ -190,7 +189,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         record = self._selected_record()
         if (
             record.network == "testnet"
-            and self.account_exists.get(record.name) is False
+            and self.account_exists.get(record.name) is not True
         ):
             self.dismiss(WalletAction("fund", record.name))
 
@@ -199,7 +198,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
-            "cancel": self.action_cancel,
+            "close": self.action_close,
             "add": self.action_add,
             "lock": self.action_toggle_lock,
             "fund": self.action_fund,
