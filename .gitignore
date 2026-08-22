@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Local Fresnica runtime data
+.fresnica/
+*.sqlite3-shm
+*.sqlite3-wal
