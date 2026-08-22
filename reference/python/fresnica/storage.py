@@ -1,48 +1,176 @@
-"""Fresnica wallet storage abstraction.
+"""Wallet metadata persistence.
 
-Storage manages wallet persistence metadata.
-It intentionally does not define encryption yet.
-Encryption will be added after the wallet model stabilizes.
+Public metadata (name, address, network) stays readable. Sensitive mnemonic or
+secret-key material is stored only as an authenticated encrypted envelope.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
+import hashlib
+import json
+import os
+from pathlib import Path
+
+from .errors import WalletExistsError, WalletNotFoundError
 
 
 @dataclass
 class WalletRecord:
-    """Persisted wallet metadata."""
-
     name: str
     address: str
     wallet_type: str
+    network: str = "mainnet"
+    secret: dict | None = None
     metadata: dict = field(default_factory=dict)
 
+    @property
+    def watch_only(self) -> bool:
+        return self.wallet_type == "watch-only"
 
-class WalletStorage:
-    """Abstract wallet storage interface."""
+    @property
+    def locked(self) -> bool:
+        return self.secret is not None
 
-    def save(self, wallet: WalletRecord):
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WalletRecord":
+        return cls(
+            name=data["name"],
+            address=data["address"],
+            wallet_type=data["wallet_type"],
+            network=data.get("network", "mainnet"),
+            secret=data.get("secret"),
+            metadata=data.get("metadata") or {},
+        )
+
+
+class WalletStorage(ABC):
+    @abstractmethod
+    def save(self, wallet: WalletRecord, overwrite: bool = False):
         raise NotImplementedError
 
-    def load(self, name: str) -> Optional[WalletRecord]:
+    @abstractmethod
+    def load(self, name: str) -> WalletRecord:
         raise NotImplementedError
 
-    def list(self):
+    @abstractmethod
+    def list(self) -> list[WalletRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, name: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_default(self) -> str | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_default(self, name: str) -> None:
         raise NotImplementedError
 
 
 class MemoryWalletStorage(WalletStorage):
-    """In-memory storage for reference implementation and tests."""
-
     def __init__(self):
-        self._wallets = {}
+        self._wallets: dict[str, WalletRecord] = {}
+        self._default: str | None = None
 
-    def save(self, wallet: WalletRecord):
+    def save(self, wallet: WalletRecord, overwrite: bool = False):
+        if wallet.name in self._wallets and not overwrite:
+            raise WalletExistsError(f"Wallet already exists: {wallet.name}")
         self._wallets[wallet.name] = wallet
 
-    def load(self, name: str):
-        return self._wallets.get(name)
+    def load(self, name: str) -> WalletRecord:
+        try:
+            return self._wallets[name]
+        except KeyError as exc:
+            raise WalletNotFoundError(f"Wallet not found: {name}") from exc
 
-    def list(self):
-        return list(self._wallets.values())
+    def list(self) -> list[WalletRecord]:
+        return sorted(self._wallets.values(), key=lambda item: item.name.lower())
+
+    def delete(self, name: str) -> None:
+        if name not in self._wallets:
+            raise WalletNotFoundError(f"Wallet not found: {name}")
+        del self._wallets[name]
+        if self._default == name:
+            self._default = None
+
+    def get_default(self) -> str | None:
+        return self._default
+
+    def set_default(self, name: str) -> None:
+        self.load(name)
+        self._default = name
+
+
+class FileWalletStorage(WalletStorage):
+    """One JSON file per wallet plus a tiny default-wallet pointer."""
+
+    def __init__(self, directory: str | Path):
+        self.directory = Path(directory).expanduser()
+        self.directory.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self.directory, 0o700)
+        except OSError:
+            pass
+        self._default_path = self.directory / ".default"
+
+    def _path(self, name: str) -> Path:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
+        return self.directory / f"{digest}.wallet.json"
+
+    def _atomic_write(self, path: Path, text: str) -> None:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(text, encoding="utf-8")
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        os.replace(temporary, path)
+
+    def save(self, wallet: WalletRecord, overwrite: bool = False):
+        path = self._path(wallet.name)
+        if path.exists() and not overwrite:
+            raise WalletExistsError(f"Wallet already exists: {wallet.name}")
+        self._atomic_write(
+            path,
+            json.dumps(wallet.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        )
+
+    def load(self, name: str) -> WalletRecord:
+        path = self._path(name)
+        if not path.exists():
+            raise WalletNotFoundError(f"Wallet not found: {name}")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        record = WalletRecord.from_dict(data)
+        if record.name != name:
+            raise WalletNotFoundError(f"Wallet not found: {name}")
+        return record
+
+    def list(self) -> list[WalletRecord]:
+        records = []
+        for path in self.directory.glob("*.wallet.json"):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            records.append(WalletRecord.from_dict(data))
+        return sorted(records, key=lambda item: item.name.lower())
+
+    def delete(self, name: str) -> None:
+        path = self._path(name)
+        if not path.exists():
+            raise WalletNotFoundError(f"Wallet not found: {name}")
+        path.unlink()
+        if self.get_default() == name:
+            self._default_path.unlink(missing_ok=True)
+
+    def get_default(self) -> str | None:
+        if not self._default_path.exists():
+            return None
+        value = self._default_path.read_text(encoding="utf-8").strip()
+        return value or None
+
+    def set_default(self, name: str) -> None:
+        self.load(name)
+        self._atomic_write(self._default_path, name + "\n")
