@@ -1,33 +1,27 @@
-"""Fresnica wallet model.
+"""Fresnica wallet identity model.
 
-Wallet manages accounts and optional signers.
-
-Account represents identity.
-Signer represents ownership proof.
-A wallet without a signer is watch-only.
+Wallet represents an account plus optional signing capability. Network state,
+balances, transaction history, and persistence live outside this object.
 """
 
 from dataclasses import dataclass
 
 from stellar_sdk import Keypair
 
+from .errors import WatchOnlyError
 from .hdwallet import derive_account
-from .signer import StellarKeypairSigner
+from .signer import Signer, StellarKeypairSigner
 
 
-@dataclass
+@dataclass(frozen=True)
 class Account:
-    """A Stellar account identity."""
-
     index: int
     address: str
     public_key: str
 
 
 class Wallet:
-    """Stellar wallet abstraction."""
-
-    def __init__(self, account: Account, signer=None):
+    def __init__(self, account: Account, signer: Signer | None = None):
         self._account = account
         self.signer = signer
 
@@ -37,27 +31,31 @@ class Wallet:
         mnemonic: str,
         passphrase: str = "",
         index: int = 0,
-    ):
-        keypair = derive_account(mnemonic, passphrase, index)
-        return cls(
-            Account(index, keypair.public_key, keypair.public_key),
-            StellarKeypairSigner(keypair),
+        language=None,
+    ) -> "Wallet":
+        keypair = derive_account(
+            mnemonic,
+            passphrase=passphrase,
+            index=index,
+            language=language,
         )
+        account = Account(index, keypair.public_key, keypair.public_key)
+        return cls(account, StellarKeypairSigner(keypair))
 
     @classmethod
-    def from_secret(cls, secret: str):
-        keypair = Keypair.from_secret(secret)
-        return cls(
-            Account(0, keypair.public_key, keypair.public_key),
-            StellarKeypairSigner(keypair),
-        )
+    def from_secret(cls, secret: str) -> "Wallet":
+        keypair = Keypair.from_secret(secret.strip())
+        account = Account(0, keypair.public_key, keypair.public_key)
+        return cls(account, StellarKeypairSigner(keypair))
 
     @classmethod
-    def from_address(cls, address: str):
-        return cls(
-            Account(0, address, address),
-            None,
-        )
+    def from_address(cls, address: str) -> "Wallet":
+        # Let the Stellar SDK validate the public key instead of duplicating StrKey logic.
+        keypair = Keypair.from_public_key(address.strip())
+        account = Account(0, keypair.public_key, keypair.public_key)
+        return cls(account)
+
+    from_public_key = from_address
 
     def account(self) -> Account:
         return self._account
@@ -69,6 +67,6 @@ class Wallet:
         return self.signer is not None
 
     def sign(self, transaction):
-        if not self.signer:
-            raise RuntimeError("Watch-only wallet cannot sign")
+        if self.signer is None:
+            raise WatchOnlyError("Watch-only wallet cannot sign transactions")
         return self.signer.sign(transaction)
