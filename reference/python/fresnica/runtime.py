@@ -39,28 +39,37 @@ class Runtime:
         self.wallet_storage = wallet_storage or FileWalletStorage(self.home / "wallets")
         self.datastore = datastore or SQLiteDataStore(self.home / "chain-data.sqlite3")
         self.wallet_manager = WalletManager(self.wallet_storage)
-        self._services = {}
+        self._services: dict[str, NetworkServices] = {}
 
     def services_for(self, network_name: str) -> NetworkServices:
         network = get_network(network_name)
         if network.name not in self._services:
             adapter = StellarAdapter(network)
+            balance_service = BalanceService(adapter, self.datastore, network.name)
+            history_service = HistoryService(adapter, self.datastore, network.name)
+            builder_service = TransactionBuilderService(adapter)
+            submit_service = SubmitService(adapter)
+            transaction_service = TransactionService(submit_service)
+
             services = NetworkServices(
                 adapter=adapter,
-                balance_service=BalanceService(adapter, self.datastore, network.name),
-                history_service=HistoryService(adapter, self.datastore, network.name),
-                transaction_builder=TransactionBuilderService(adapter),
-                submit_service=SubmitService(adapter),
-                transaction_service=TransactionService(SubmitService(adapter)),
+                balance_service=balance_service,
+                history_service=history_service,
+                transaction_builder=builder_service,
+                submit_service=submit_service,
+                transaction_service=transaction_service,
                 transfer_service=TransferService(
-                    BalanceService(adapter, self.datastore, network.name),
-                    TransactionBuilderService(adapter),
-                    TransactionService(SubmitService(adapter)),
+                    balance_service,
+                    builder_service,
+                    transaction_service,
                 ),
             )
+
             if network.name == "testnet":
                 services.testnet_service = TestnetService(adapter)
+
             self._services[network.name] = services
+
         return self._services[network.name]
 
     @property
