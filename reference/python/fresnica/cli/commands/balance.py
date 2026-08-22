@@ -1,22 +1,20 @@
 """Balance command."""
 
+from ..context import require_wallet_network
+
 
 def execute_balance(runtime, args, renderer):
     session = runtime.wallet_manager.view(args.wallet)
-    services = runtime.services_for(session.record.network)
+    require_wallet_network(session.record, runtime.network)
+    services = runtime.services_for()
     if args.cached:
-        raw = runtime.datastore.get_balances(
-            session.record.network,
-            session.record.address,
-        )
-        # Cached rows intentionally remain raw; reserve-aware available XLM
-        # requires fresh account-level reserve fields.
+        raw = runtime.datastore.get_balances(runtime.network, session.record.address)
         if args.as_json:
             renderer.console.print_json(
                 data={
                     "wallet": session.record.name,
                     "address": session.record.address,
-                    "network": session.record.network,
+                    "network": runtime.network,
                     "balances": raw,
                     "cached": True,
                 }

@@ -20,7 +20,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         return manager.get_record(args.name)
 
     if command == "watch":
-        record = manager.add_watch(args.name, args.address, network=args.network)
+        record = manager.add_watch(args.name, args.address, network=runtime.network)
         renderer.success(f'Added watch-only wallet "{record.name}"')
         return record
 
@@ -31,7 +31,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
             args.name,
             secret,
             password,
-            network=args.network,
+            network=runtime.network,
         )
         renderer.success(f'Imported wallet "{record.name}"')
         return record
@@ -49,7 +49,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
             mnemonic_passphrase=mnemonic_passphrase,
             index=args.index,
             language=args.language,
-            network=args.network,
+            network=runtime.network,
         )
         renderer.success(f'Imported wallet "{record.name}"')
         return record
@@ -70,10 +70,15 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
             mnemonic_passphrase=mnemonic_passphrase,
             index=args.index,
             language=args.language,
-            network=args.network,
+            network=runtime.network,
         )
         renderer.render_created_mnemonic(record, mnemonic)
         return record
+
+    if command == "fund":
+        from .fund import execute_fund
+
+        return execute_fund(runtime, args, renderer)
 
     if command == "delete":
         answer = input_fn(

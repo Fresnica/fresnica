@@ -2,7 +2,6 @@
 
 import argparse
 
-
 LANGUAGES = (
     "english",
     "chinese_simplified",
@@ -13,6 +12,7 @@ LANGUAGES = (
     "french",
     "italian",
 )
+NETWORKS = ("mainnet", "testnet")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,8 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--network",
         default="mainnet",
-        choices=("mainnet", "testnet"),
-        help="Stellar network context",
+        choices=NETWORKS,
+        help="Stellar network context for this invocation",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -49,7 +49,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     wallet = sub.add_parser("wallet", help="Manage wallets")
     wallet_sub = wallet.add_subparsers(dest="wallet_command", required=True)
-
     wallet_sub.add_parser("list", help="List wallets")
 
     use = wallet_sub.add_parser("use", help="Select default wallet")
@@ -58,21 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
     watch = wallet_sub.add_parser("watch", help="Add a watch-only wallet")
     watch.add_argument("name")
     watch.add_argument("address")
-    watch.add_argument("--network", default="mainnet", choices=("mainnet", "testnet"))
 
     secret = wallet_sub.add_parser("import-secret", help="Import an S... secret")
     secret.add_argument("name")
-    secret.add_argument("--network", default="mainnet", choices=("mainnet", "testnet"))
 
     mnemonic = wallet_sub.add_parser("import-mnemonic", help="Import a mnemonic")
     mnemonic.add_argument("name")
-    mnemonic.add_argument("--network", default="mainnet", choices=("mainnet", "testnet"))
     mnemonic.add_argument("--index", type=int, default=0)
     mnemonic.add_argument("--language", choices=LANGUAGES)
 
     create = wallet_sub.add_parser("create", help="Create a new mnemonic wallet")
     create.add_argument("name")
-    create.add_argument("--network", default="mainnet", choices=("mainnet", "testnet"))
     create.add_argument("--index", type=int, default=0)
     create.add_argument("--language", default="english", choices=LANGUAGES)
     create.add_argument(
@@ -82,9 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(128, 160, 192, 224, 256),
     )
 
+    fund = wallet_sub.add_parser("fund", help="Fund a testnet wallet with Friendbot")
+    fund.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+
     delete = wallet_sub.add_parser("delete", help="Delete a wallet")
     delete.add_argument("name")
-
     return parser
 
 
@@ -93,7 +90,6 @@ def parse_args(argv=None):
 
 
 def parse_command(args):
-    """Compatibility helper retained for early reference tests."""
     if not args:
         return {"command": "tui"}
     return {"command": args[0], "args": args[1:]}

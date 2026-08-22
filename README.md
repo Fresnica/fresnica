@@ -21,19 +21,41 @@ cd reference/python
 python -m pip install -e ".[dev]"
 ```
 
-Run the interactive TUI:
+Run the interactive TUI on the default mainnet context:
 
 ```bash
 fresnica
 ```
 
-Or use one-shot command mode:
+A network can be selected for the whole invocation. Put the global option
+before the command:
 
 ```bash
-fresnica wallet create main
+fresnica --network testnet balance
+```
+
+### Testnet smoke flow
+
+Create a disposable testnet wallet, fund it with Stellar Friendbot, inspect the
+balance, then send a payment:
+
+```bash
+fresnica --network testnet wallet create testnet-demo
+fresnica --network testnet wallet fund
+fresnica --network testnet balance
+fresnica --network testnet send 1 XLM to GDESTINATION...
+```
+
+`wallet create` displays the generated mnemonic once and stores only encrypted
+signing material. `wallet fund` is rejected outside testnet. Balance, history,
+and send commands also verify that the selected runtime network matches the
+wallet record, preventing accidental cross-network use.
+
+Other one-shot commands:
+
+```bash
 fresnica wallet watch observer G...
 fresnica wallet list
-fresnica balance
 fresnica history
 fresnica send 100 XLM to G...
 fresnica send 25 USDC:GISSUER... to G...
@@ -41,7 +63,8 @@ fresnica send 25 USDC:GISSUER... to G...
 
 Sensitive mnemonic/secret material is encrypted at rest. Public metadata such
 as wallet name, address, and network remains readable. Chain-derived data is
-kept separately in a SQLite cache.
+kept separately in a SQLite cache. One-shot send commands release the unlocked
+signer before returning.
 
 ## Current architecture
 
