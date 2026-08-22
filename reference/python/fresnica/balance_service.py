@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from .availability import AvailabilityService
 from .errors import FresnicaError
-from .models import Asset, LiquidityPositionView, LiquidityReserveView
+from .models import Asset, BalanceView, LiquidityPositionView, LiquidityReserveView
 
 
 class BalanceService:
@@ -35,14 +35,42 @@ class BalanceService:
 
     def get_views(self, wallet):
         account = self.get_account(wallet, refresh=True)
-        return self._views_for_account(account)
+        views = self._views_for_account(account)
+        self._cache_views(wallet.address(), account, views)
+        return views
 
     def get_portfolio_views(self, wallet):
         account = self.get_account(wallet, refresh=True)
         views = self._views_for_account(account)
+        self._cache_views(wallet.address(), account, views)
         balances = [item for item in views if not item.asset.is_liquidity_pool]
         positions = [
-            self._liquidity_position(item)
+            self._liquidity_position(item, refresh=True)
+            for item in views
+            if item.asset.is_liquidity_pool and item.balance > 0
+        ]
+        return balances, positions
+
+    def has_cached_account(self, wallet) -> bool:
+        """Return true only when a prior successful account load is cached."""
+        return bool(
+            self.datastore.get_balances(self.network_name, wallet.address())
+        )
+
+    def get_cached_portfolio_views(self, wallet):
+        """Build a portfolio only from local cache; never touch Horizon."""
+        raw_balances = self.datastore.get_balances(
+            self.network_name,
+            wallet.address(),
+        )
+        if not raw_balances:
+            return [], []
+
+        views = [_cached_balance_view(item) for item in raw_balances]
+        views.sort(key=_balance_sort_key)
+        balances = [item for item in views if not item.asset.is_liquidity_pool]
+        positions = [
+            self._liquidity_position(item, refresh=False)
             for item in views
             if item.asset.is_liquidity_pool and item.balance > 0
         ]
@@ -53,7 +81,28 @@ class BalanceService:
         views = self.availability.balance_views(account, base_reserve)
         return sorted(views, key=_balance_sort_key)
 
-    def _liquidity_position(self, balance_view) -> LiquidityPositionView:
+    def _cache_views(self, address: str, account: dict, views: list[BalanceView]) -> None:
+        """Persist presentation-safe availability alongside raw balance rows.
+
+        Issued-asset availability can always be recomputed from a Horizon balance
+        row. Native availability additionally depends on account reserve metadata,
+        so the last computed value is retained for instant cached presentation.
+        """
+        by_key = {_view_key(view): view for view in views}
+        cached = []
+        for raw in account.get("balances", []):
+            item = dict(raw)
+            view = by_key.get(_raw_balance_key(raw))
+            if view is not None and view.available is not None:
+                item["_fresnica_available"] = str(view.available)
+            cached.append(item)
+        self.datastore.save_balances(self.network_name, address, cached)
+
+    def _liquidity_position(
+        self,
+        balance_view,
+        refresh: bool = True,
+    ) -> LiquidityPositionView:
         pool_id = balance_view.asset.liquidity_pool_id or ""
         shares = balance_view.balance
         if not pool_id:
@@ -66,18 +115,25 @@ class BalanceService:
 
         pool = None
         lookup_error = None
-        try:
-            pool = self.adapter.get_liquidity_pool(pool_id)
-            self.datastore.save_liquidity_pool(self.network_name, pool_id, pool)
-        except (FresnicaError, ValueError, ArithmeticError) as exc:
-            lookup_error = exc
+        if refresh:
+            try:
+                pool = self.adapter.get_liquidity_pool(pool_id)
+                self.datastore.save_liquidity_pool(self.network_name, pool_id, pool)
+            except (FresnicaError, ValueError, ArithmeticError) as exc:
+                lookup_error = exc
+                pool = self.datastore.get_liquidity_pool(self.network_name, pool_id)
+        else:
             pool = self.datastore.get_liquidity_pool(self.network_name, pool_id)
 
         if pool is None:
             return LiquidityPositionView(
                 pool_id=pool_id,
                 shares=shares,
-                error=str(lookup_error) if lookup_error is not None else "Liquidity pool details unavailable",
+                error=(
+                    str(lookup_error)
+                    if lookup_error is not None
+                    else "Liquidity pool details not cached yet"
+                ),
                 raw=balance_view.raw,
             )
 
@@ -102,6 +158,58 @@ class BalanceService:
                 error=str(exc),
                 raw=pool,
             )
+
+
+def _cached_balance_view(raw: dict) -> BalanceView:
+    asset_type = raw.get("asset_type")
+    if asset_type == "native":
+        asset = Asset("XLM")
+    elif asset_type == "liquidity_pool_shares":
+        asset = Asset("LP", liquidity_pool_id=raw.get("liquidity_pool_id"))
+    else:
+        asset = Asset(raw.get("asset_code", ""), raw.get("asset_issuer"))
+
+    balance = Decimal(str(raw.get("balance", "0")))
+    selling = Decimal(str(raw.get("selling_liabilities", "0")))
+    buying = Decimal(str(raw.get("buying_liabilities", "0")))
+    cached_available = raw.get("_fresnica_available")
+    if cached_available is not None:
+        available = Decimal(str(cached_available))
+    elif asset.is_liquidity_pool:
+        available = balance
+    elif asset.is_native:
+        # Never overstate spendable XLM when an older cache predates the stored
+        # reserve-aware availability value. The background refresh fills it in.
+        available = None
+    else:
+        available = max(balance - selling, Decimal("0"))
+
+    return BalanceView(
+        asset=asset,
+        balance=balance,
+        selling_liabilities=selling,
+        buying_liabilities=buying,
+        available=available,
+        raw=raw,
+    )
+
+
+def _raw_balance_key(raw: dict):
+    asset_type = raw.get("asset_type")
+    if asset_type == "native":
+        return ("native", "", "")
+    if asset_type == "liquidity_pool_shares":
+        return ("pool", raw.get("liquidity_pool_id") or "", "")
+    return ("asset", raw.get("asset_code") or "", raw.get("asset_issuer") or "")
+
+
+def _view_key(view: BalanceView):
+    asset = view.asset
+    if asset.is_native:
+        return ("native", "", "")
+    if asset.is_liquidity_pool:
+        return ("pool", asset.liquidity_pool_id or "", "")
+    return ("asset", asset.code, asset.issuer or "")
 
 
 def _balance_sort_key(item):
