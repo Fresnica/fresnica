@@ -1,19 +1,35 @@
-"""Fresnica error definitions.
-
-Errors are separated from Stellar SDK errors so higher layers do not
-need to depend directly on SDK exception types.
-"""
+"""Fresnica domain errors."""
 
 
 class FresnicaError(Exception):
-    pass
+    """Base error for user-facing Fresnica failures."""
 
 
 class WalletError(FresnicaError):
     pass
 
 
+class WalletNotFoundError(WalletError):
+    pass
+
+
+class WalletExistsError(WalletError):
+    pass
+
+
+class WalletLockedError(WalletError):
+    pass
+
+
+class InvalidPasswordError(WalletError):
+    pass
+
+
 class SignerError(FresnicaError):
+    pass
+
+
+class WatchOnlyError(SignerError):
     pass
 
 
@@ -22,4 +38,26 @@ class NetworkError(FresnicaError):
 
 
 class TransactionError(FresnicaError):
+    pass
+
+
+class InvalidAmountError(TransactionError):
+    pass
+
+
+class InvalidAssetError(TransactionError):
+    pass
+
+
+class InsufficientBalanceError(TransactionError):
+    def __init__(self, asset: str, requested, available):
+        self.asset = asset
+        self.requested = requested
+        self.available = available
+        super().__init__(
+            f"Insufficient {asset} balance: requested {requested}, available {available}"
+        )
+
+
+class UserCancelled(FresnicaError):
     pass
