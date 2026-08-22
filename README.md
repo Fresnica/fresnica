@@ -76,22 +76,38 @@ Assets are presented as holdings rather than raw Horizon balances. XLM is always
 first. Issued assets include issuer/source identity so two assets with the same
 code remain distinguishable. Amounts are normalized for humans (`0E-7` -> `0`),
 and the selling-liability column is labelled `In offers`. Zero-balance
-trustlines are hidden by default and can be toggled with `Z`.
+trustlines are hidden by default and can be toggled with `Z`; this preference is
+persisted in local settings and restored on the next TUI launch.
 
 Liquidity-pool shares are not shown as anonymous normal assets. Fresnica resolves
 the pool and displays a separate liquidity position with pool assets, share
-balance, and the underlying reserve amounts represented by those shares.
+balance, and the underlying reserve amounts represented by those shares. Pool
+details are cached locally so a previously resolved position can still be
+organized when the pool-detail endpoint is temporarily unavailable.
 
-`H` opens a dedicated History view backed by the local operation cache. Initial
+`H` opens a dedicated Activity view backed by the local operation cache. Initial
 sync stores up to 200 recent operations; later refreshes request newer operations
-from the latest local cursor, while `M` in History loads an older page. Activity
-summaries are written from the current account's point of view, for example
-`Sent`, `Received`, `Sell offer`, `Added liquidity`, or `Removed trustline`.
+from the latest local cursor, while `M` in Activity loads an older page. Fresnica
+groups operations sharing a transaction hash into one user-facing activity while
+retaining the underlying operations. Summaries are written from the current
+account's point of view, for example `Sent`, `Received`, `Sell offer`,
+`Added liquidity`, or `Removed trustline`.
 
-`w` opens Wallet Management. From there the TUI can use, create, import, unlock,
-lock, testnet-fund, or delete wallets. Add Wallet contains the same lifecycle
-choices as the CLI: create mnemonic, import secret, import mnemonic, or import
-watch-only.
+`W` opens Wallet Management as a visible wallet list. Moving through the list
+previews a wallet; `Enter` makes the highlighted wallet current, so there is no
+separate Use button or shortcut. Actions are organized by meaning rather than
+shown as one flat toolbar:
+
+```text
+Wallet actions   Lock / Unlock; Fund on testnet when applicable
+Wallet library   Add wallet
+Danger zone      Remove wallet
+```
+
+Watch-only wallets do not expose lock/unlock controls, and Friendbot funding is
+hidden unless the highlighted wallet belongs to Testnet. Add Wallet contains the
+same lifecycle choices as the CLI: create mnemonic, import secret, import
+mnemonic, or import watch-only.
 
 Expected capability restrictions are shown as modal notices rather than being
 written into the main status line. Form validation remains next to the field,
@@ -125,7 +141,8 @@ Fresnica stores local state under `~/.fresnica` by default. Set
 ```text
 ~/.fresnica/
   wallets/             public wallet metadata + encrypted signing material
-  chain-data.sqlite3   balances, history, offers, trades, and aggregations cache
+  chain-data.sqlite3   balances, activity, LP metadata, offers, trades, aggregations
+  settings.json        local UI preferences such as zero-balance visibility
 ```
 
 Watch-only wallets contain only public metadata such as name, G-address,
@@ -157,7 +174,7 @@ mnemonic creation logic in the presentation layer.
 
 CLI balance/history presentation consumes the same portfolio/activity semantics
 as the TUI: issuer/source identity, human amount formatting, `Available`,
-`In offers`, and human-readable activity summaries.
+`In offers`, transaction-level activity grouping, and human-readable summaries.
 
 ### Testnet smoke flow
 
