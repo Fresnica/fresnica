@@ -16,22 +16,31 @@ signing primitives, and Horizon access.
 
 ## Python reference
 
+The reference implementation uses [uv](https://docs.astral.sh/uv/) for Python,
+dependency, environment, and lockfile management.
+
 ```bash
 cd reference/python
-python -m pip install -e ".[dev]"
+uv sync --locked
 ```
 
 Run the interactive TUI on the default mainnet context:
 
 ```bash
-fresnica
+uv run fresnica
 ```
 
 A network can be selected for the whole invocation. Put the global option
 before the command:
 
 ```bash
-fresnica --network testnet balance
+uv run fresnica --network testnet balance
+```
+
+Run tests with the locked environment:
+
+```bash
+uv run pytest -q
 ```
 
 ### Testnet smoke flow
@@ -40,10 +49,10 @@ Create a disposable testnet wallet, fund it with Stellar Friendbot, inspect the
 balance, then send a payment:
 
 ```bash
-fresnica --network testnet wallet create testnet-demo
-fresnica --network testnet wallet fund
-fresnica --network testnet balance
-fresnica --network testnet send 1 XLM to GDESTINATION...
+uv run fresnica --network testnet wallet create testnet-demo
+uv run fresnica --network testnet wallet fund
+uv run fresnica --network testnet balance
+uv run fresnica --network testnet send 1 XLM to GDESTINATION...
 ```
 
 `wallet create` displays the generated mnemonic once and stores only encrypted
@@ -54,11 +63,11 @@ wallet record, preventing accidental cross-network use.
 Other one-shot commands:
 
 ```bash
-fresnica wallet watch observer G...
-fresnica wallet list
-fresnica history
-fresnica send 100 XLM to G...
-fresnica send 25 USDC:GISSUER... to G...
+uv run fresnica wallet watch observer G...
+uv run fresnica wallet list
+uv run fresnica history
+uv run fresnica send 100 XLM to G...
+uv run fresnica send 25 USDC:GISSUER... to G...
 ```
 
 Sensitive mnemonic/secret material is encrypted at rest. Public metadata such
