@@ -53,7 +53,7 @@ def main(argv=None, runtime=None) -> int:
         renderer.error(str(exc))
         return 2
     except (FresnicaError, ValueError) as exc:
-        renderer.error(str(exc))
+        renderer.error(str(exc), getattr(exc, "details", None))
         return 1
 
 
