@@ -24,13 +24,27 @@ cd reference/python
 uv sync --locked
 ```
 
-Run the interactive TUI on the default mainnet context:
+Run the interactive TUI:
 
 ```bash
 uv run fresnica
 ```
 
-A network can be selected for the whole invocation. Put the global option
+TUI keys:
+
+```text
+r  refresh balances and recent activity
+w  switch the default wallet
+h  refresh recent activity
+s  send a payment
+q  quit
+```
+
+The TUI follows the selected wallet's stored network. Sending opens a password
+prompt, then a transaction review, then submits only after confirmation. Signing
+material is released again after submission or cancellation.
+
+A network can be selected for a one-shot CLI invocation. Put the global option
 before the command:
 
 ```bash
@@ -60,6 +74,38 @@ signing material. `wallet fund` is rejected outside testnet. Balance, history,
 and send commands also verify that the selected runtime network matches the
 wallet record, preventing accidental cross-network use.
 
+If an XLM destination does not exist, `send` reviews and submits a Stellar
+`CreateAccount` operation instead of a `Payment`. Issued assets still require an
+existing destination account and trustline.
+
+### Read-only SDEX
+
+The current SDEX milestone is intentionally read-only. Asset syntax is `XLM` or
+`CODE:GISSUER...`.
+
+```bash
+# Selling XLM, buying USDC
+uv run fresnica --network mainnet dex orderbook XLM USDC:GISSUER...
+
+# Offers owned by the selected wallet
+uv run fresnica --network mainnet dex offers --limit 20
+
+# Recent trades for an explicitly oriented pair
+uv run fresnica --network mainnet dex trades XLM USDC:GISSUER... --limit 20
+
+# Horizon trade aggregations / candles
+uv run fresnica --network mainnet dex candles XLM USDC:GISSUER... \
+  --resolution 1h --limit 24
+```
+
+Supported aggregation resolutions are `1m`, `5m`, `15m`, `1h`, `1d`, and `1w`.
+Offers, trades, and trade aggregations retain their raw Horizon JSON in the local
+SQLite cache while indexing fields useful for wallet and market views.
+
+Manage-offer and cancel-offer write operations are deliberately deferred until
+the read path is stable; they will reuse the existing review/sign/submit
+pipeline rather than introducing a separate signing path.
+
 Other one-shot commands:
 
 ```bash
@@ -85,13 +131,15 @@ CLI (Rich) / TUI (Textual)
    +------+-------+
    |              |
 WalletManager   Services
-   |              |
-WalletStorage  DataStore
-                  |
-             StellarAdapter
-                  |
-              stellar-sdk
+   |          /    |      \
+WalletStorage Balance History  DEX
+               \    |      /
+                 DataStore
+                    |
+               StellarAdapter
+                    |
+                stellar-sdk
 ```
 
 `Wallet` represents identity plus optional signing capability. A watch-only
-wallet therefore uses the same balance/history services but cannot sign.
+wallet therefore uses the same balance/history/market services but cannot sign.

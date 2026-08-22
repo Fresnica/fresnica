@@ -13,6 +13,7 @@ LANGUAGES = (
     "italian",
 )
 NETWORKS = ("mainnet", "testnet")
+RESOLUTIONS = ("1m", "5m", "15m", "1h", "1d", "1w")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,6 +83,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     delete = wallet_sub.add_parser("delete", help="Delete a wallet")
     delete.add_argument("name")
+
+    dex = sub.add_parser("dex", help="Read Stellar DEX market data")
+    dex_sub = dex.add_subparsers(dest="dex_command", required=True)
+
+    orderbook = dex_sub.add_parser("orderbook", help="Show an order book")
+    orderbook.add_argument("selling")
+    orderbook.add_argument("buying")
+
+    offers = dex_sub.add_parser("offers", help="Show current offers for a wallet")
+    offers.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    offers.add_argument("--limit", type=int, default=20)
+    offers.add_argument("--cached", action="store_true", help="Use local cache only")
+
+    trades = dex_sub.add_parser("trades", help="Show recent trades for an asset pair")
+    trades.add_argument("base")
+    trades.add_argument("counter")
+    trades.add_argument("--limit", type=int, default=20)
+    trades.add_argument("--cached", action="store_true", help="Use local cache only")
+
+    candles = dex_sub.add_parser("candles", help="Show trade aggregations for an asset pair")
+    candles.add_argument("base")
+    candles.add_argument("counter")
+    candles.add_argument("--resolution", default="1h", choices=RESOLUTIONS)
+    candles.add_argument("--start", type=int, dest="start_time")
+    candles.add_argument("--end", type=int, dest="end_time")
+    candles.add_argument("--offset", type=int)
+    candles.add_argument("--limit", type=int, default=100)
+    candles.add_argument("--cached", action="store_true", help="Use local cache only")
     return parser
 
 

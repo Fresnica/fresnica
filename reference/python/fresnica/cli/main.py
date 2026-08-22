@@ -48,6 +48,10 @@ def main(argv=None, runtime=None) -> int:
             from .commands.wallet import execute_wallet
 
             execute_wallet(runtime, args, renderer)
+        elif args.command == "dex":
+            from .commands.dex import execute_dex
+
+            execute_dex(runtime, args, renderer)
         return 0
     except UserCancelled as exc:
         renderer.error(str(exc))

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .balance_service import BalanceService
 from .datastore import SQLiteDataStore
+from .dex_service import DexService
 from .history_service import HistoryService
 from .manager import WalletManager
 from .network import get_network
@@ -23,6 +24,7 @@ class NetworkServices:
     adapter: StellarAdapter
     balance_service: BalanceService
     history_service: HistoryService
+    dex_service: DexService
     transaction_builder: TransactionBuilderService
     submit_service: SubmitService
     transaction_service: TransactionService
@@ -55,6 +57,7 @@ class Runtime:
                 adapter=adapter,
                 balance_service=balance,
                 history_service=HistoryService(adapter, self.datastore, network.name),
+                dex_service=DexService(adapter, self.datastore, network.name),
                 transaction_builder=builder,
                 submit_service=submit,
                 transaction_service=transaction,
