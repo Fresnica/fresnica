@@ -62,3 +62,19 @@ def test_submission_error_preserves_horizon_result_codes_for_developers():
     assert "status=400" in captured.value.details
     assert "Transaction Failed" in captured.value.details
     assert "op_no_destination" in captured.value.details
+
+
+def test_base_reserve_is_loaded_once_per_adapter_instance():
+    adapter = StellarAdapter(TESTNET)
+    calls = 0
+
+    def latest_ledger():
+        nonlocal calls
+        calls += 1
+        return {"base_reserve_in_stroops": 5_000_000}
+
+    adapter.get_latest_ledger = latest_ledger
+
+    assert adapter.get_base_reserve_stroops() == 5_000_000
+    assert adapter.get_base_reserve_stroops() == 5_000_000
+    assert calls == 1
