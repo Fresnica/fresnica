@@ -36,7 +36,9 @@ class AvailabilityService:
             balance = Decimal(raw.get("balance", "0"))
             selling = Decimal(raw.get("selling_liabilities", "0"))
             buying = Decimal(raw.get("buying_liabilities", "0"))
-            if asset.is_native:
+            if asset.is_liquidity_pool:
+                available = balance
+            elif asset.is_native:
                 available = (
                     balance
                     - selling
@@ -132,8 +134,14 @@ def _amount(value) -> Decimal:
 
 
 def _asset_from_balance(raw: dict) -> Asset:
-    if raw.get("asset_type") == "native":
+    asset_type = raw.get("asset_type")
+    if asset_type == "native":
         return Asset("XLM")
+    if asset_type == "liquidity_pool_shares":
+        return Asset(
+            "LP",
+            liquidity_pool_id=raw.get("liquidity_pool_id"),
+        )
     return Asset(raw.get("asset_code", ""), raw.get("asset_issuer"))
 
 

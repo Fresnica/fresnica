@@ -1,13 +1,24 @@
-"""State-driven Textual wallet shell for interactive Fresnica mode."""
+"""State-driven Textual wallet dashboard for interactive Fresnica mode."""
+
+from datetime import datetime
 
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
 from ..errors import FresnicaError, NetworkError, WalletLockedError, WalletNotFoundError
 from ..manager import WalletState
+from ..presentation import (
+    asset_label,
+    asset_source,
+    format_amount,
+    format_timestamp,
+    short_pool_id,
+)
+from .history import HistoryScreen
 from .screens import (
     AddWalletDialog,
     ConfirmDialog,
@@ -26,13 +37,17 @@ from .screens import (
 )
 
 
+WIDE_DASHBOARD_COLUMNS = 120
+
+
 class FresnicaApp(App[None]):
     TITLE = "Fresnica"
     SUB_TITLE = "Stellar Wallet"
     BINDINGS = [
         Binding("r", "refresh", "Refresh"),
         Binding("w", "manage_wallets", "Wallets"),
-        Binding("h", "refresh_history", "History"),
+        Binding("h", "history", "History"),
+        Binding("z", "toggle_zero", "Zero assets"),
         Binding("s", "send", "Send", show=False),
         Binding("l", "toggle_lock", "Lock / Unlock", show=False),
         Binding("q", "quit", "Quit"),
@@ -40,46 +55,96 @@ class FresnicaApp(App[None]):
 
     CSS = """
     #wallet { padding: 1 2 0 2; height: auto; text-style: bold; }
-    #actions { padding: 0 2; height: auto; color: $text-muted; }
-    #status { padding: 0 2 1 2; height: auto; }
-    .section-title { padding: 0 2; text-style: bold; }
-    #balances { height: 2fr; min-height: 8; }
-    #history { height: 2fr; min-height: 8; }
+    #wallet-actions { padding: 0 2; height: auto; color: $text-muted; }
+    #status { padding: 0 2; height: auto; }
+    #sync-status { padding: 0 2 1 2; height: 2; text-align: right; color: $text-muted; }
+    .section-title { padding: 0 1; height: 1; text-style: bold; }
+    #dashboard { height: 1fr; layout: vertical; }
+    #portfolio-pane, #activity-pane { width: 1fr; height: 1fr; padding: 0 1; }
+    #dashboard.wide { layout: horizontal; }
+    #dashboard.wide #portfolio-pane { width: 3fr; height: 1fr; }
+    #dashboard.wide #activity-pane { width: 2fr; height: 1fr; }
+    #balances { height: 2fr; min-height: 7; }
+    #liquidity { height: 1fr; min-height: 5; }
+    #history { height: 1fr; min-height: 8; }
     """
 
     def __init__(self, runtime):
         super().__init__()
         self.runtime = runtime
         self._pending_send = None
+        self._show_zero_balances = False
+        self._last_record = None
+        self._last_balances = []
+        self._last_positions = []
+        self._last_history = []
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("Loading wallet...", id="wallet")
-        yield Static("", id="actions")
+        yield Static("", id="wallet-actions")
         yield Static("", id="status")
-        yield Label("Assets", classes="section-title")
-        yield DataTable(id="balances")
-        yield Label("Recent activity", classes="section-title")
-        yield DataTable(id="history")
+        yield Static("", id="sync-status")
+        with Horizontal(id="dashboard"):
+            with Vertical(id="portfolio-pane"):
+                yield Label("Assets", id="assets-title", classes="section-title")
+                yield DataTable(id="balances")
+                yield Label("Liquidity positions", id="liquidity-title", classes="section-title")
+                yield DataTable(id="liquidity")
+            with Vertical(id="activity-pane"):
+                yield Label("Recent activity", classes="section-title")
+                yield DataTable(id="history")
         yield Footer()
 
     def on_mount(self) -> None:
         balances = self.query_one("#balances", DataTable)
-        balances.add_columns("Asset", "Balance", "Liabilities", "Available")
+        balances.add_columns("Asset", "Issuer / source", "Balance", "Available", "In offers")
         balances.cursor_type = "row"
+        liquidity = self.query_one("#liquidity", DataTable)
+        liquidity.add_columns("Pool", "Shares", "Position")
+        liquidity.cursor_type = "row"
         history = self.query_one("#history", DataTable)
-        history.add_columns("Time", "Type", "Summary")
+        history.add_columns("Time", "Activity")
         history.cursor_type = "row"
+        self._apply_layout(self.size.width)
         self.refresh_wallet()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._apply_layout(event.size.width)
 
     def on_unmount(self) -> None:
         self.runtime.wallet_manager.lock()
 
-    def action_refresh(self) -> None:
-        self.refresh_wallet("Refreshed")
+    def _apply_layout(self, width: int) -> None:
+        dashboard = self.query_one("#dashboard", Horizontal)
+        if width >= WIDE_DASHBOARD_COLUMNS:
+            dashboard.add_class("wide")
+        else:
+            dashboard.remove_class("wide")
 
-    def action_refresh_history(self) -> None:
-        self.refresh_wallet("History refreshed")
+    def action_refresh(self) -> None:
+        self.refresh_wallet()
+
+    def action_history(self) -> None:
+        try:
+            session = self.runtime.wallet_manager.view()
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before viewing history.")
+            return
+        services = self.runtime.services_for(session.record.network)
+        self.push_screen(
+            HistoryScreen(
+                services.history_service,
+                session.wallet,
+                session.record.name,
+            )
+        )
+
+    def action_toggle_zero(self) -> None:
+        self._show_zero_balances = not self._show_zero_balances
+        self._render_balances()
+        mode = "shown" if self._show_zero_balances else "hidden"
+        self._set_sync(f"Zero-balance assets {mode} · no network refresh")
 
     def action_manage_wallets(self) -> None:
         self._open_wallet_manager()
@@ -321,20 +386,32 @@ class FresnicaApp(App[None]):
         self._set_status("Preparing transaction...")
         self.prepare_send(request)
 
-    @work(exclusive=True, thread=True, exit_on_error=False)
     def refresh_wallet(self, ready_message: str | None = None) -> None:
+        self._set_sync("Refreshing account data...")
+        self._refresh_wallet(ready_message)
+
+    @work(exclusive=True, thread=True, exit_on_error=False)
+    def _refresh_wallet(self, ready_message: str | None = None) -> None:
         record = None
         try:
             session = self.runtime.wallet_manager.view()
             record = session.record
             services = self.runtime.services_for(record.network)
-            balances = services.balance_service.get_views(session.wallet)
+            balances, positions = services.balance_service.get_portfolio_views(session.wallet)
             history = services.history_service.get_views(session.wallet, limit=20)
-            self.call_from_thread(self._apply_wallet, record, balances, history, ready_message, None)
+            self.call_from_thread(
+                self._apply_wallet,
+                record,
+                balances,
+                positions,
+                history,
+                ready_message,
+                None,
+            )
         except WalletNotFoundError:
-            self.call_from_thread(self._apply_wallet, None, [], [], ready_message, None)
+            self.call_from_thread(self._apply_wallet, None, [], [], [], ready_message, None)
         except (FresnicaError, ValueError) as exc:
-            self.call_from_thread(self._apply_wallet, record, [], [], ready_message, exc)
+            self.call_from_thread(self._apply_wallet, record, [], [], [], ready_message, exc)
 
     @work(thread=True, exit_on_error=False)
     def fund_wallet(self, wallet_name: str) -> None:
@@ -419,39 +496,89 @@ class FresnicaApp(App[None]):
         )
         self.refresh_wallet(message)
 
-    def _apply_wallet(self, record, balances, history, ready_message, error) -> None:
+    def _apply_wallet(self, record, balances, positions, history, ready_message, error) -> None:
         wallet_widget = self.query_one("#wallet", Static)
-        actions_widget = self.query_one("#actions", Static)
-        balance_table = self.query_one("#balances", DataTable)
-        history_table = self.query_one("#history", DataTable)
-        balance_table.clear()
-        history_table.clear()
+        wallet_actions = self.query_one("#wallet-actions", Static)
+
+        self._last_record = record
+        self._last_balances = list(balances)
+        self._last_positions = list(positions)
+        self._last_history = list(history)
 
         if record is None:
             wallet_widget.update("No wallet configured")
-            actions_widget.update("W Add wallet   Q Quit")
-            self._set_status(ready_message or "Use W to create or import a wallet")
+            wallet_actions.update("")
+            self._render_balances()
+            self._render_liquidity()
+            self._render_history()
+            self._set_sync("No wallet selected")
+            if ready_message:
+                self._set_status(ready_message)
             if error is not None:
                 self._show_error(error)
             return
 
         state = self.runtime.wallet_manager.state(record.name)
         wallet_widget.update(
-            f"{record.name}\n{record.network.upper()} · {_wallet_type(record.wallet_type)} · {state.value}\n{record.address}"
+            f"{record.name}\n{_wallet_meta(record, state)}\n{record.address}"
         )
-        actions_widget.update(_actions_for(state))
-        self._set_status(ready_message or "Ready")
-        for item in balances:
-            balance_table.add_row(
-                item.asset.display,
-                str(item.balance),
-                str(item.selling_liabilities),
-                str(item.available),
-            )
-        for item in history:
-            history_table.add_row(item.created_at or "", item.operation_type, item.summary)
+        wallet_actions.update(_signing_actions_for(state))
+        self._render_balances()
+        self._render_liquidity()
+        self._render_history()
+        self._set_sync(f"Updated {datetime.now().strftime('%H:%M:%S')}")
+        if ready_message:
+            self._set_status(ready_message)
         if error is not None:
+            self._set_sync("Account refresh failed")
             self._show_error(error)
+
+    def _render_balances(self) -> None:
+        table = self.query_one("#balances", DataTable)
+        table.clear()
+        items = self._last_balances
+        if not self._show_zero_balances:
+            items = [item for item in items if not _zero_balance(item)]
+        title = "Assets · showing zero" if self._show_zero_balances else "Assets · zero hidden"
+        self.query_one("#assets-title", Label).update(title)
+        for item in items:
+            table.add_row(
+                asset_label(item.asset),
+                asset_source(item.asset),
+                format_amount(item.balance),
+                format_amount(item.available),
+                format_amount(item.selling_liabilities),
+            )
+
+    def _render_liquidity(self) -> None:
+        table = self.query_one("#liquidity", DataTable)
+        title = self.query_one("#liquidity-title", Label)
+        table.clear()
+        visible = bool(self._last_positions)
+        table.display = visible
+        title.display = visible
+        for position in self._last_positions:
+            pool_assets = " / ".join(
+                asset_label(reserve.asset) for reserve in position.reserves
+            ) or f"Pool {short_pool_id(position.pool_id)}"
+            if position.error:
+                detail = "Pool details unavailable"
+            else:
+                detail = " + ".join(
+                    f"{format_amount(reserve.amount)} {asset_label(reserve.asset)}"
+                    for reserve in position.reserves
+                ) or "No reserves"
+            table.add_row(
+                f"{pool_assets} · {short_pool_id(position.pool_id)}",
+                format_amount(position.shares),
+                detail,
+            )
+
+    def _render_history(self) -> None:
+        table = self.query_one("#history", DataTable)
+        table.clear()
+        for item in self._last_history:
+            table.add_row(format_timestamp(item.created_at), item.summary)
 
     def _show_notice(self, title: str, message: str) -> None:
         self.push_screen(NoticeDialog(title, message))
@@ -462,6 +589,10 @@ class FresnicaApp(App[None]):
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(Text(message, style="green"))
 
+    def _set_sync(self, message: str) -> None:
+        style = "yellow" if "Refreshing" in message or "Loading" in message else "dim"
+        self.query_one("#sync-status", Static).update(Text(message, style=style))
+
 
 def _wallet_type(value: str) -> str:
     return {
@@ -471,12 +602,29 @@ def _wallet_type(value: str) -> str:
     }.get(value, value)
 
 
-def _actions_for(state: WalletState) -> str:
+def _wallet_meta(record, state: WalletState) -> str:
+    network = record.network.upper()
+    wallet_type = _wallet_type(record.wallet_type)
     if state is WalletState.WATCH_ONLY:
-        return "W Wallets   R Refresh   H History   Q Quit"
+        return f"{network} · {wallet_type}"
+    state_label = "Unlocked" if state is WalletState.UNLOCKED else "Locked"
+    return f"{network} · {wallet_type} · {state_label}"
+
+
+def _signing_actions_for(state: WalletState) -> str:
+    if state is WalletState.WATCH_ONLY:
+        return ""
     if state is WalletState.LOCKED:
-        return "W Wallets   S Send   L Unlock   R Refresh   H History   Q Quit"
-    return "W Wallets   S Send   L Lock   R Refresh   H History   Q Quit"
+        return "S Send   L Unlock"
+    return "S Send   L Lock"
+
+
+def _zero_balance(item) -> bool:
+    return (
+        item.balance == 0
+        and item.selling_liabilities == 0
+        and item.buying_liabilities == 0
+    )
 
 
 def run_tui(runtime=None):
