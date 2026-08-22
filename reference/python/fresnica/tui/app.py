@@ -7,7 +7,7 @@ information architecture.
 
 from textual import work
 
-from ..errors import FresnicaError, WalletNotFoundError
+from ..errors import FresnicaError, NetworkError, WalletNotFoundError
 from .app_base import FresnicaApp as BaseFresnicaApp
 from .wallet_management import WalletManagerDialog
 
@@ -115,6 +115,35 @@ class FresnicaApp(BaseFresnicaApp):
             # Cache presentation is opportunistic. The background refresh remains
             # authoritative and will surface a real network/protocol error.
             return
+
+    @work(thread=True, exit_on_error=False)
+    def fund_wallet(self, wallet_name: str) -> None:
+        """Verify an unknown Testnet account only after the user requests funding."""
+        try:
+            record = self.runtime.wallet_manager.get_record(wallet_name)
+            if record.network != "testnet":
+                raise NetworkError("Friendbot is only available on testnet")
+            services = self.runtime.services_for("testnet")
+            if services.testnet_service is None:
+                raise NetworkError("Friendbot is unavailable for testnet")
+
+            adapter = getattr(services.balance_service, "adapter", None)
+            checker = getattr(adapter, "account_exists", None)
+            if checker is not None and checker(record.address):
+                self.call_from_thread(
+                    self.refresh_wallet,
+                    f'Wallet "{record.name}" already exists on testnet; Friendbot not needed',
+                )
+                return
+
+            result = services.testnet_service.fund(record.address)
+            tx_hash = result.get("hash") if isinstance(result, dict) else None
+            message = f'Funded wallet "{record.name}" on testnet'
+            if tx_hash:
+                message += f"; transaction {tx_hash}"
+            self.call_from_thread(self.refresh_wallet, message)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._show_error, exc)
 
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _refresh_wallet(self, ready_message: str | None = None) -> None:
