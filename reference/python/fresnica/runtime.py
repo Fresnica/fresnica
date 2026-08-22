@@ -8,7 +8,7 @@ from .balance_service import BalanceService
 from .datastore import SQLiteDataStore
 from .history_service import HistoryService
 from .manager import WalletManager
-from .network import MAINNET, get_network
+from .network import get_network
 from .stellar_adapter import StellarAdapter
 from .storage import FileWalletStorage
 from .submit_service import SubmitService
@@ -31,7 +31,8 @@ class NetworkServices:
 
 
 class Runtime:
-    def __init__(self, home: str | Path | None = None, wallet_storage=None, datastore=None):
+    def __init__(self, network: str = "mainnet", home: str | Path | None = None, wallet_storage=None, datastore=None):
+        self.network = get_network(network).name
         if home is None:
             home = os.environ.get("FRESNICA_HOME", "~/.fresnica")
         self.home = Path(home).expanduser()
@@ -41,45 +42,37 @@ class Runtime:
         self.wallet_manager = WalletManager(self.wallet_storage)
         self._services: dict[str, NetworkServices] = {}
 
-    def services_for(self, network_name: str) -> NetworkServices:
-        network = get_network(network_name)
+    def services_for(self, network_name: str | None = None) -> NetworkServices:
+        name = network_name or self.network
+        network = get_network(name)
         if network.name not in self._services:
             adapter = StellarAdapter(network)
-            balance_service = BalanceService(adapter, self.datastore, network.name)
-            history_service = HistoryService(adapter, self.datastore, network.name)
-            builder_service = TransactionBuilderService(adapter)
-            submit_service = SubmitService(adapter)
-            transaction_service = TransactionService(submit_service)
-
+            balance = BalanceService(adapter, self.datastore, network.name)
+            builder = TransactionBuilderService(adapter)
+            submit = SubmitService(adapter)
+            transaction = TransactionService(submit)
             services = NetworkServices(
                 adapter=adapter,
-                balance_service=balance_service,
-                history_service=history_service,
-                transaction_builder=builder_service,
-                submit_service=submit_service,
-                transaction_service=transaction_service,
-                transfer_service=TransferService(
-                    balance_service,
-                    builder_service,
-                    transaction_service,
-                ),
+                balance_service=balance,
+                history_service=HistoryService(adapter, self.datastore, network.name),
+                transaction_builder=builder,
+                submit_service=submit,
+                transaction_service=transaction,
+                transfer_service=TransferService(balance, builder, transaction),
             )
-
             if network.name == "testnet":
                 services.testnet_service = TestnetService(adapter)
-
             self._services[network.name] = services
-
         return self._services[network.name]
 
     @property
     def balance_service(self):
-        return self.services_for(MAINNET.name).balance_service
+        return self.services_for().balance_service
 
     @property
     def transfer_service(self):
-        return self.services_for(MAINNET.name).transfer_service
+        return self.services_for().transfer_service
 
     @property
     def transaction_service(self):
-        return self.services_for(MAINNET.name).transaction_service
+        return self.services_for().transaction_service
