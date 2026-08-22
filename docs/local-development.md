@@ -18,12 +18,15 @@ to use another root directory.
 ```text
 ~/.fresnica/
   wallets/             wallet metadata and encrypted signing material
-  chain-data.sqlite3   chain, activity, and SDEX cache
+  chain-data.sqlite3   chain, activity, LP metadata, and SDEX cache
+  settings.json        local UI preferences
 ```
 
 Watch-only records do not contain signing material. Operation history is cached
-incrementally in SQLite; the dashboard can therefore show a small recent slice
-while the dedicated History screen browses a larger local history.
+incrementally in SQLite. Operations that share a transaction hash are grouped
+into one user-facing Activity while their individual raw operation records remain
+available in the cache. Liquidity-pool details are also cached by network and
+pool ID for reuse when a later pool lookup is unavailable.
 
 ## Interactive TUI
 
@@ -38,7 +41,7 @@ w  wallet management
 s  send when the wallet has signing capability
 l  lock / unlock
 r  refresh dashboard data
-h  full History
+h  full Activity history
 z  show / hide zero-balance assets
 q  quit
 ```
@@ -52,24 +55,35 @@ Assets use the portfolio model rather than raw Horizon formatting: XLM sorts
 first, issued assets include a shortened issuer/source, amounts remove exponent
 notation and redundant trailing zeros, and selling liabilities are presented as
 `In offers`. Zero-balance trustlines are hidden by default and `Z` toggles them
-without a network request.
+without a network request. That preference is persisted to `settings.json` and
+restored on the next launch.
 
 Liquidity-pool share balances are resolved into a separate Liquidity Positions
-section. Fresnica loads pool reserves and total shares through the Stellar SDK
-and computes the underlying reserve amounts represented by the wallet's shares.
-A pool lookup failure does not prevent the rest of the dashboard from loading.
+section. Fresnica loads pool reserves and total shares through the Stellar SDK,
+caches the pool detail, and computes the underlying reserve amounts represented
+by the wallet's shares. A previously cached pool can be used if a later pool
+lookup fails, so one unavailable endpoint does not hide the rest of the wallet.
 
 `R` refreshes the dashboard and shows `Refreshing...` / `Updated HH:MM:SS` near
-the data. `H` is navigation, not another refresh shortcut: it opens a History
+the data. `H` is navigation, not another refresh shortcut: it opens an Activity
 screen backed by local cache. Initial sync requests up to 200 operations; later
 refreshes use the newest cached paging token to request only newer operations.
-`M` inside History requests an older page.
+`M` inside Activity requests an older page. Transaction-level grouping is a
+presentation model only; raw operation records stay intact.
 
-Wallet Management supports use, add, lock/unlock, testnet funding, and delete.
-Add Wallet branches into create, import-secret, import-mnemonic, and import-watch
-flows. Actions are capability-aware: watch-only wallets cannot unlock, mainnet
-wallets do not expose Friendbot funding, and switching wallets releases any
-unlocked signing session.
+Wallet Management is a list rather than a select box. Cursor movement previews a
+wallet and `Enter` makes the highlighted row current, so there is no separate
+Use action. Controls are grouped by intent:
+
+```text
+Wallet actions   lock / unlock; testnet funding when applicable
+Wallet library   add wallet
+Danger zone      remove wallet
+```
+
+Watch-only wallets hide signing controls, and Friendbot funding is not shown for
+mainnet wallets. Add Wallet branches into create, import-secret, import-mnemonic,
+and import-watch flows. Switching wallets releases any unlocked signing session.
 
 Unlock is a separate workflow from Send. A write action may request unlock as a
 prerequisite, but the password never appears in the payment form. An unlocked
@@ -100,7 +114,8 @@ uv run fresnica --network testnet wallet testnet-fund
 ```
 
 `watch` and `fund` remain accepted as compatibility aliases. Balance and history
-use the same human-facing asset/activity semantics as the TUI.
+use the same human-facing asset/activity semantics as the TUI, including
+transaction-level Activity grouping.
 
 ## Network selection
 
