@@ -1,15 +1,16 @@
 """User-facing wallet lifecycle and session state management."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 
-from .errors import WalletLockedError, WalletNotFoundError, WatchOnlyError
+from .errors import WalletError, WalletLockedError, WalletNotFoundError, WatchOnlyError
 from .hdwallet import detect_mnemonic_language, generate_mnemonic_phrase
 from .network import get_network
 from .secret_store import decrypt_secret, encrypt_secret
 from .storage import WalletRecord, WalletStorage
 from .wallet import Wallet
+from .wallet_backup import read_wallet_backup, write_wallet_backup
 
 
 @dataclass
@@ -192,6 +193,31 @@ class WalletManager:
             make_default=make_default,
         )
         return record, mnemonic
+
+    def backup(self, name: str, path, overwrite: bool = False):
+        """Back up the stored encrypted record without unlocking the wallet."""
+        return write_wallet_backup(
+            self.get_record(name),
+            path,
+            overwrite=overwrite,
+        )
+
+    def restore_backup(
+        self,
+        path,
+        name: str | None = None,
+        make_default: bool | None = None,
+    ) -> WalletRecord:
+        """Restore an encrypted record; password validation remains an unlock concern."""
+        record = read_wallet_backup(path)
+        if name is not None:
+            name = name.strip()
+            if not name:
+                raise WalletError("Restored wallet name cannot be empty")
+            record = replace(record, name=name)
+        self.storage.save(record)
+        self._maybe_default(record.name, make_default)
+        return record
 
     def view(self, name: str | None = None) -> WalletSession:
         record = self.get_record(name)

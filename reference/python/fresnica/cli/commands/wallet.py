@@ -69,6 +69,20 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         renderer.render_created_mnemonic(record, mnemonic)
         return record
 
+    if command == "backup":
+        path = manager.backup(args.name, args.path, overwrite=args.force)
+        renderer.success(
+            f'Encrypted backup for "{args.name}" written to {path}; wallet password is unchanged'
+        )
+        return path
+
+    if command == "restore":
+        record = manager.restore_backup(args.path, name=args.name)
+        renderer.success(
+            f'Restored wallet "{record.name}" [{record.network}]; unlock with its original wallet password'
+        )
+        return record
+
     if command in {"testnet-fund", "fund"}:
         from .fund import execute_fund
 
