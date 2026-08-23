@@ -1,8 +1,9 @@
 import pytest
 from stellar_sdk import Account, Keypair
 from stellar_sdk.exceptions import SdkError
+from stellar_sdk.sep.exceptions import AccountRequiresMemoError
 
-from fresnica.errors import TransactionError
+from fresnica.errors import MemoRequiredError, TransactionError
 from fresnica.models import Asset, PriceRatio
 from fresnica.network import TESTNET
 from fresnica.stellar_adapter import StellarAdapter
@@ -31,6 +32,18 @@ class SubmissionError(SdkError):
 class FailingServer:
     def submit_transaction(self, transaction):
         raise SubmissionError("failed")
+
+
+class MemoRequiredServer:
+    def __init__(self, account_id):
+        self.account_id = account_id
+
+    def submit_transaction(self, transaction):
+        raise AccountRequiresMemoError(
+            "destination account requires a memo",
+            self.account_id,
+            0,
+        )
 
 
 def test_adapter_builds_create_account_operation():
@@ -139,6 +152,20 @@ def test_submission_error_preserves_horizon_result_codes_for_developers():
     assert "status=400" in captured.value.details
     assert "Transaction Failed" in captured.value.details
     assert "op_no_destination" in captured.value.details
+
+
+def test_sep29_memo_required_error_remains_specific_and_actionable():
+    destination = Keypair.random().public_key
+    adapter = StellarAdapter(TESTNET)
+    adapter.server = MemoRequiredServer(destination)
+
+    with pytest.raises(MemoRequiredError) as captured:
+        adapter.submit_transaction(object())
+
+    assert captured.value.account_id == destination
+    assert destination in str(captured.value)
+    assert "requires a transaction memo" in str(captured.value)
+    assert isinstance(captured.value.__cause__, AccountRequiresMemoError)
 
 
 def test_base_reserve_is_loaded_once_per_adapter_instance():
