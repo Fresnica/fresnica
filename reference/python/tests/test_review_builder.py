@@ -26,6 +26,10 @@ class FakeAdapter:
         self.payment = kwargs
         return FakeEnvelope()
 
+    def build_change_trust(self, **kwargs):
+        self.trustline = kwargs
+        return FakeEnvelope()
+
     def build_manage_sell_offer(self, **kwargs):
         self.offer = kwargs
         return FakeEnvelope()
@@ -50,6 +54,34 @@ def test_payment_review_keeps_full_issued_asset_identity():
     )
 
     assert prepared.review.asset == f"USDC:{issuer}"
+
+
+def test_trustline_review_distinguishes_default_maximum_from_remove_zero():
+    adapter = FakeAdapter()
+    builder = TransactionBuilderService(adapter)
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    asset = Asset("USD", Keypair.random().public_key)
+
+    added = builder.build_trustline(
+        wallet_name="main",
+        wallet=wallet,
+        asset=asset,
+        base_fee_stroops=100,
+        action="add",
+    )
+    assert adapter.trustline["limit"] is None
+    assert added.review.limit == "Stellar maximum"
+
+    removed = builder.build_trustline(
+        wallet_name="main",
+        wallet=wallet,
+        asset=asset,
+        base_fee_stroops=100,
+        action="remove",
+        limit=Decimal("0"),
+    )
+    assert adapter.trustline["limit"] == "0"
+    assert removed.review.limit is None
 
 
 def test_pair_aware_cancel_review_preserves_buy_orientation_but_chain_cancel_stays_canonical():
