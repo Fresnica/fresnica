@@ -10,6 +10,7 @@ from .datastore import SQLiteDataStore
 from .dex_service import DexService
 from .history_service import HistoryService
 from .manager import WalletManager
+from .market_preferences import MarketPreferencesStore
 from .network import get_network
 from .offer_service import OfferService
 from .pending_transactions import PendingTransactionService, PendingTransactionStore
@@ -55,6 +56,7 @@ class Runtime:
         self.settings_store = SettingsStore(self.home / "settings.json")
         self.settings = self.settings_store.load()
         self.contact_store = ContactStore(self.home / "contacts.json")
+        self.market_preferences = MarketPreferencesStore(self.home / "markets.json")
         self.wallet_manager = WalletManager(self.wallet_storage)
         self._services: dict[str, NetworkServices] = {}
 
