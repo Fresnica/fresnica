@@ -40,6 +40,12 @@ class DexService:
             for item in self.get_offers(wallet, limit=limit, refresh=refresh)
         ]
 
+    def get_open_offer(self, wallet, offer_id: str):
+        raw = self.adapter.get_offer(offer_id)
+        if raw.get("seller") != wallet.address():
+            raise ValueError(f"Offer {offer_id} does not belong to this wallet")
+        return open_offer_from_horizon(raw)
+
     def get_account_trade_segments(self, wallet, limit: int = 200):
         """Fetch recent wallet fills and compress consecutive fills per offer."""
         address = wallet.address()
