@@ -36,8 +36,8 @@ class FakeOfferService:
     def __init__(self):
         self.calls = []
 
-    def prepare_create(self, wallet_name, wallet, intent):
-        self.calls.append(("create", intent))
+    def prepare_create(self, wallet_name, wallet, intent, allow_trustline=False):
+        self.calls.append(("create", intent, allow_trustline))
         return SimpleNamespace(review=SimpleNamespace(action="create"), envelope=object())
 
     def prepare_update(self, wallet_name, wallet, offer, intent):
@@ -94,6 +94,7 @@ def test_buy_command_builds_pair_relative_offer_intent():
             "XLM",
             "100",
             "0.325",
+            "--allow-trustline",
             "-y",
         ]
     )
@@ -102,8 +103,9 @@ def test_buy_command_builds_pair_relative_offer_intent():
     renderer = FakeRenderer()
 
     execute_dex(runtime, args, renderer)
-    kind, intent = offers.calls[0]
+    kind, intent, allow_trustline = offers.calls[0]
     assert kind == "create"
+    assert allow_trustline is True
     assert intent.side == "buy"
     assert intent.pair.base == Asset("XRP", issuer)
     assert intent.pair.counter == Asset("XLM")
