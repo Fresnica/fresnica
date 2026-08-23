@@ -1,0 +1,478 @@
+{
+  "schema": "fresnica-sdex-v1",
+  "offer_intents": [
+    {
+      "name": "sell-base-for-counter",
+      "pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "side": "sell",
+      "amount": "100",
+      "price": "0.325",
+      "expected": {
+        "operation": "manage_sell_offer",
+        "selling": {"code": "XRP", "issuer": "issuer-xrp"},
+        "buying": {"code": "USDC", "issuer": "issuer-usdc"},
+        "operation_amount": "100",
+        "operation_price": "0.325"
+      }
+    },
+    {
+      "name": "buy-base-with-counter",
+      "pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "side": "buy",
+      "amount": "100",
+      "price": "0.325",
+      "expected": {
+        "operation": "manage_buy_offer",
+        "selling": {"code": "USDC", "issuer": "issuer-usdc"},
+        "buying": {"code": "XRP", "issuer": "issuer-xrp"},
+        "operation_amount": "100",
+        "operation_price": "0.325"
+      }
+    }
+  ],
+  "offer_projection": [
+    {
+      "name": "direct-canonical-offer-is-sell",
+      "pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "offer": {
+        "offer_id": "101",
+        "selling": {"code": "XRP", "issuer": "issuer-xrp"},
+        "buying": {"code": "USDC", "issuer": "issuer-usdc"},
+        "selling_amount": "10",
+        "price_r": {"n": 1, "d": 2}
+      },
+      "expected": {
+        "side": "sell",
+        "amount": "10",
+        "price": "0.5",
+        "total": "5"
+      }
+    },
+    {
+      "name": "reverse-canonical-offer-is-buy",
+      "pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "offer": {
+        "offer_id": "102",
+        "selling": {"code": "USDC", "issuer": "issuer-usdc"},
+        "buying": {"code": "XRP", "issuer": "issuer-xrp"},
+        "selling_amount": "3.25",
+        "price_r": {"n": 40, "d": 13}
+      },
+      "expected": {
+        "side": "buy",
+        "amount": "10",
+        "price": "0.325",
+        "total": "3.25"
+      }
+    },
+    {
+      "name": "sell-projection-rounds-to-seven-decimals-half-up",
+      "pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "offer": {
+        "offer_id": "103",
+        "selling": {"code": "XRP", "issuer": "issuer-xrp"},
+        "buying": {"code": "USDC", "issuer": "issuer-usdc"},
+        "selling_amount": "3",
+        "price_r": {"n": 2, "d": 3}
+      },
+      "expected": {
+        "side": "sell",
+        "amount": "3",
+        "price": "0.6666667",
+        "total": "2"
+      }
+    },
+    {
+      "name": "partial-buy-remaining-amount-is-a-projection",
+      "pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "offer": {
+        "offer_id": "104",
+        "selling": {"code": "USDC", "issuer": "issuer-usdc"},
+        "buying": {"code": "XRP", "issuer": "issuer-xrp"},
+        "selling_amount": "0.1",
+        "price_r": {"n": 1, "d": 3}
+      },
+      "expected": {
+        "side": "buy",
+        "amount": "0.0333333",
+        "price": "3",
+        "total": "0.1"
+      }
+    }
+  ],
+  "trade_segment_projection": [
+    {
+      "name": "direct-segment-keeps-market-orientation",
+      "segment": {
+        "pair": {
+          "base": {"code": "XRP", "issuer": "issuer-xrp"},
+          "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+        },
+        "side": "sell",
+        "base_amount": "7",
+        "counter_amount": "3.5",
+        "price_r": {"n": 1, "d": 2},
+        "user_offer_id": "77",
+        "trade_count": 2,
+        "first_trade_id": "t1",
+        "last_trade_id": "t2"
+      },
+      "target_pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "expected": {
+        "side": "sell",
+        "base_amount": "7",
+        "counter_amount": "3.5",
+        "price_r": {"n": 1, "d": 2},
+        "user_offer_id": "77",
+        "trade_count": 2
+      }
+    },
+    {
+      "name": "reverse-segment-swaps-amounts-side-and-price",
+      "segment": {
+        "pair": {
+          "base": {"code": "USDC", "issuer": "issuer-usdc"},
+          "counter": {"code": "XRP", "issuer": "issuer-xrp"}
+        },
+        "side": "buy",
+        "base_amount": "3.5",
+        "counter_amount": "7",
+        "price_r": {"n": 2, "d": 1},
+        "user_offer_id": "77",
+        "trade_count": 2,
+        "first_trade_id": "t1",
+        "last_trade_id": "t2"
+      },
+      "target_pair": {
+        "base": {"code": "XRP", "issuer": "issuer-xrp"},
+        "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+      },
+      "expected": {
+        "side": "sell",
+        "base_amount": "7",
+        "counter_amount": "3.5",
+        "price_r": {"n": 1, "d": 2},
+        "user_offer_id": "77",
+        "trade_count": 2
+      }
+    }
+  ],
+  "trade_compression": [
+    {
+      "name": "adjacent-fills-from-same-offer-and-exact-price-merge",
+      "address": "wallet",
+      "trades": [
+        {
+          "trade_id": "t1",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "4",
+          "counter_amount": "2",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "77",
+          "counter_offer_id": "900"
+        },
+        {
+          "trade_id": "t2",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "3",
+          "counter_amount": "1.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "77",
+          "counter_offer_id": "901"
+        }
+      ],
+      "expected": [
+        {
+          "side": "sell",
+          "base_amount": "7",
+          "counter_amount": "3.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": "77",
+          "trade_count": 2,
+          "first_trade_id": "t1",
+          "last_trade_id": "t2"
+        }
+      ]
+    },
+    {
+      "name": "missing-user-offer-id-never-merges",
+      "address": "wallet",
+      "trades": [
+        {
+          "trade_id": "t1",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": null,
+          "counter_offer_id": null
+        },
+        {
+          "trade_id": "t2",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "2",
+          "counter_amount": "1",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": null,
+          "counter_offer_id": null
+        }
+      ],
+      "expected": [
+        {
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": null,
+          "trade_count": 1,
+          "first_trade_id": "t1",
+          "last_trade_id": "t1"
+        },
+        {
+          "side": "sell",
+          "base_amount": "2",
+          "counter_amount": "1",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": null,
+          "trade_count": 1,
+          "first_trade_id": "t2",
+          "last_trade_id": "t2"
+        }
+      ]
+    },
+    {
+      "name": "same-offer-with-different-exact-price-does-not-merge",
+      "address": "wallet",
+      "trades": [
+        {
+          "trade_id": "t1",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "77",
+          "counter_offer_id": "900"
+        },
+        {
+          "trade_id": "t2",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5000001",
+          "price_r": {"n": 5000001, "d": 10000000},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "77",
+          "counter_offer_id": "901"
+        }
+      ],
+      "expected": [
+        {
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": "77",
+          "trade_count": 1,
+          "first_trade_id": "t1",
+          "last_trade_id": "t1"
+        },
+        {
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5000001",
+          "price_r": {"n": 5000001, "d": 10000000},
+          "user_offer_id": "77",
+          "trade_count": 1,
+          "first_trade_id": "t2",
+          "last_trade_id": "t2"
+        }
+      ]
+    },
+    {
+      "name": "same-offer-does-not-merge-across-an-intervening-segment",
+      "address": "wallet",
+      "trades": [
+        {
+          "trade_id": "t1",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "77",
+          "counter_offer_id": "900"
+        },
+        {
+          "trade_id": "t2",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "88",
+          "counter_offer_id": "901"
+        },
+        {
+          "trade_id": "t3",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "wallet",
+          "counter_account": "counterparty",
+          "base_offer_id": "77",
+          "counter_offer_id": "902"
+        }
+      ],
+      "expected": [
+        {
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": "77",
+          "trade_count": 1,
+          "first_trade_id": "t1",
+          "last_trade_id": "t1"
+        },
+        {
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": "88",
+          "trade_count": 1,
+          "first_trade_id": "t2",
+          "last_trade_id": "t2"
+        },
+        {
+          "side": "sell",
+          "base_amount": "1",
+          "counter_amount": "0.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": "77",
+          "trade_count": 1,
+          "first_trade_id": "t3",
+          "last_trade_id": "t3"
+        }
+      ]
+    },
+    {
+      "name": "counter-account-uses-counter-offer-id",
+      "address": "wallet",
+      "trades": [
+        {
+          "trade_id": "t1",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "buy",
+          "base_amount": "2",
+          "counter_amount": "1",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "counterparty",
+          "counter_account": "wallet",
+          "base_offer_id": "900",
+          "counter_offer_id": "99"
+        },
+        {
+          "trade_id": "t2",
+          "pair": {
+            "base": {"code": "XRP", "issuer": "issuer-xrp"},
+            "counter": {"code": "USDC", "issuer": "issuer-usdc"}
+          },
+          "side": "buy",
+          "base_amount": "3",
+          "counter_amount": "1.5",
+          "price_r": {"n": 1, "d": 2},
+          "base_account": "counterparty",
+          "counter_account": "wallet",
+          "base_offer_id": "901",
+          "counter_offer_id": "99"
+        }
+      ],
+      "expected": [
+        {
+          "side": "buy",
+          "base_amount": "5",
+          "counter_amount": "2.5",
+          "price_r": {"n": 1, "d": 2},
+          "user_offer_id": "99",
+          "trade_count": 2,
+          "first_trade_id": "t1",
+          "last_trade_id": "t2"
+        }
+      ]
+    }
+  ]
+}
