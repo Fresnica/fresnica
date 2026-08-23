@@ -1,9 +1,14 @@
 from decimal import Decimal
 
 import pytest
-from stellar_sdk import Keypair, Price
+from stellar_sdk import Keypair
 
-from fresnica.errors import InvalidAmountError, TransactionError
+from fresnica.errors import (
+    InsufficientBalanceError,
+    InvalidAmountError,
+    TransactionError,
+    TrustlineConfirmationRequired,
+)
 from fresnica.models import Asset, MarketPair, OfferIntent, OpenOffer, PriceRatio
 from fresnica.network import MAINNET
 from fresnica.offer_service import OfferService, offer_view_for_pair, open_offer_from_horizon
@@ -24,11 +29,20 @@ class FakeEnvelope:
 class FakeAdapter:
     network = MAINNET
 
-    def __init__(self):
+    def __init__(self, account=None):
         self.calls = []
+        self.account = account
 
     def fetch_base_fee(self):
         return 100
+
+    def get_base_reserve_stroops(self):
+        return 5_000_000
+
+    def get_account(self, address):
+        if self.account is None:
+            raise AssertionError("test did not configure fresh account state")
+        return self.account
 
     def build_manage_sell_offer(self, **kwargs):
         self.calls.append(("sell", kwargs))
@@ -55,10 +69,54 @@ def _pair():
     )
 
 
+def _balance(asset, balance, selling_liabilities="0"):
+    if asset.is_native:
+        return {
+            "asset_type": "native",
+            "balance": str(balance),
+            "selling_liabilities": str(selling_liabilities),
+            "buying_liabilities": "0",
+        }
+    return {
+        "asset_type": "credit_alphanum4" if len(asset.code) <= 4 else "credit_alphanum12",
+        "asset_code": asset.code,
+        "asset_issuer": asset.issuer,
+        "balance": str(balance),
+        "selling_liabilities": str(selling_liabilities),
+        "buying_liabilities": "0",
+        "limit": "922337203685.4775807",
+    }
+
+
+def _account(wallet, balances, subentry_count=None):
+    if subentry_count is None:
+        subentry_count = sum(1 for item in balances if item["asset_type"] != "native")
+    return {
+        "account_id": wallet.address(),
+        "subentry_count": subentry_count,
+        "num_sponsoring": 0,
+        "num_sponsored": 0,
+        "balances": balances,
+    }
+
+
+def _funded_adapter(wallet, pair):
+    return FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "100"),
+                _balance(pair.base, "1000"),
+                _balance(pair.counter, "1000"),
+            ],
+        )
+    )
+
+
 def test_sell_and_buy_intent_keep_one_human_price_direction():
     pair = _pair()
     wallet = Wallet.from_secret(Keypair.random().secret)
-    adapter = FakeAdapter()
+    adapter = _funded_adapter(wallet, pair)
     service = _service(adapter)
 
     sell = OfferIntent(pair, "sell", Decimal("100"), Decimal("0.325"))
@@ -70,6 +128,7 @@ def test_sell_and_buy_intent_keep_one_human_price_direction():
     assert kwargs["amount"] == "100"
     assert kwargs["price"] == "0.325"
     assert kwargs["offer_id"] == 0
+    assert kwargs["trustline_asset"] is None
     assert prepared.review.side == "sell"
     assert prepared.review.total == "32.5"
 
@@ -82,6 +141,111 @@ def test_sell_and_buy_intent_keep_one_human_price_direction():
     assert kwargs["buy_amount"] == "100"
     assert kwargs["price"] == "0.325"
     assert prepared.review.side == "buy"
+
+
+def test_missing_receiving_trustline_requires_explicit_approval():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "100"),
+                _balance(pair.counter, "1000"),
+            ],
+        )
+    )
+    service = _service(adapter)
+    intent = OfferIntent(pair, "buy", Decimal("2"), Decimal("1"))
+
+    with pytest.raises(TrustlineConfirmationRequired, match="XRP"):
+        service.prepare_create("main", wallet, intent)
+
+    prepared = service.prepare_create(
+        "main",
+        wallet,
+        intent,
+        allow_trustline=True,
+    )
+    kind, kwargs = adapter.calls[-1]
+    assert kind == "buy"
+    assert kwargs["trustline_asset"] == pair.base
+    assert prepared.review.trustline_asset == "XRP"
+    assert prepared.review.fee == "0.00002"
+
+
+def test_create_preflight_uses_fresh_selling_liabilities():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "100"),
+                _balance(pair.base, "2", "1.5"),
+                _balance(pair.counter, "100"),
+            ],
+        )
+    )
+    service = _service(adapter)
+
+    with pytest.raises(InsufficientBalanceError):
+        service.prepare_create(
+            "main",
+            wallet,
+            OfferIntent(pair, "sell", Decimal("1"), Decimal("1")),
+        )
+
+
+def test_buy_preflight_rounds_required_selling_amount_up_to_stroop():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "100"),
+                _balance(pair.base, "100"),
+                _balance(pair.counter, "5.9999999"),
+            ],
+        )
+    )
+    service = _service(adapter)
+
+    with pytest.raises(InsufficientBalanceError):
+        service.prepare_create(
+            "main",
+            wallet,
+            OfferIntent(pair, "buy", Decimal("2"), Decimal("3")),
+        )
+
+
+def test_credit_offer_preflight_still_requires_xlm_for_new_subentry_and_fee():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    balances = [
+        _balance(Asset("XLM"), "2.5"),
+        _balance(pair.base, "100"),
+        _balance(pair.counter, "100"),
+    ]
+    adapter = FakeAdapter(_account(wallet, balances, subentry_count=2))
+    service = _service(adapter)
+
+    with pytest.raises(InsufficientBalanceError) as captured:
+        service.prepare_create(
+            "main",
+            wallet,
+            OfferIntent(pair, "sell", Decimal("1"), Decimal("1")),
+        )
+    assert captured.value.asset == "XLM"
+
+    adapter.account["balances"][0]["balance"] = "2.50001"
+    prepared = service.prepare_create(
+        "main",
+        wallet,
+        OfferIntent(pair, "sell", Decimal("1"), Decimal("1")),
+    )
+    assert prepared.review.fee == "0.00001"
 
 
 def test_reverse_canonical_offer_projects_to_buy_and_updates_with_manage_buy():
@@ -202,7 +366,7 @@ def test_horizon_offer_parser_preserves_exact_price_fraction():
 def test_offer_sign_and_submit_reuse_generic_transaction_pipeline():
     pair = _pair()
     wallet = Wallet.from_secret(Keypair.random().secret)
-    adapter = FakeAdapter()
+    adapter = _funded_adapter(wallet, pair)
     service = _service(adapter)
     prepared = service.prepare_create(
         "main",
