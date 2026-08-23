@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Literal
+import webbrowser
 
 from textual import work
 from textual.app import ComposeResult
@@ -12,21 +13,22 @@ from textual.widgets import Button, Footer, Input, Label, Static
 
 from ..anchor_service import AnchorCapabilities, AnchorService
 from ..balance_service import ISSUER_DOMAIN_CACHE_KEY
-from ..errors import FresnicaError
+from ..errors import FresnicaError, WalletLockedError
+from ..manager import WalletState
 from ..models import BalanceView
+from ..network import get_network
 from ..presentation import asset_source, format_amount, short_address
-from .screens import SendDialog
+from .screens import SendDialog, UnlockDialog
 from .trustlines import TrustlineAction, TrustlineFormDialog
 
 
-AssetDetailActionKind = Literal["send", "anchor-deposit", "anchor-withdraw"]
+AssetDetailActionKind = Literal["send"]
 
 
 @dataclass(frozen=True)
 class AssetDetailAction:
     kind: AssetDetailActionKind
     asset: str
-    capabilities: AnchorCapabilities | None = None
 
 
 class PrefilledSendDialog(SendDialog):
@@ -107,6 +109,10 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        if self.runtime is None:
+            self.runtime = getattr(self.app, "runtime", None)
+        if self.on_trustline_action is None:
+            self.on_trustline_action = getattr(self.app, "_on_trustline_action", None)
         self._render_balance()
         for selector in ("#anchor-deposit", "#anchor-withdraw"):
             buttons = self.query(selector)
@@ -176,13 +182,78 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         if not enabled:
             self.set_status(f"SEP-24 {kind} is not available for this asset.")
             return
-        self.dismiss(
-            AssetDetailAction(
-                f"anchor-{kind}",
-                _asset_identity(self.balance),
-                capabilities=capabilities,
+        if self.runtime is None:
+            self.set_status("Anchor transfers are unavailable in this runtime.")
+            return
+        try:
+            record = self.runtime.wallet_manager.get_record()
+            state = self.runtime.wallet_manager.state(record.name)
+        except FresnicaError as exc:
+            self.set_status(str(exc))
+            return
+        if state is WalletState.WATCH_ONLY:
+            self.set_status("Watch-only wallet cannot sign SEP-10 authentication.")
+            return
+        if state is WalletState.LOCKED:
+            self.app.push_screen(
+                UnlockDialog(record.name),
+                lambda password: self._after_anchor_unlock(kind, record.name, password),
             )
+            return
+        self._begin_anchor_transfer(kind)
+
+    def _after_anchor_unlock(self, kind: str, wallet_name: str, password: str | None) -> None:
+        if password is None or self.runtime is None:
+            return
+        try:
+            self.runtime.wallet_manager.unlock(wallet_name, password)
+        except (FresnicaError, ValueError) as exc:
+            self.app.push_screen(
+                UnlockDialog(wallet_name, error=str(exc)),
+                lambda retry: self._after_anchor_unlock(kind, wallet_name, retry),
+            )
+            return
+        self._begin_anchor_transfer(kind)
+
+    def _begin_anchor_transfer(self, kind: str) -> None:
+        self.set_status(f"Authenticating with anchor for {kind}...")
+        self._run_anchor_transfer(kind)
+
+    @work(exclusive=True, thread=True, exit_on_error=False)
+    def _run_anchor_transfer(self, kind: str) -> None:
+        try:
+            if self.runtime is None or self._anchor_capabilities is None:
+                raise ValueError("Anchor transfer context is unavailable")
+            session = self.runtime.wallet_manager.current()
+            if session is None:
+                raise WalletLockedError("Wallet is locked")
+            network = get_network(session.record.network)
+            transfer = AnchorService().start_sep24(
+                session.wallet,
+                self.asset,
+                self._anchor_capabilities,
+                kind,
+                network.passphrase,
+            )
+            self.app.call_from_thread(self._finish_anchor_transfer, transfer, None)
+        except (FresnicaError, ValueError) as exc:
+            self.app.call_from_thread(self._finish_anchor_transfer, None, exc)
+
+    def _finish_anchor_transfer(self, transfer, error) -> None:
+        if not self.is_mounted:
+            return
+        if error is not None:
+            self.set_status(f"Anchor transfer failed: {error}")
+            return
+        assert transfer is not None
+        opened = bool(webbrowser.open(transfer.url, new=2))
+        self.query_one("#asset-anchor", Static).update(
+            f"Anchor {transfer.kind} session:\n{transfer.url}"
         )
+        if opened:
+            self.set_status(f"Opened anchor {transfer.kind} flow in the system browser.")
+        else:
+            self.set_status("Browser did not open automatically · use the URL shown above.")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
