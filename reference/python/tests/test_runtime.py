@@ -31,4 +31,6 @@ def test_testnet_runtime_uses_one_shared_service_graph(tmp_path):
     assert services.transfer_service.balance_service is services.balance_service
     assert services.transfer_service.transaction_builder is services.transaction_builder
     assert services.transfer_service.transaction_service is services.transaction_service
+    assert services.offer_service.transaction_builder is services.transaction_builder
+    assert services.offer_service.transaction_service is services.transaction_service
     assert services.transaction_service.submit_service is services.submit_service
