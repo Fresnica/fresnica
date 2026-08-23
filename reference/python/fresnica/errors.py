@@ -53,6 +53,12 @@ class InvalidAssetError(TransactionError):
     pass
 
 
+class TrustlineConfirmationRequired(TransactionError):
+    def __init__(self, asset: str):
+        self.asset = asset
+        super().__init__(f"Receiving {asset} requires creating a trustline")
+
+
 class InsufficientBalanceError(TransactionError):
     def __init__(self, asset: str, requested, available):
         self.asset = asset
