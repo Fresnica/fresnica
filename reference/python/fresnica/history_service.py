@@ -4,9 +4,11 @@ from decimal import Decimal, InvalidOperation
 
 from .models import ActivityView, OperationView
 from .presentation import format_amount, short_address
+from .sync import SyncResult
 
 
 SYNC_PAGE_LIMIT = 200
+SYNC_MAX_INCREMENTAL_PAGES = 5
 SUSPICIOUS_NATIVE_DUST_MAX = Decimal("0.0000010")
 
 
@@ -16,29 +18,46 @@ class HistoryService:
         self.datastore = datastore
         self.network_name = network_name
 
-    def sync_recent(self, wallet, limit: int = SYNC_PAGE_LIMIT) -> int:
+    def sync_recent(self, wallet, limit: int = SYNC_PAGE_LIMIT) -> SyncResult:
+        """Catch up newer operations with a bounded forward pagination loop."""
         address = wallet.address()
         cached = self.datastore.get_operations(self.network_name, address, limit=1)
-        if cached:
-            cursor = _paging_token(cached[0])
+        if not cached:
+            response = self.adapter.get_operations(address, limit=limit, desc=True)
+            records = list(response.get("_embedded", {}).get("records", []))
+            if records:
+                self.datastore.save_operations(self.network_name, address, response)
+            # A descending first page is anchored at Horizon head even when older
+            # history exists; older data is explicitly fetched via load_older().
+            return SyncResult(fetched_count=len(records), caught_up=True)
+
+        next_cursor = _paging_token(cached[0])
+        fetched = 0
+        for _ in range(SYNC_MAX_INCREMENTAL_PAGES):
             response = self.adapter.get_operations(
                 address,
                 limit=limit,
-                cursor=cursor,
+                cursor=next_cursor,
                 desc=False,
             )
-        else:
-            response = self.adapter.get_operations(address, limit=limit, desc=True)
-        records = list(response.get("_embedded", {}).get("records", []))
-        if records:
+            records = list(response.get("_embedded", {}).get("records", []))
+            if not records:
+                return SyncResult(fetched_count=fetched, caught_up=True)
             self.datastore.save_operations(self.network_name, address, response)
-        return len(records)
+            fetched += len(records)
+            last_cursor = _paging_token(records[-1])
+            if not last_cursor or last_cursor == next_cursor:
+                return SyncResult(fetched_count=fetched, caught_up=False)
+            next_cursor = last_cursor
+            if len(records) < limit:
+                return SyncResult(fetched_count=fetched, caught_up=True)
+        return SyncResult(fetched_count=fetched, caught_up=False)
 
     def load_older(self, wallet, limit: int = SYNC_PAGE_LIMIT) -> int:
         address = wallet.address()
         cached = self.datastore.get_operations(self.network_name, address, limit=100000)
         if not cached:
-            return self.sync_recent(wallet, limit=limit)
+            return self.sync_recent(wallet, limit=limit).fetched_count
         cursor = _paging_token(cached[-1])
         response = self.adapter.get_operations(
             address,

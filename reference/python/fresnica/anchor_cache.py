@@ -15,7 +15,7 @@ class AnchorCapabilitiesCacheError(FresnicaError):
 
 
 class AnchorCapabilitiesStore:
-    """Persist discovered SEP metadata by exact issued asset and home domain.
+    """Persist discovered SEP metadata by network, exact asset, and home domain.
 
     Discovery remains explicit. Once discovered, reopening Asset Details can use
     the cached capabilities without another stellar.toml or /info request. The
@@ -25,8 +25,8 @@ class AnchorCapabilitiesStore:
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser()
 
-    def get(self, asset: Asset, domain: str) -> AnchorCapabilities | None:
-        key = _key(asset, domain)
+    def get(self, network: str, asset: Asset, domain: str) -> AnchorCapabilities | None:
+        key = _key(network, asset, domain)
         if key is None:
             return None
         raw = self._load().get(key)
@@ -46,8 +46,16 @@ class AnchorCapabilitiesStore:
                 direct_payment_url=_optional_text(value.get("direct_payment_url")),
                 sep6_deposit=bool(value.get("sep6_deposit", False)),
                 sep6_withdraw=bool(value.get("sep6_withdraw", False)),
-                sep6_deposit_info=dict(value.get("sep6_deposit_info", {})) if isinstance(value.get("sep6_deposit_info", {}), dict) else {},
-                sep6_withdraw_info=dict(value.get("sep6_withdraw_info", {})) if isinstance(value.get("sep6_withdraw_info", {}), dict) else {},
+                sep6_deposit_info=(
+                    dict(value.get("sep6_deposit_info", {}))
+                    if isinstance(value.get("sep6_deposit_info", {}), dict)
+                    else {}
+                ),
+                sep6_withdraw_info=(
+                    dict(value.get("sep6_withdraw_info", {}))
+                    if isinstance(value.get("sep6_withdraw_info", {}), dict)
+                    else {}
+                ),
                 sep24_deposit=bool(value.get("sep24_deposit", False)),
                 sep24_withdraw=bool(value.get("sep24_withdraw", False)),
                 warnings=tuple(
@@ -57,8 +65,13 @@ class AnchorCapabilitiesStore:
         except (KeyError, TypeError, ValueError):
             return None
 
-    def put(self, asset: Asset, capabilities: AnchorCapabilities) -> None:
-        key = _key(asset, capabilities.domain)
+    def put(
+        self,
+        network: str,
+        asset: Asset,
+        capabilities: AnchorCapabilities,
+    ) -> None:
+        key = _key(network, asset, capabilities.domain)
         if key is None:
             return
         entries = self._load()
@@ -124,13 +137,14 @@ class AnchorCapabilitiesStore:
             ) from exc
 
 
-def _key(asset: Asset, domain: str) -> str | None:
+def _key(network: str, asset: Asset, domain: str) -> str | None:
     if asset.is_native or asset.is_liquidity_pool or not asset.issuer:
         return None
+    network_name = str(network or "").strip().lower()
     host = str(domain or "").strip().lower().rstrip(".")
-    if not host:
+    if not network_name or not host:
         return None
-    return f"{asset.code}:{asset.issuer}@{host}"
+    return f"{network_name}|{asset.code}:{asset.issuer}@{host}"
 
 
 def _optional_text(value) -> str | None:

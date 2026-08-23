@@ -12,9 +12,17 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, Label, Static
 
-from ..anchor_service import AnchorCapabilities, AnchorSep6Transfer, AnchorService
+from ..anchor_service import AnchorCapabilities
+from ..anchor_transfer_service import (
+    AnchorDepositInstructions,
+    AnchorKycRequired,
+    AnchorNeedFields,
+    AnchorOpenUrl,
+    AnchorTransferPlan,
+    AnchorWithdrawalPayment,
+)
 from ..balance_service import ISSUER_DOMAIN_CACHE_KEY
-from ..errors import FresnicaError, WalletLockedError
+from ..errors import FresnicaError
 from ..manager import WalletState
 from ..models import BalanceView
 from ..network import get_network
@@ -24,23 +32,14 @@ from .trustlines import TrustlineAction
 
 
 AssetDetailActionKind = Literal["send"]
+# Compatibility for app.py while the presentation-specific name ages out.
+AnchorWithdrawalRequest = AnchorWithdrawalPayment
 
 
 @dataclass(frozen=True)
 class AssetDetailAction:
     kind: AssetDetailActionKind
     asset: str
-
-
-@dataclass(frozen=True)
-class AnchorWithdrawalRequest:
-    asset: str
-    amount: str
-    destination: str
-    memo: str | None = None
-    memo_type: str | None = None
-    anchor_domain: str | None = None
-    extra_info: str | None = None
 
 
 class Sep6TransferDialog(ModalScreen[dict | None]):
@@ -56,16 +55,14 @@ class Sep6TransferDialog(ModalScreen[dict | None]):
     Sep6TransferDialog Button { margin-left: 1; }
     """
 
-    def __init__(self, kind: str, asset_code: str, info: dict):
+    def __init__(self, kind: str, asset_code: str, plan: AnchorTransferPlan):
         super().__init__()
         self.kind = kind
         self.asset_code = asset_code
-        self.info = info if isinstance(info, dict) else {}
-        self.transfer_type, fields = _sep6_schema(self.info)
+        self.transfer_type = plan.transfer_type
         self.fields = [
             (name, spec if isinstance(spec, dict) else {})
-            for name, spec in fields.items()
-            if name not in {"asset_code", "account"}
+            for name, spec in plan.user_fields.items()
         ]
 
     def compose(self) -> ComposeResult:
@@ -235,109 +232,68 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
 
     def _start_anchor(self, kind: Literal["deposit", "withdraw"]) -> None:
         capabilities = self._anchor_capabilities
+        service = getattr(self.runtime, "anchor_transfer_service", None) if self.runtime else None
         if capabilities is None:
             self.set_status("Discover anchor capabilities first (A).")
             return
-        sep24_enabled = (
-            capabilities.sep24_deposit if kind == "deposit" else capabilities.sep24_withdraw
-        )
-        sep24_ready = bool(
-            sep24_enabled and capabilities.web_auth_url and capabilities.signing_key
-        )
-        sep6_enabled = capabilities.sep6_deposit if kind == "deposit" else capabilities.sep6_withdraw
-        if sep24_ready:
-            self._start_sep24(kind)
-            return
-        if sep6_enabled and capabilities.sep6_url:
-            self._start_sep6(kind)
-            return
-        self.set_status(f"No usable SEP-24/SEP-6 {kind} flow is advertised for this asset.")
-
-    def _start_sep24(self, kind: str) -> None:
-        if self.runtime is None:
-            self.set_status("Anchor transfers are unavailable in this runtime.")
+        if service is None:
+            self.set_status("Anchor transfer workflow is unavailable in this runtime.")
             return
         try:
-            record = self.runtime.wallet_manager.get_record()
-            state = self.runtime.wallet_manager.state(record.name)
-        except FresnicaError as exc:
-            self.set_status(str(exc))
-            return
-        if state is WalletState.WATCH_ONLY:
-            self.set_status("Watch-only wallet cannot sign SEP-10 authentication.")
-            return
-        if state is WalletState.LOCKED:
-            self.app.push_screen(
-                UnlockDialog(record.name),
-                lambda password: self._after_anchor_unlock(kind, record.name, password),
-            )
-            return
-        self._begin_anchor_transfer(kind)
-
-    def _after_anchor_unlock(self, kind: str, wallet_name: str, password: str | None) -> None:
-        if password is None or self.runtime is None:
-            return
-        try:
-            self.runtime.wallet_manager.unlock(wallet_name, password)
+            plan = service.plan(capabilities, kind)
         except (FresnicaError, ValueError) as exc:
+            self.set_status(str(exc))
+            return
+        if plan.requires_fields:
             self.app.push_screen(
-                UnlockDialog(wallet_name, error=str(exc)),
-                lambda retry: self._after_anchor_unlock(kind, wallet_name, retry),
+                Sep6TransferDialog(kind, self.asset.code, plan),
+                lambda values: self._begin_anchor_transfer(plan, values),
             )
             return
-        self._begin_anchor_transfer(kind)
+        self._begin_anchor_transfer(plan, {})
 
-    def _begin_anchor_transfer(self, kind: str) -> None:
-        self.set_status(f"Authenticating with anchor for {kind}...")
-        self._run_anchor_transfer(kind)
-
-    def _start_sep6(self, kind: str) -> None:
-        capabilities = self._anchor_capabilities
-        if capabilities is None:
+    def _begin_anchor_transfer(
+        self,
+        plan: AnchorTransferPlan,
+        fields: dict | None,
+    ) -> None:
+        if fields is None or self.runtime is None:
             return
-        info = capabilities.sep6_deposit_info if kind == "deposit" else capabilities.sep6_withdraw_info
-        transfer_type, fields = _sep6_schema(info)
-        visible_fields = [name for name in fields if name not in {"asset_code", "account"}]
-        if visible_fields or (kind == "withdraw" and transfer_type):
-            self.app.push_screen(
-                Sep6TransferDialog(kind, self.asset.code, info),
-                lambda values: self._begin_sep6_transfer(kind, values),
-            )
-            return
-        self._begin_sep6_transfer(kind, {})
-
-    def _begin_sep6_transfer(self, kind: str, fields: dict | None) -> None:
-        if fields is None or self.runtime is None or self._anchor_capabilities is None:
-            return
-        info = (
-            self._anchor_capabilities.sep6_deposit_info
-            if kind == "deposit"
-            else self._anchor_capabilities.sep6_withdraw_info
-        )
-        needs_signing = kind == "withdraw" or bool(info.get("authentication_required", False))
         try:
             record = self.runtime.wallet_manager.get_record()
             state = self.runtime.wallet_manager.state(record.name)
         except FresnicaError as exc:
             self.set_status(str(exc))
             return
-        if needs_signing and state is WalletState.WATCH_ONLY:
-            self.set_status("Watch-only wallet cannot complete this SEP-6 flow.")
+        if plan.requires_signing and state is WalletState.WATCH_ONLY:
+            self.set_status("Watch-only wallet cannot complete this anchor transfer.")
             return
-        if needs_signing and state is WalletState.LOCKED:
+        if plan.requires_signing and state is WalletState.LOCKED:
             self.app.push_screen(
                 UnlockDialog(record.name),
-                lambda password: self._after_sep6_unlock(kind, fields, record.name, password),
+                lambda password: self._after_anchor_unlock(
+                    plan, fields, record.name, password
+                ),
             )
             return
-        session = self.runtime.wallet_manager.current() if needs_signing else self.runtime.wallet_manager.view()
+        session = (
+            self.runtime.wallet_manager.current()
+            if plan.requires_signing
+            else self.runtime.wallet_manager.view()
+        )
         if session is None:
             self.set_status("Wallet is locked.")
             return
-        self.set_status(f"Requesting SEP-6 {kind} instructions...")
-        self._run_sep6_transfer(kind, fields, session.wallet)
+        self.set_status(f"Starting anchor {plan.kind} via {plan.protocol.upper()}...")
+        self._run_anchor_transfer(plan, fields, session.wallet)
 
-    def _after_sep6_unlock(self, kind: str, fields: dict, wallet_name: str, password: str | None) -> None:
+    def _after_anchor_unlock(
+        self,
+        plan: AnchorTransferPlan,
+        fields: dict,
+        wallet_name: str,
+        password: str | None,
+    ) -> None:
         if password is None or self.runtime is None:
             return
         try:
@@ -345,107 +301,87 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         except (FresnicaError, ValueError) as exc:
             self.app.push_screen(
                 UnlockDialog(wallet_name, error=str(exc)),
-                lambda retry: self._after_sep6_unlock(kind, fields, wallet_name, retry),
+                lambda retry: self._after_anchor_unlock(
+                    plan, fields, wallet_name, retry
+                ),
             )
             return
-        self._begin_sep6_transfer(kind, fields)
+        self._begin_anchor_transfer(plan, fields)
 
     @work(exclusive=True, thread=True, exit_on_error=False)
-    def _run_sep6_transfer(self, kind: str, fields: dict, wallet) -> None:
+    def _run_anchor_transfer(self, plan: AnchorTransferPlan, fields: dict, wallet) -> None:
         try:
             if self.runtime is None or self._anchor_capabilities is None:
                 raise ValueError("Anchor transfer context is unavailable")
-            network = get_network(self.runtime.wallet_manager.get_record().network)
-            transfer = AnchorService().start_sep6(
+            service = getattr(self.runtime, "anchor_transfer_service", None)
+            if service is None:
+                raise ValueError("Anchor transfer workflow is unavailable")
+            record = self.runtime.wallet_manager.get_record()
+            network = get_network(record.network)
+            outcome = service.start(
                 wallet,
                 self.asset,
                 self._anchor_capabilities,
-                kind,
+                plan.kind,
                 network.passphrase,
-                fields,
+                fields=fields,
+                plan=plan,
             )
-            self.app.call_from_thread(self._finish_sep6_transfer, transfer, None)
-        except (FresnicaError, ValueError) as exc:
-            self.app.call_from_thread(self._finish_sep6_transfer, None, exc)
-
-    def _finish_sep6_transfer(self, transfer: AnchorSep6Transfer | None, error) -> None:
-        if not self.is_mounted:
-            return
-        if error is not None:
-            self.set_status(f"SEP-6 transfer failed: {error}")
-            return
-        assert transfer is not None
-        self.query_one("#asset-anchor", Static).update(_sep6_transfer_text(transfer))
-        response_type = str(transfer.payload.get("type") or "")
-        if response_type in {
-            "non_interactive_customer_info_needed",
-            "customer_info_status",
-        }:
-            self.set_status("Anchor requires customer information · SEP-12/KYC handoff is not exposed yet.")
-            return
-        if transfer.kind == "deposit":
-            self.set_status("SEP-6 deposit instructions ready.")
-            return
-        destination = str(transfer.payload.get("account_id") or "").strip()
-        amount = str(transfer.request.get("amount") or "").strip()
-        if not destination or not amount:
-            self.set_status("SEP-6 withdraw response is missing account_id or requested amount.")
-            return
-        handler = getattr(self.app, "prepare_anchor_withdrawal", None)
-        if handler is None:
-            self.set_status("Anchor withdrawal payment pipeline is unavailable.")
-            return
-        extra = transfer.payload.get("extra_info")
-        if isinstance(extra, dict):
-            extra = extra.get("message")
-        handler(
-            self,
-            AnchorWithdrawalRequest(
-                asset=_asset_identity(self.balance),
-                amount=amount,
-                destination=destination,
-                memo=_optional_payload_text(transfer.payload.get("memo")),
-                memo_type=_optional_payload_text(transfer.payload.get("memo_type")),
-                anchor_domain=self._anchor_capabilities.domain,
-                extra_info=_optional_payload_text(extra),
-            ),
-        )
-
-    @work(exclusive=True, thread=True, exit_on_error=False)
-    def _run_anchor_transfer(self, kind: str) -> None:
-        try:
-            if self.runtime is None or self._anchor_capabilities is None:
-                raise ValueError("Anchor transfer context is unavailable")
-            session = self.runtime.wallet_manager.current()
-            if session is None:
-                raise WalletLockedError("Wallet is locked")
-            network = get_network(session.record.network)
-            transfer = AnchorService().start_sep24(
-                session.wallet,
-                self.asset,
-                self._anchor_capabilities,
-                kind,
-                network.passphrase,
-            )
-            self.app.call_from_thread(self._finish_anchor_transfer, transfer, None)
+            self.app.call_from_thread(self._finish_anchor_transfer, outcome, None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._finish_anchor_transfer, None, exc)
 
-    def _finish_anchor_transfer(self, transfer, error) -> None:
+    def _finish_anchor_transfer(self, outcome, error) -> None:
         if not self.is_mounted:
             return
         if error is not None:
             self.set_status(f"Anchor transfer failed: {error}")
             return
-        assert transfer is not None
-        opened = bool(webbrowser.open(transfer.url, new=2))
-        self.query_one("#asset-anchor", Static).update(
-            f"Anchor {transfer.kind} session:\n{transfer.url}"
-        )
-        if opened:
-            self.set_status(f"Opened anchor {transfer.kind} flow in the system browser.")
-        else:
-            self.set_status("Browser did not open automatically · use the URL shown above.")
+        if isinstance(outcome, AnchorNeedFields):
+            self.app.push_screen(
+                Sep6TransferDialog(outcome.plan.kind, self.asset.code, outcome.plan),
+                lambda values: self._begin_anchor_transfer(outcome.plan, values),
+            )
+            return
+        if isinstance(outcome, AnchorOpenUrl):
+            opened = bool(webbrowser.open(outcome.url, new=2))
+            self.query_one("#asset-anchor", Static).update(
+                f"Anchor {outcome.kind} session:\n{outcome.url}"
+            )
+            if opened:
+                self.set_status(
+                    f"Opened anchor {outcome.kind} flow in the system browser."
+                )
+            else:
+                self.set_status(
+                    "Browser did not open automatically · use the URL shown above."
+                )
+            return
+        if isinstance(outcome, AnchorKycRequired):
+            self.query_one("#asset-anchor", Static).update(
+                _anchor_payload_text(outcome.kind, outcome.payload)
+            )
+            self.set_status(
+                "Anchor requires customer information · SEP-12/KYC handoff is not exposed yet."
+            )
+            return
+        if isinstance(outcome, AnchorDepositInstructions):
+            self.query_one("#asset-anchor", Static).update(
+                _anchor_payload_text("deposit", outcome.payload)
+            )
+            self.set_status("SEP-6 deposit instructions ready.")
+            return
+        if isinstance(outcome, AnchorWithdrawalPayment):
+            self.query_one("#asset-anchor", Static).update(
+                _anchor_payload_text("withdraw", outcome.payload)
+            )
+            handler = getattr(self.app, "prepare_anchor_withdrawal", None)
+            if handler is None:
+                self.set_status("Anchor withdrawal payment pipeline is unavailable.")
+                return
+            handler(self, outcome)
+            return
+        self.set_status("Anchor returned an unsupported transfer outcome.")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
@@ -463,7 +399,12 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
     @work(thread=True, exit_on_error=False)
     def _discover_anchor(self, domain: str) -> None:
         try:
-            capabilities = AnchorService().discover(self.asset, domain)
+            if self.runtime is None:
+                raise ValueError("Anchor transfer context is unavailable")
+            service = getattr(self.runtime, "anchor_transfer_service", None)
+            if service is None:
+                raise ValueError("Anchor transfer workflow is unavailable")
+            capabilities = service.discover(self.asset, domain)
             self.app.call_from_thread(self._apply_anchor, capabilities, None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply_anchor, None, exc)
@@ -475,7 +416,8 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         if store is None:
             return
         try:
-            capabilities = store.get(self.asset, self.domain)
+            record = self.runtime.wallet_manager.get_record()
+            capabilities = store.get(record.network, self.asset, self.domain)
         except FresnicaError:
             return
         if capabilities is not None:
@@ -495,7 +437,8 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         store = getattr(self.runtime, "anchor_capabilities_store", None) if self.runtime else None
         if store is not None:
             try:
-                store.put(self.asset, capabilities)
+                record = self.runtime.wallet_manager.get_record()
+                store.put(record.network, self.asset, capabilities)
             except FresnicaError as exc:
                 cache_error = exc
         self._show_anchor(capabilities)
@@ -528,12 +471,20 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         withdraw = self.query("#anchor-withdraw")
         if deposit:
             deposit.first().display = bool(
-                (capabilities.sep24_deposit and capabilities.web_auth_url and capabilities.signing_key)
+                (
+                    capabilities.sep24_deposit
+                    and capabilities.web_auth_url
+                    and capabilities.signing_key
+                )
                 or capabilities.sep6_deposit
             )
         if withdraw:
             withdraw.first().display = bool(
-                (capabilities.sep24_withdraw and capabilities.web_auth_url and capabilities.signing_key)
+                (
+                    capabilities.sep24_withdraw
+                    and capabilities.web_auth_url
+                    and capabilities.signing_key
+                )
                 or capabilities.sep6_withdraw
             )
 
@@ -595,22 +546,8 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             self.query_one("#asset-status", Static).update(message)
 
 
-def _sep6_schema(info: dict) -> tuple[str | None, dict]:
-    if not isinstance(info, dict):
-        return None, {}
-    types = info.get("types")
-    if isinstance(types, dict) and types:
-        transfer_type = next(iter(types))
-        spec = types.get(transfer_type)
-        fields = spec.get("fields", {}) if isinstance(spec, dict) else {}
-        return transfer_type, fields if isinstance(fields, dict) else {}
-    fields = info.get("fields", {})
-    return None, fields if isinstance(fields, dict) else {}
-
-
-def _sep6_transfer_text(transfer: AnchorSep6Transfer) -> str:
-    payload = transfer.payload
-    lines = [f"SEP-6 {transfer.kind}:"]
+def _anchor_payload_text(kind: str, payload: dict) -> str:
+    lines = [f"SEP-6 {kind}:"]
     how = _optional_payload_text(payload.get("how"))
     if how:
         lines.append(how)

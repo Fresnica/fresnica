@@ -7,6 +7,7 @@ from textual.widgets import Static
 
 from fresnica.anchor_cache import AnchorCapabilitiesStore
 from fresnica.anchor_service import AnchorCapabilities, AnchorInteractiveTransfer
+from fresnica.anchor_transfer_service import AnchorTransferService
 from fresnica.balance_service import ISSUER_DOMAIN_CACHE_KEY
 from fresnica.manager import WalletManager
 from fresnica.models import Asset, BalanceView
@@ -22,6 +23,7 @@ async def _settle(pilot, rounds=6):
 class Runtime:
     def __init__(self, tmp_path):
         self.anchor_capabilities_store = AnchorCapabilitiesStore(tmp_path / "anchors.json")
+        self.anchor_transfer_service = AnchorTransferService()
         self.wallet_manager = WalletManager(MemoryWalletStorage())
         self.keypair = Keypair.random()
         self.wallet_manager.import_secret(
@@ -116,7 +118,7 @@ def test_anchor_discovery_is_cached_and_reused_without_network(tmp_path, monkeyp
                     transaction_id="1",
                 )
 
-        monkeypatch.setattr("fresnica.tui.asset_details.AnchorService", FakeAnchorService)
+        runtime.anchor_transfer_service = AnchorTransferService(FakeAnchorService())
         monkeypatch.setattr(
             "fresnica.tui.asset_details.webbrowser.open",
             lambda url, new=0: opened.append((url, new)) or True,
@@ -132,7 +134,12 @@ def test_anchor_discovery_is_cached_and_reused_without_network(tmp_path, monkeyp
             await pilot.press("a")
             await _settle(pilot, 8)
             assert discoveries == [(balance.asset, "anchor.example")]
-            assert runtime.anchor_capabilities_store.get(balance.asset, "anchor.example") == capabilities
+            assert (
+                runtime.anchor_capabilities_store.get(
+                    "testnet", balance.asset, "anchor.example"
+                )
+                == capabilities
+            )
             assert screen.query_one("#anchor-deposit").display is True
             assert screen.query_one("#anchor-withdraw").display is True
 
