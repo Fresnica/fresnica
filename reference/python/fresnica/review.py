@@ -31,3 +31,4 @@ class OfferReview:
     fee: str
     network: str
     offer_id: str | None = None
+    trustline_asset: str | None = None
