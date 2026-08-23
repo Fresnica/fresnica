@@ -1,19 +1,19 @@
 """Decode user-relevant SDEX state from Stellar transaction result XDR."""
 
-import binascii
-
 from stellar_sdk import xdr as stellar_xdr
 
 from .models import OfferSubmissionOutcome
 
 
 def parse_offer_submission_outcome(result_xdr: str | None) -> OfferSubmissionOutcome | None:
-    """Return ManageOffer outcome metadata without making it transaction-critical."""
+    """Return optional ManageOffer metadata without making it transaction-critical."""
     if not result_xdr:
         return None
     try:
         payload = stellar_xdr.TransactionResult.from_xdr(result_xdr).to_json_dict()
-    except (binascii.Error, TypeError, ValueError):
+    except Exception:
+        # This is post-submit display metadata. A future/invalid XDR shape must
+        # never rewrite a confirmed transaction success as a client failure.
         return None
     return _offer_outcome_from_result_json(payload)
 
