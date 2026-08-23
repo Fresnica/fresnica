@@ -46,6 +46,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Back"),
+        Binding("enter", "open_selected", "Open", priority=True),
         Binding("p", "popular", "Popular"),
         Binding("f", "favorites", "Starred"),
         Binding("a", "add_pair", "Add pair"),
@@ -106,6 +107,11 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def action_open_selected(self) -> None:
+        pair = self._selected_pair()
+        if pair is not None:
+            self._open_pair(pair)
+
     def action_popular(self) -> None:
         self._tab = "popular"
         self._render_market_list()
@@ -156,9 +162,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "market-list":
-            pair = self._selected_pair()
-            if pair is not None:
-                self._open_pair(pair)
+            self.action_open_selected()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
