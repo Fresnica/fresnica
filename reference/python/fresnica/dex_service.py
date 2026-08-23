@@ -13,6 +13,8 @@ RESOLUTIONS = {
     "1d": 86_400_000,
     "1w": 604_800_000,
 }
+ACCOUNT_TRADE_PAGE_LIMIT = 200
+ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES = 5
 
 
 class DexService:
@@ -46,12 +48,68 @@ class DexService:
             raise ValueError(f"Offer {offer_id} does not belong to this wallet")
         return open_offer_from_horizon(raw)
 
-    def get_account_trade_segments(self, wallet, limit: int = 200):
-        """Fetch recent wallet fills and compress consecutive fills per offer."""
+    def get_account_trade_segments(
+        self,
+        wallet,
+        limit: int = 1000,
+        refresh: bool = True,
+    ):
+        """Sync wallet trades incrementally, then aggregate consecutive offer fills."""
         address = wallet.address()
-        response = self.adapter.get_account_trades(address, limit=limit, desc=True)
-        trades = [account_trade_from_horizon(item, address) for item in _records(response)]
+        cache_key = account_trade_cache_key(address)
+        if refresh:
+            latest = self.datastore.get_trades(
+                self.network_name,
+                cache_key,
+                limit=1,
+            )
+            cursor = _paging_token(latest[0]) if latest else None
+            if cursor:
+                self._sync_account_trade_increment(address, cache_key, cursor)
+            else:
+                response = self.adapter.get_account_trades(
+                    address,
+                    limit=min(ACCOUNT_TRADE_PAGE_LIMIT, max(limit, 1)),
+                    desc=True,
+                )
+                self.datastore.save_trades(
+                    self.network_name,
+                    cache_key,
+                    response,
+                )
+
+        raw = self.datastore.get_trades(
+            self.network_name,
+            cache_key,
+            limit=limit,
+        )
+        trades = [account_trade_from_horizon(item, address) for item in raw]
         return compress_account_trades(trades, address)
+
+    def _sync_account_trade_increment(
+        self,
+        address: str,
+        cache_key: str,
+        cursor: str,
+    ) -> None:
+        next_cursor = cursor
+        for _ in range(ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES):
+            response = self.adapter.get_account_trades(
+                address,
+                limit=ACCOUNT_TRADE_PAGE_LIMIT,
+                cursor=next_cursor,
+                desc=False,
+            )
+            records = _records(response)
+            if not records:
+                return
+            self.datastore.save_trades(self.network_name, cache_key, records)
+            last_cursor = _paging_token(records[-1])
+            if last_cursor is None or last_cursor == next_cursor:
+                return
+            next_cursor = last_cursor
+            if len(records) < ACCOUNT_TRADE_PAGE_LIMIT:
+                return
 
     def get_trades(
         self,
@@ -130,6 +188,10 @@ def asset_pair_key(base: Asset, counter: Asset) -> str:
     return f"{_asset_key(base)}>{_asset_key(counter)}"
 
 
+def account_trade_cache_key(address: str) -> str:
+    return f"account:{address}"
+
+
 def _asset(value) -> Asset:
     return value if isinstance(value, Asset) else Asset.parse(value)
 
@@ -138,6 +200,11 @@ def _asset_key(asset: Asset) -> str:
     if asset.is_native:
         return "XLM"
     return f"{asset.code}:{asset.issuer}"
+
+
+def _paging_token(item: dict) -> str | None:
+    value = item.get("paging_token", item.get("id"))
+    return None if value is None else str(value)
 
 
 def _records(payload) -> list[dict]:
