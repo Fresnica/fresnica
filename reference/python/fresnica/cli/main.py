@@ -48,6 +48,10 @@ def main(argv=None, runtime=None) -> int:
             from .commands.wallet import execute_wallet
 
             execute_wallet(runtime, args, renderer)
+        elif args.command == "contact":
+            from .commands.contact import execute_contact
+
+            execute_contact(runtime, args, renderer)
         elif args.command == "dex":
             from .commands.dex import execute_dex
 
