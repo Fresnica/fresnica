@@ -446,15 +446,17 @@ class FresnicaApp(App[None]):
                 request.destination,
                 request.memo,
             )
-            prepared = services.transfer_service.prepare(
-                wallet_name=record.name,
-                wallet=session.wallet,
-                destination=destination.address,
-                asset=request.asset,
-                amount=request.amount,
-                memo=destination.memo,
-                contact_name=destination.contact_name,
-            )
+            prepare_kwargs = {
+                "wallet_name": record.name,
+                "wallet": session.wallet,
+                "destination": destination.address,
+                "asset": request.asset,
+                "amount": request.amount,
+                "memo": destination.memo,
+            }
+            if destination.contact_name is not None:
+                prepare_kwargs["contact_name"] = destination.contact_name
+            prepared = services.transfer_service.prepare(**prepare_kwargs)
             self.call_from_thread(
                 self._show_review,
                 session.wallet,
