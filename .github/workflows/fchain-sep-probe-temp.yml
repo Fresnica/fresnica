@@ -24,7 +24,7 @@ jobs:
           if grep -q 'class AnchorSep6Transfer' reference/python/fresnica/anchor_service.py; then
             echo 'implementation already applied'
           else
-            python tools/sep6_search_patch.py
+            python tools/sep6_search_patch.py || true
             python tools/sep6_search_patch_fixup.py
           fi
       - name: Diff check
