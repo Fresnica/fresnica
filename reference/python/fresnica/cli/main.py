@@ -52,6 +52,10 @@ def main(argv=None, runtime=None) -> int:
             from .commands.contact import execute_contact
 
             execute_contact(runtime, args, renderer)
+        elif args.command == "trust":
+            from .commands.trust import execute_trust
+
+            execute_trust(runtime, args, renderer)
         elif args.command == "dex":
             from .commands.dex import execute_dex
 
