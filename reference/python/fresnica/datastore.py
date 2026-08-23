@@ -27,8 +27,13 @@ class DataStore(ABC):
 
     @abstractmethod
     def get_operations(
-        self, network: str, account: str, limit: int = 20
+        self, network: str, account: str, limit: int | None = 20
     ) -> list[dict]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def trim_operations(self, network: str, account: str, limit: int) -> int:
+        """Keep only the newest ``limit`` operations and return rows removed."""
         raise NotImplementedError
 
     @abstractmethod
@@ -91,14 +96,27 @@ class MemoryDataStore(DataStore):
                 bucket[token] = item
 
     def get_operations(
-        self, network: str, account: str, limit: int = 20
+        self, network: str, account: str, limit: int | None = 20
     ) -> list[dict]:
         items = list(self._operations.get((network, account), {}).values())
         items.sort(
             key=lambda item: int(item.get("paging_token", item.get("id", 0)) or 0),
             reverse=True,
         )
-        return items[:limit]
+        return items if limit is None else items[:limit]
+
+    def trim_operations(self, network: str, account: str, limit: int) -> int:
+        if limit < 0:
+            raise ValueError("Operation retention limit must be non-negative")
+        key = (network, account)
+        bucket = self._operations.get(key, {})
+        if len(bucket) <= limit:
+            return 0
+        tokens = sorted(bucket, key=lambda value: int(value or 0), reverse=True)
+        keep = set(tokens[:limit])
+        removed = len(bucket) - len(keep)
+        self._operations[key] = {token: item for token, item in bucket.items() if token in keep}
+        return removed
 
     def save_liquidity_pool(self, network: str, pool_id: str, pool: dict) -> None:
         self._liquidity_pools[(network, pool_id)] = dict(pool)
@@ -315,19 +333,54 @@ class SQLiteDataStore(DataStore):
             )
 
     def get_operations(
-        self, network: str, account: str, limit: int = 20
+        self, network: str, account: str, limit: int | None = 20
     ) -> list[dict]:
         with self._connect() as db:
-            rows = db.execute(
-                """
-                SELECT raw_json FROM operations
-                WHERE network = ? AND account = ?
-                ORDER BY CAST(paging_token AS INTEGER) DESC
-                LIMIT ?
-                """,
-                (network, account, limit),
-            ).fetchall()
+            if limit is None:
+                rows = db.execute(
+                    """
+                    SELECT raw_json FROM operations
+                    WHERE network = ? AND account = ?
+                    ORDER BY CAST(paging_token AS INTEGER) DESC
+                    """,
+                    (network, account),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """
+                    SELECT raw_json FROM operations
+                    WHERE network = ? AND account = ?
+                    ORDER BY CAST(paging_token AS INTEGER) DESC
+                    LIMIT ?
+                    """,
+                    (network, account, limit),
+                ).fetchall()
         return [json.loads(row["raw_json"]) for row in rows]
+
+    def trim_operations(self, network: str, account: str, limit: int) -> int:
+        if limit < 0:
+            raise ValueError("Operation retention limit must be non-negative")
+        with self._connect() as db:
+            if limit == 0:
+                cursor = db.execute(
+                    "DELETE FROM operations WHERE network = ? AND account = ?",
+                    (network, account),
+                )
+            else:
+                cursor = db.execute(
+                    """
+                    DELETE FROM operations
+                    WHERE network = ? AND account = ?
+                      AND paging_token NOT IN (
+                          SELECT paging_token FROM operations
+                          WHERE network = ? AND account = ?
+                          ORDER BY CAST(paging_token AS INTEGER) DESC
+                          LIMIT ?
+                      )
+                    """,
+                    (network, account, network, account, limit),
+                )
+            return max(0, cursor.rowcount)
 
     def save_liquidity_pool(self, network: str, pool_id: str, pool: dict) -> None:
         with self._connect() as db:

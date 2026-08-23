@@ -4,36 +4,90 @@ from decimal import Decimal, InvalidOperation
 
 from .models import ActivityView, OperationView
 from .presentation import format_amount, short_address
-from .sync import SyncResult
-
-
 SYNC_PAGE_LIMIT = 200
-SYNC_MAX_INCREMENTAL_PAGES = 5
+HISTORY_CACHE_LIMIT = 2000
 SUSPICIOUS_NATIVE_DUST_MAX = Decimal("0.0000010")
 
 
 class HistoryService:
-    def __init__(self, adapter, datastore, network_name: str):
+    """Account history cache with a recent-window default and full-history opt-in.
+
+    The default model keeps the newest ``history_cache_limit`` Horizon operations.
+    An empty cache is bootstrapped from the current Horizon head backwards. Once a
+    cache exists, refresh always starts at the newest local cursor and walks forward
+    to the current head. Old rows are trimmed as new pages arrive.
+
+    ``keep_full_history`` disables trimming and also backfills older Horizon history
+    that is still available. Fresnica never claims it can recover records already
+    pruned by the upstream Horizon instance.
+    """
+
+    def __init__(
+        self,
+        adapter,
+        datastore,
+        network_name: str,
+        *,
+        history_cache_limit: int = HISTORY_CACHE_LIMIT,
+        keep_full_history: bool = False,
+    ):
+        if history_cache_limit <= 0:
+            raise ValueError("History cache limit must be positive")
         self.adapter = adapter
         self.datastore = datastore
         self.network_name = network_name
+        self.history_cache_limit = history_cache_limit
+        self.keep_full_history = bool(keep_full_history)
 
-    def sync_recent(self, wallet, limit: int = SYNC_PAGE_LIMIT) -> SyncResult:
-        """Catch up newer operations with a bounded forward pagination loop."""
+    def set_keep_full_history(self, enabled: bool) -> None:
+        self.keep_full_history = bool(enabled)
+
+    def sync_recent(self, wallet, limit: int = SYNC_PAGE_LIMIT) -> int:
+        """Synchronize the local history cache and return fetched operation count."""
         address = wallet.address()
         cached = self.datastore.get_operations(self.network_name, address, limit=1)
         if not cached:
-            response = self.adapter.get_operations(address, limit=limit, desc=True)
-            records = list(response.get("_embedded", {}).get("records", []))
-            if records:
-                self.datastore.save_operations(self.network_name, address, response)
-            # A descending first page is anchored at Horizon head even when older
-            # history exists; older data is explicitly fetched via load_older().
-            return SyncResult(fetched_count=len(records), caught_up=True)
+            fetched = self._bootstrap_from_head(address, limit)
+        else:
+            fetched = self._sync_newer(address, _paging_token(cached[0]), limit)
+            if self.keep_full_history:
+                fetched += self._backfill_older(address, limit)
 
-        next_cursor = _paging_token(cached[0])
+        if not self.keep_full_history:
+            self.datastore.trim_operations(
+                self.network_name, address, self.history_cache_limit
+            )
+        return fetched
+
+    def _bootstrap_from_head(self, address: str, limit: int) -> int:
         fetched = 0
-        for _ in range(SYNC_MAX_INCREMENTAL_PAGES):
+        cursor = None
+        while self.keep_full_history or fetched < self.history_cache_limit:
+            response = self.adapter.get_operations(
+                address,
+                limit=limit,
+                cursor=cursor,
+                desc=True,
+            )
+            records = list(response.get("_embedded", {}).get("records", []))
+            if not records:
+                break
+            self.datastore.save_operations(self.network_name, address, response)
+            fetched += len(records)
+            if not self.keep_full_history:
+                self.datastore.trim_operations(
+                    self.network_name, address, self.history_cache_limit
+                )
+            next_cursor = _paging_token(records[-1])
+            if not next_cursor or next_cursor == cursor or len(records) < limit:
+                break
+            cursor = next_cursor
+        return fetched
+
+    def _sync_newer(self, address: str, cursor: str, limit: int) -> int:
+        fetched = 0
+        next_cursor = cursor
+        while next_cursor:
             response = self.adapter.get_operations(
                 address,
                 limit=limit,
@@ -42,22 +96,55 @@ class HistoryService:
             )
             records = list(response.get("_embedded", {}).get("records", []))
             if not records:
-                return SyncResult(fetched_count=fetched, caught_up=True)
+                break
             self.datastore.save_operations(self.network_name, address, response)
             fetched += len(records)
-            last_cursor = _paging_token(records[-1])
-            if not last_cursor or last_cursor == next_cursor:
-                return SyncResult(fetched_count=fetched, caught_up=False)
-            next_cursor = last_cursor
-            if len(records) < limit:
-                return SyncResult(fetched_count=fetched, caught_up=True)
-        return SyncResult(fetched_count=fetched, caught_up=False)
+            if not self.keep_full_history:
+                self.datastore.trim_operations(
+                    self.network_name, address, self.history_cache_limit
+                )
+            cursor_after_page = _paging_token(records[-1])
+            if (
+                not cursor_after_page
+                or cursor_after_page == next_cursor
+                or len(records) < limit
+            ):
+                break
+            next_cursor = cursor_after_page
+        return fetched
+
+    def _backfill_older(self, address: str, limit: int) -> int:
+        cached = self.datastore.get_operations(self.network_name, address, limit=None)
+        if not cached:
+            return self._bootstrap_from_head(address, limit)
+        fetched = 0
+        cursor = _paging_token(cached[-1])
+        while cursor:
+            response = self.adapter.get_operations(
+                address,
+                limit=limit,
+                cursor=cursor,
+                desc=True,
+            )
+            records = list(response.get("_embedded", {}).get("records", []))
+            if not records:
+                break
+            self.datastore.save_operations(self.network_name, address, response)
+            fetched += len(records)
+            next_cursor = _paging_token(records[-1])
+            if not next_cursor or next_cursor == cursor or len(records) < limit:
+                break
+            cursor = next_cursor
+        return fetched
 
     def load_older(self, wallet, limit: int = SYNC_PAGE_LIMIT) -> int:
+        """Compatibility helper: network backfill is available only in full mode."""
+        if not self.keep_full_history:
+            return 0
         address = wallet.address()
-        cached = self.datastore.get_operations(self.network_name, address, limit=100000)
+        cached = self.datastore.get_operations(self.network_name, address, limit=None)
         if not cached:
-            return self.sync_recent(wallet, limit=limit).fetched_count
+            return self._bootstrap_from_head(address, limit)
         cursor = _paging_token(cached[-1])
         response = self.adapter.get_operations(
             address,
@@ -75,7 +162,7 @@ class HistoryService:
             self.datastore.get_operations(
                 self.network_name,
                 wallet.address(),
-                limit=100000,
+                limit=None,
             )
         )
 
@@ -95,23 +182,21 @@ class HistoryService:
     def get_activity_views(
         self,
         wallet,
-        limit: int = 20,
+        limit: int | None = 20,
         refresh: bool = True,
     ) -> list[ActivityView]:
         """Group cached account operations into transaction-level activities."""
         address = wallet.address()
         if refresh:
             self.sync_recent(wallet)
-        # Multi-operation transactions mean N displayed activities can require more
-        # than N raw operations. Read the full local cache so loading older pages is
-        # immediately reflected instead of being hidden behind a fixed 200-op window.
         raw_operations = self.datastore.get_operations(
             self.network_name,
             address,
-            limit=100000,
+            limit=None,
         )
         operations = [self._view(item, address) for item in raw_operations]
-        return _group_activities(operations)[:limit]
+        activities = _group_activities(operations)
+        return activities if limit is None else activities[:limit]
 
     @staticmethod
     def _view(raw: dict, account: str) -> OperationView:

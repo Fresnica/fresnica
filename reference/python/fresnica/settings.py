@@ -10,6 +10,7 @@ class UserSettings:
     show_zero_balances: bool = False
     hide_suspicious_claimables: bool = False
     use_local_time: bool = True
+    keep_full_history: bool = False
     theme: str | None = None
 
 
@@ -35,6 +36,7 @@ class SettingsStore:
                 raw.get("hide_suspicious_claimables", False)
             ),
             use_local_time=bool(raw.get("use_local_time", True)),
+            keep_full_history=bool(raw.get("keep_full_history", False)),
             theme=str(theme) if theme else None,
         )
 
