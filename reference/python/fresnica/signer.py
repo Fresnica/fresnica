@@ -2,12 +2,22 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from stellar_sdk import Keypair
 from stellar_sdk.decorated_signature import DecoratedSignature
 from stellar_sdk.exceptions import BadSignatureError
 
 from .errors import SignerError
+
+
+@dataclass(frozen=True)
+class ExternalSigningRequest:
+    """Public transaction material an external signer may inspect before signing."""
+
+    transaction_hash: bytes
+    transaction_xdr: str
+    network_passphrase: str
 
 
 class Signer(ABC):
@@ -39,19 +49,23 @@ class StellarKeypairSigner(Signer):
 
 
 class ExternalEd25519Signer(Signer):
-    """Signer adapter for a device/process that signs a Stellar transaction hash.
+    """Verified adapter for a hardware/device/process Ed25519 signer.
 
-    The provider receives exactly the 32-byte hash returned by the Stellar SDK
-    envelope. Fresnica verifies the returned Ed25519 signature against the
-    declared public key before adding a decorated signature to the envelope.
-    No private signing material is stored by this adapter.
+    The provider receives public transaction material including XDR and the
+    exact 32-byte hash that Stellar validators expect to be signed. Fresnica
+    verifies the returned signature against the declared public key before
+    mutating the transaction envelope. No private signing material is stored.
     """
 
-    def __init__(self, public_key: str, sign_hash: Callable[[bytes], bytes]):
+    def __init__(
+        self,
+        public_key: str,
+        sign_request: Callable[[ExternalSigningRequest], bytes],
+    ):
         self.keypair = Keypair.from_public_key(public_key)
-        if not callable(sign_hash):
-            raise TypeError("External sign_hash provider must be callable")
-        self.sign_hash = sign_hash
+        if not callable(sign_request):
+            raise TypeError("External sign_request provider must be callable")
+        self.sign_request = sign_request
 
     @property
     def public_key(self) -> str:
@@ -59,8 +73,13 @@ class ExternalEd25519Signer(Signer):
 
     def sign(self, transaction):
         tx_hash = transaction.hash()
+        request = ExternalSigningRequest(
+            transaction_hash=tx_hash,
+            transaction_xdr=transaction.to_xdr(),
+            network_passphrase=transaction.network_passphrase,
+        )
         try:
-            signature = self.sign_hash(tx_hash)
+            signature = self.sign_request(request)
         except Exception as exc:
             raise SignerError("External signer failed") from exc
         if not isinstance(signature, bytes) or len(signature) != 64:
