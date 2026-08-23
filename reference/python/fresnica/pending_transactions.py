@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from .errors import TransactionPendingError
+from .errors import TransactionError, TransactionPendingError
 
 
 PendingStatus = Literal["pending", "confirmed", "expired"]
@@ -71,36 +71,72 @@ class PendingTransactionStore:
             return []
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return []
+        except (OSError, ValueError, TypeError) as exc:
+            raise TransactionError(
+                "Unable to read pending transaction state",
+                details=f"{self.path}: {type(exc).__name__}",
+            ) from exc
         if not isinstance(raw, list):
-            return []
+            raise TransactionError(
+                "Pending transaction state is malformed",
+                details=f"{self.path}: expected a JSON array",
+            )
+
         items = []
         for value in raw:
             if not isinstance(value, dict):
-                continue
-            try:
-                items.append(
-                    PendingTransaction(
-                        network=str(value["network"]),
-                        account=str(value["account"]),
-                        tx_hash=str(value["tx_hash"]),
-                        kind=str(value.get("kind", "transaction")),
-                        submitted_at=str(value["submitted_at"]),
-                    )
+                raise TransactionError(
+                    "Pending transaction state is malformed",
+                    details=f"{self.path}: expected an object entry",
                 )
-            except (KeyError, TypeError, ValueError):
-                continue
+            try:
+                network = value["network"]
+                account = value["account"]
+                tx_hash = value["tx_hash"]
+                submitted_at = value["submitted_at"]
+                kind = value.get("kind", "transaction")
+            except KeyError as exc:
+                raise TransactionError(
+                    "Pending transaction state is malformed",
+                    details=f"{self.path}: missing {exc.args[0]}",
+                ) from exc
+            fields = {
+                "network": network,
+                "account": account,
+                "tx_hash": tx_hash,
+                "kind": kind,
+                "submitted_at": submitted_at,
+            }
+            if any(not isinstance(item, str) or not item.strip() for item in fields.values()):
+                raise TransactionError(
+                    "Pending transaction state is malformed",
+                    details=f"{self.path}: fields must be non-empty strings",
+                )
+            items.append(
+                PendingTransaction(
+                    network=network,
+                    account=account,
+                    tx_hash=tx_hash,
+                    kind=kind,
+                    submitted_at=submitted_at,
+                )
+            )
         return items
 
     def _save(self, items: list[PendingTransaction]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps([asdict(item) for item in items], indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(
+                json.dumps([asdict(item) for item in items], indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(self.path)
+        except OSError as exc:
+            raise TransactionError(
+                "Unable to persist pending transaction state",
+                details=f"{self.path}: {type(exc).__name__}",
+            ) from exc
 
 
 class PendingTransactionService:
