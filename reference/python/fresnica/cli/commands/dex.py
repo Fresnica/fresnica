@@ -105,7 +105,7 @@ def _execute_offer_write(
     services = runtime.services_for()
     pending = getattr(services, "pending_transaction_service", None)
     if pending is not None:
-        pending.ensure_clear(record.address)
+        pending.reconcile_and_ensure_clear(record.address)
 
     current = manager.current()
     if current is not None and current.record.name == record.name:
