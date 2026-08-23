@@ -45,6 +45,17 @@ class TransactionError(FresnicaError):
     pass
 
 
+class MemoRequiredError(TransactionError):
+    """SEP-29 destination requires a transaction memo."""
+
+    def __init__(self, account_id: str):
+        self.account_id = account_id
+        super().__init__(
+            f"Destination {account_id} requires a transaction memo (SEP-29). "
+            "Add a memo and try again."
+        )
+
+
 class TransactionSubmissionUncertain(TransactionError):
     """Submission may have reached Stellar but the client did not get a result."""
 
