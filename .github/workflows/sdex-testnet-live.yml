@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/sdex-outcomes-validation
+      - feature/transaction-outcomes
 
 permissions:
   contents: read
