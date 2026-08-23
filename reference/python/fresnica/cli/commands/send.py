@@ -24,6 +24,11 @@ def execute_send(
     if record.watch_only:
         raise WatchOnlyError(f'Wallet "{record.name}" is watch-only')
 
+    contact = runtime.contact_store.find(args.destination)
+    destination = contact.address if contact is not None else args.destination
+    memo = args.memo if args.memo is not None else (contact.memo if contact else None)
+    contact_name = contact.name if contact is not None else None
+
     services = runtime.services_for()
     pending = getattr(services, "pending_transaction_service", None)
     if pending is not None:
@@ -40,10 +45,11 @@ def execute_send(
         prepared = services.transfer_service.prepare(
             wallet_name=record.name,
             wallet=session.wallet,
-            destination=args.destination,
+            destination=destination,
             asset=args.asset,
             amount=args.amount,
-            memo=args.memo,
+            memo=memo,
+            contact_name=contact_name,
         )
         renderer.render_review(prepared.review)
 
