@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from stellar_sdk import Keypair
 from textual.widgets import DataTable, Input, Static
 
+from fresnica.errors import TrustlineConfirmationRequired
 from fresnica.manager import WalletManager, WalletState
 from fresnica.models import (
     AccountTradeSegment,
@@ -18,7 +19,7 @@ from fresnica.review import OfferReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
 from fresnica.tui.dex import DexScreen, MarketPairDialog, OfferFormDialog, OfferReviewDialog
-from fresnica.tui.screens import NoticeDialog, UnlockDialog
+from fresnica.tui.screens import ConfirmDialog, NoticeDialog, UnlockDialog
 
 
 PASSWORD = "test-password"
@@ -104,9 +105,12 @@ class FakeOfferService:
         self.prepared = []
         self.signed = 0
         self.submitted = 0
+        self.require_trustline = False
 
     def prepare_create(self, wallet_name, wallet, intent, allow_trustline=False):
         self.prepared.append(("create", intent, allow_trustline))
+        if self.require_trustline and not allow_trustline:
+            raise TrustlineConfirmationRequired(intent.pair.base.display)
         return SimpleNamespace(
             envelope=object(),
             review=OfferReview(
@@ -119,8 +123,13 @@ class FakeOfferService:
                 amount=str(intent.amount),
                 price=str(intent.price),
                 total=str(intent.amount * intent.price),
-                fee="0.00001",
+                fee="0.00002" if self.require_trustline else "0.00001",
                 network="testnet",
+                trustline_asset=(
+                    _identity(intent.pair.base)
+                    if self.require_trustline and allow_trustline
+                    else None
+                ),
             ),
         )
 
@@ -229,18 +238,22 @@ def _open_pair(app, runtime):
     dialog.query_one("#counter", Input).value = "XLM"
 
 
+async def _enter_market(app, runtime, pilot):
+    await pilot.press("d")
+    _open_pair(app, runtime)
+    await pilot.click("#open")
+    await _settle(pilot, 8)
+    assert isinstance(app.screen, DexScreen)
+
+
 def test_dex_screen_projects_reverse_offer_and_fill_into_selected_pair():
     async def scenario():
         runtime = FakeRuntime()
         app = FresnicaApp(runtime)
         async with app.run_test(size=(130, 50)) as pilot:
             await _settle(pilot)
-            await pilot.press("d")
-            _open_pair(app, runtime)
-            await pilot.click("#open")
-            await _settle(pilot, 10)
+            await _enter_market(app, runtime, pilot)
 
-            assert isinstance(app.screen, DexScreen)
             offers = app.screen.query_one("#dex-offers", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
             book = app.screen.query_one("#dex-book", DataTable)
@@ -263,12 +276,7 @@ def test_locked_wallet_resumes_buy_after_unlock_and_reuses_offer_pipeline():
         async with app.run_test(size=(130, 50)) as pilot:
             await _settle(pilot)
             assert runtime.wallet_manager.state() is WalletState.LOCKED
-
-            await pilot.press("d")
-            _open_pair(app, runtime)
-            await pilot.click("#open")
-            await _settle(pilot, 8)
-            assert isinstance(app.screen, DexScreen)
+            await _enter_market(app, runtime, pilot)
 
             await pilot.press("b")
             assert isinstance(app.screen, OfferFormDialog)
@@ -302,17 +310,83 @@ def test_locked_wallet_resumes_buy_after_unlock_and_reuses_offer_pipeline():
     asyncio.run(scenario())
 
 
+def test_edit_reverse_buy_offer_keeps_buy_side_and_cancel_uses_selected_offer():
+    async def scenario():
+        runtime = FakeRuntime()
+        runtime.wallet_manager.unlock("main", PASSWORD)
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(130, 50)) as pilot:
+            await _settle(pilot)
+            await _enter_market(app, runtime, pilot)
+
+            await pilot.press("e")
+            assert isinstance(app.screen, OfferFormDialog)
+            assert app.screen.side == "buy"
+            assert app.screen.query_one("#amount", Input).value == "100"
+            assert app.screen.query_one("#price", Input).value == "0.325"
+            app.screen.query_one("#amount", Input).value = "90"
+            app.screen.query_one("#price", Input).value = "0.33"
+            await pilot.click("#review")
+            await _settle(pilot, 6)
+
+            assert isinstance(app.screen, OfferReviewDialog)
+            kind, offer, intent = runtime.offer_service.prepared[-1]
+            assert kind == "update"
+            assert offer.offer_id == "42"
+            assert intent.side == "buy"
+            assert intent.amount == Decimal("90")
+            assert intent.price == Decimal("0.33")
+
+            await pilot.click("#cancel")
+            await _settle(pilot)
+            assert isinstance(app.screen, DexScreen)
+            await pilot.press("x")
+            await _settle(pilot, 6)
+            assert isinstance(app.screen, OfferReviewDialog)
+            kind, offer = runtime.offer_service.prepared[-1]
+            assert kind == "cancel"
+            assert offer.offer_id == "42"
+
+    asyncio.run(scenario())
+
+
+def test_missing_trustline_requires_separate_confirmation_before_final_review():
+    async def scenario():
+        runtime = FakeRuntime()
+        runtime.wallet_manager.unlock("main", PASSWORD)
+        runtime.offer_service.require_trustline = True
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(130, 50)) as pilot:
+            await _settle(pilot)
+            await _enter_market(app, runtime, pilot)
+
+            await pilot.press("b")
+            app.screen.query_one("#amount", Input).value = "2"
+            app.screen.query_one("#price", Input).value = "1.5"
+            await pilot.click("#review")
+            await _settle(pilot, 6)
+
+            assert isinstance(app.screen, ConfirmDialog)
+            assert [call[2] for call in runtime.offer_service.prepared] == [False]
+            await pilot.click("#confirm")
+            await _settle(pilot, 8)
+
+            assert isinstance(app.screen, OfferReviewDialog)
+            assert [call[2] for call in runtime.offer_service.prepared] == [False, True]
+            review_text = str(app.screen.query_one("#review-text", Static).render())
+            assert "Also create trustline" in review_text
+            assert f"XRP:{runtime.issuer}" in review_text
+
+    asyncio.run(scenario())
+
+
 def test_watch_only_wallet_can_read_market_but_cannot_start_write():
     async def scenario():
         runtime = FakeRuntime(watch_only=True)
         app = FresnicaApp(runtime)
         async with app.run_test(size=(130, 50)) as pilot:
             await _settle(pilot)
-            await pilot.press("d")
-            _open_pair(app, runtime)
-            await pilot.click("#open")
-            await _settle(pilot, 8)
-            assert isinstance(app.screen, DexScreen)
+            await _enter_market(app, runtime, pilot)
 
             await pilot.press("b")
             assert isinstance(app.screen, OfferFormDialog)
