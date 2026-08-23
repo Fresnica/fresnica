@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/sep6-search-ux
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
