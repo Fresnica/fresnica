@@ -23,6 +23,7 @@ def test_contact_store_persists_case_insensitive_names_and_default_memo(tmp_path
     assert contact.address == address
     assert contact.memo == "12345"
     assert ContactStore(path).get("alice") == contact
+    assert ContactStore(path).find_by_address(address) == contact
     assert json.loads(path.read_text(encoding="utf-8")) == [
         {"address": address, "memo": "12345", "name": "Alice"}
     ]
@@ -40,6 +41,7 @@ def test_contact_store_remove_and_missing_contact(tmp_path):
     assert removed == contact
     assert store.list() == []
     assert store.find("bob") is None
+    assert store.find_by_address(contact.address) is None
     with pytest.raises(ContactNotFoundError):
         store.get("bob")
 
@@ -48,6 +50,7 @@ def test_contact_store_rejects_invalid_address_and_corrupt_file(tmp_path):
     store = ContactStore(tmp_path / "contacts.json")
     with pytest.raises(ContactError, match="valid Stellar"):
         store.add("bad", "not-an-address")
+    assert store.find_by_address("not-an-address") is None
 
     store.path.write_text("not-json", encoding="utf-8")
     with pytest.raises(ContactError, match="Unable to read contacts"):
