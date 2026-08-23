@@ -247,14 +247,14 @@ def test_market_entry_favorites_realtime_book_trades_immediate_fill_and_swap(tmp
             trades = app.screen.query_one("#dex-trades", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
 
-            assert [str(column.label) for column in asks.columns.values()] == ["Amount", "Price"]
-            assert [str(column.label) for column in bids.columns.values()] == ["Price", "Amount"]
-            assert [str(column.label) for column in trades.columns.values()] == ["Price", "Amount", "Time"]
+            assert [str(column.label) for column in bids.columns.values()] == ["Amount", "Price"]
+            assert [str(column.label) for column in asks.columns.values()] == ["Price", "Amount"]
+            assert [str(column.label) for column in trades.columns.values()] == ["Price", "Amount", "Time (UTC)"]
 
             # SSE replaces the REST book. Bid raw amount is quote amount:
             # 4.1 XLM / 0.41 XLM/XRP = 10 XRP BASE amount.
-            assert _plain_row(asks, 0) == ["20", "0.5100000"]
-            assert _plain_row(bids, 0) == ["0.4100000", "10"]
+            assert _plain_row(bids, 0) == ["10.0000000", "0.4100000"]
+            assert _plain_row(asks, 0) == ["0.5100000", "20.0000000"]
 
             # REST duplicate + SSE cursor replay remain one trade-100 row;
             # trade-101 is the only new row. No mystery counter-amount Total.

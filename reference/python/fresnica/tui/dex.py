@@ -456,6 +456,7 @@ class DexScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close", "Back"),
         Binding("r", "refresh", "Refresh"),
+        Binding("u", "toggle_timezone", "UTC / Local"),
         Binding("f", "favorite_market", "Star / Unstar"),
         Binding("w", "swap_pair", "Swap pair"),
         Binding("b", "buy", "Buy"),
@@ -465,7 +466,7 @@ class DexScreen(ModalScreen[None]):
     ]
 
     CSS = """
-    DexScreen { layout: vertical; background: $surface; padding: 1 2; }
+    DexScreen { layout: vertical; width: 100%; height: 100%; background: $background; opacity: 100%; padding: 1 2; }
     #dex-title { height: auto; text-style: bold; }
     #dex-assets { height: auto; color: $text-muted; }
     #dex-actions { height: auto; margin: 1 0; }
@@ -508,11 +509,11 @@ class DexScreen(ModalScreen[None]):
         yield Static("Loading market snapshot...", id="dex-status")
         with Horizontal(id="book-row"):
             with Vertical(classes="book-pane"):
-                yield Label("ASK · SELL", classes="dex-section")
-                yield DataTable(id="dex-asks")
-            with Vertical(classes="book-pane"):
                 yield Label("BID · BUY", classes="dex-section")
                 yield DataTable(id="dex-bids")
+            with Vertical(classes="book-pane"):
+                yield Label("ASK · SELL", classes="dex-section")
+                yield DataTable(id="dex-asks")
         yield Label("Recent market trades · realtime", classes="dex-section")
         yield DataTable(id="dex-trades")
         with Horizontal(id="account-row"):
@@ -525,20 +526,20 @@ class DexScreen(ModalScreen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        asks = self.query_one("#dex-asks", DataTable)
-        asks.add_columns("Amount", "Price")
-        asks.cursor_type = "row"
         bids = self.query_one("#dex-bids", DataTable)
-        bids.add_columns("Price", "Amount")
+        bids.add_columns("Amount", "Price")
         bids.cursor_type = "row"
+        asks = self.query_one("#dex-asks", DataTable)
+        asks.add_columns("Price", "Amount")
+        asks.cursor_type = "row"
         trades = self.query_one("#dex-trades", DataTable)
-        trades.add_columns("Price", "Amount", "Time")
+        trades.add_columns("Price", "Amount", self._time_column())
         trades.cursor_type = "row"
         offers = self.query_one("#dex-offers", DataTable)
         offers.add_columns("Side", "Amount", "Price", "Total", "Offer ID")
         offers.cursor_type = "row"
         fills = self.query_one("#dex-fills", DataTable)
-        fills.add_columns("Time", "Side", "Amount", "Price", "Total", "Fills", "Offer")
+        fills.add_columns(self._time_column(), "Side", "Amount", "Price", "Total", "Fills", "Offer")
         fills.cursor_type = "row"
         self.call_later(self._update_pair_labels)
         self.refresh_market()
@@ -561,6 +562,18 @@ class DexScreen(ModalScreen[None]):
         self.dismiss(None)
 
     def action_refresh(self) -> None:
+        self.refresh_market()
+
+    def action_toggle_timezone(self) -> None:
+        settings = getattr(self.runtime, "settings", None)
+        if settings is None:
+            self.set_status("Timezone preference is unavailable in this runtime.")
+            return
+        settings.use_local_time = not bool(getattr(settings, "use_local_time", True))
+        store = getattr(self.runtime, "settings_store", None)
+        if store is not None:
+            store.save(settings)
+        self._update_time_columns()
         self.refresh_market()
 
     def action_favorite_market(self) -> None:
@@ -781,14 +794,14 @@ class DexScreen(ModalScreen[None]):
         for row in orderbook.get("asks", []):
             amount = _decimal(row.get("amount", "0"))
             asks.add_row(
-                format_amount(amount),
                 _stellar_decimal_text(_book_price(row), style="red"),
+                _stellar_decimal_text(amount),
             )
         for row in orderbook.get("bids", []):
             amount = _bid_base_amount(row)
             bids.add_row(
+                _stellar_decimal_text(amount),
                 _stellar_decimal_text(_book_price(row), style="green"),
-                format_amount(amount),
             )
 
     def _render_recent_trades(self) -> None:
@@ -985,6 +998,24 @@ class DexScreen(ModalScreen[None]):
     def _time(self, value: str | None) -> str:
         settings = getattr(self.runtime, "settings", None)
         return format_timestamp(value, local=bool(getattr(settings, "use_local_time", True)))
+
+    def _time_column(self) -> str:
+        settings = getattr(self.runtime, "settings", None)
+        use_local = bool(getattr(settings, "use_local_time", True))
+        return "Time (local)" if use_local else "Time (UTC)"
+
+    def _update_time_columns(self) -> None:
+        label = self._time_column()
+        trades = self.query_one("#dex-trades", DataTable)
+        trade_columns = list(trades.columns.values())
+        if trade_columns:
+            trade_columns[-1].label = Text(label)
+            trades.refresh()
+        fills = self.query_one("#dex-fills", DataTable)
+        fill_columns = list(fills.columns.values())
+        if fill_columns:
+            fill_columns[0].label = Text(label)
+            fills.refresh()
 
     def set_status(self, message: str) -> None:
         if self.is_mounted:
