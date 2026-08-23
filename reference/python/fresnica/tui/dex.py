@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Literal
 
+import requests
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -12,9 +13,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Label, Static
 
 from ..errors import FresnicaError
+from ..market_discovery import MarketDiscoveryService
 from ..models import Asset, MarketPair, OpenOffer
 from ..offer_service import offer_view_for_pair
-from ..presentation import format_amount, format_timestamp
+from ..presentation import asset_label, format_amount, format_timestamp
 from ..sdex_presentation import format_market_price, format_price_ratio, offer_id_label
 from ..trade_segments import account_trade_segment_for_pair
 
@@ -32,12 +34,24 @@ class DexOfferAction:
     offer: OpenOffer | None = None
 
 
+@dataclass(frozen=True)
+class _MarketChoice:
+    pair: MarketPair
+    source: str
+
+
 class MarketPairDialog(ModalScreen[MarketPair | None]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("f", "favorite", "Star / Unstar"),
+    ]
 
     CSS = """
     MarketPairDialog { align: center middle; }
-    MarketPairDialog > #dialog { width: 88; height: auto; padding: 1 2; border: round $accent; background: $surface; }
+    MarketPairDialog > #dialog { width: 110; height: auto; max-height: 92%; padding: 1 2; border: round $accent; background: $surface; }
+    MarketPairDialog #market-status { height: 2; color: $text-muted; margin: 1 0; }
+    MarketPairDialog #market-list { height: 12; min-height: 5; }
+    MarketPairDialog #custom-title { margin-top: 1; text-style: bold; }
     MarketPairDialog Input { margin-top: 1; }
     MarketPairDialog #market-help { color: $text-muted; margin-top: 1; }
     MarketPairDialog #form-error { color: $error; margin-top: 1; }
@@ -45,9 +59,21 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
     MarketPairDialog Button { margin-left: 1; }
     """
 
+    def __init__(self):
+        super().__init__()
+        self._scope: tuple[str, str] | None = None
+        self._choices: list[_MarketChoice] = []
+        self._popular: list[MarketPair] = []
+
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Open Stellar DEX market")
+            yield Static(
+                "Starred and recent markets are local to this wallet. Held assets and public volume rankings provide suggestions.",
+                id="market-status",
+            )
+            yield DataTable(id="market-list")
+            yield Label("Custom pair", id="custom-title")
             yield Input(value="XLM", placeholder="Base asset: XLM or CODE:GISSUER...", id="base")
             yield Input(placeholder="Counter asset: XLM or CODE:GISSUER...", id="counter")
             yield Static(
@@ -57,10 +83,41 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
             yield Static("", id="form-error")
             with Horizontal(id="actions"):
                 yield Button("Cancel", id="cancel")
-                yield Button("Open market", id="open", variant="primary")
+                yield Button("Open custom pair", id="open", variant="primary")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#market-list", DataTable)
+        table.add_columns("★", "Pair", "Base", "Counter", "Source")
+        table.cursor_type = "row"
+        try:
+            session = self.app.runtime.wallet_manager.view()
+            self._scope = (session.record.network, session.wallet.address())
+        except (FresnicaError, ValueError):
+            self._scope = None
+        self._render_choices()
+        self._load_popular()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_favorite(self) -> None:
+        choice = self._selected_choice()
+        store = getattr(self.app.runtime, "market_preferences", None)
+        if choice is None or self._scope is None or store is None:
+            return
+        network, address = self._scope
+        preferences = store.toggle_favorite(network, address, choice.pair)
+        starred = choice.pair in preferences.favorites
+        self._render_choices(
+            f"{'Starred' if starred else 'Unstarred'} {_pair_label(choice.pair)}"
+        )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id != "market-list":
+            return
+        choice = self._selected_choice()
+        if choice is not None:
+            self._open_pair(choice.pair)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -78,7 +135,111 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         if base == counter:
             error.update("Base and counter assets must be different.")
             return
-        self.dismiss(MarketPair(base=base, counter=counter))
+        self._open_pair(MarketPair(base=base, counter=counter))
+
+    def _open_pair(self, pair: MarketPair) -> None:
+        store = getattr(self.app.runtime, "market_preferences", None)
+        if self._scope is not None and store is not None:
+            network, address = self._scope
+            store.touch(network, address, pair)
+        self.dismiss(pair)
+
+    @work(exclusive=True, thread=True, exit_on_error=False)
+    def _load_popular(self) -> None:
+        if self._scope is None:
+            return
+        network, _ = self._scope
+        try:
+            pairs = MarketDiscoveryService().popular_pairs(network, limit=10)
+            self.app.call_from_thread(self._apply_popular, pairs, None)
+        except (requests.RequestException, ValueError) as exc:
+            self.app.call_from_thread(self._apply_popular, [], exc)
+
+    def _apply_popular(self, pairs: list[MarketPair], error) -> None:
+        if not self.is_mounted:
+            return
+        if error is None:
+            self._popular = pairs
+            self._render_choices(
+                f"{len(self._choices)} markets · Enter open · F star · custom pair remains available below"
+            )
+        else:
+            self._render_choices(
+                "Popular ranking unavailable · starred, recent, held-asset and custom markets remain available"
+            )
+
+    def _render_choices(self, status: str | None = None) -> None:
+        choices: list[_MarketChoice] = []
+        favorites: tuple[MarketPair, ...] = ()
+        recents: tuple[MarketPair, ...] = ()
+        store = getattr(self.app.runtime, "market_preferences", None)
+        if self._scope is not None and store is not None:
+            network, address = self._scope
+            preferences = store.get(network, address)
+            favorites = preferences.favorites
+            recents = preferences.recents
+
+        def add(pair: MarketPair, source: str) -> None:
+            if pair.base == pair.counter or any(item.pair == pair for item in choices):
+                return
+            choices.append(_MarketChoice(pair, source))
+
+        for pair in favorites:
+            add(pair, "Starred")
+        for pair in recents:
+            add(pair, "Recent")
+        for pair in self._held_asset_suggestions():
+            add(pair, "Held asset")
+        for pair in self._popular:
+            add(pair, "Popular")
+
+        self._choices = choices
+        table = self.query_one("#market-list", DataTable)
+        table.clear()
+        favorite_set = set(favorites)
+        for choice in choices:
+            pair = choice.pair
+            table.add_row(
+                "★" if pair in favorite_set else "",
+                _pair_label(pair),
+                asset_label(pair.base, include_source=True),
+                asset_label(pair.counter, include_source=True),
+                choice.source,
+            )
+        if status is not None:
+            self.query_one("#market-status", Static).update(status)
+        elif choices:
+            self.query_one("#market-status", Static).update(
+                f"{len(choices)} markets · Enter open · F star · public popular markets loading"
+            )
+        else:
+            self.query_one("#market-status", Static).update(
+                "No saved market yet · use the custom pair below; public popular markets are loading"
+            )
+
+    def _held_asset_suggestions(self) -> list[MarketPair]:
+        try:
+            session = self.app.runtime.wallet_manager.view()
+            service = self.app.runtime.services_for(session.record.network).balance_service
+            getter = getattr(service, "get_cached_portfolio_views", None)
+            if getter is None:
+                return []
+            balances, _ = getter(session.wallet)
+        except (FresnicaError, ValueError):
+            return []
+        result = []
+        for balance in balances:
+            asset = balance.asset
+            if asset.is_native or asset.is_liquidity_pool or balance.balance <= 0:
+                continue
+            result.append(MarketPair(asset, Asset("XLM")))
+        return result
+
+    def _selected_choice(self) -> _MarketChoice | None:
+        if not self._choices:
+            return None
+        row = self.query_one("#market-list", DataTable).cursor_row
+        return self._choices[max(0, min(row, len(self._choices) - 1))]
 
 
 class OfferFormDialog(ModalScreen[DexOfferAction | None]):
@@ -381,11 +542,11 @@ class DexScreen(ModalScreen[None]):
             session = self.runtime.wallet_manager.view()
             services = self.runtime.services_for(session.record.network)
             orderbook = services.dex_service.get_orderbook(self.pair.base, self.pair.counter)
-            recent_trades = services.dex_service.get_trades(
-                self.pair.base,
-                self.pair.counter,
-                limit=30,
-                refresh=True,
+            get_trades = getattr(services.dex_service, "get_trades", None)
+            recent_trades = (
+                get_trades(self.pair.base, self.pair.counter, limit=30, refresh=True)
+                if get_trades is not None
+                else []
             )
             offers = services.dex_service.get_open_offers(
                 session.wallet,
@@ -513,6 +674,7 @@ class DexScreen(ModalScreen[None]):
             return
         adapter = getattr(services, "adapter", None)
         if adapter is None:
+            self._set_market_status("snapshot only · realtime unavailable")
             return
         orderbook_stream = getattr(adapter, "stream_orderbook", None)
         trade_stream = getattr(adapter, "stream_trades", None)
@@ -647,6 +809,10 @@ def _asset_identity(asset: Asset) -> str:
 
 def _asset_code(asset: Asset) -> str:
     return "XLM" if asset.is_native else asset.code
+
+
+def _pair_label(pair: MarketPair) -> str:
+    return f"{_asset_code(pair.base)}/{_asset_code(pair.counter)}"
 
 
 def _decimal(value) -> Decimal:
