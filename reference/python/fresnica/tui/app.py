@@ -20,11 +20,10 @@ from ..errors import (
     WalletLockedError,
     WalletNotFoundError,
 )
-from ..history_service import is_suspicious_claimable_activity
+from ..history_service import is_dust_activity
 from ..manager import WalletState
 from ..models import OfferIntent
 from ..presentation import format_timestamp, offer_outcome_summary
-from .activity_presentation import activity_display_summary, activity_metadata, activity_text
 from .app_base import FresnicaApp as BaseFresnicaApp
 from .asset_details import AssetDetailAction, AssetDetailsScreen, PrefilledSendDialog
 from .dex import DexOfferAction, DexScreen, MarketPairDialog
@@ -59,13 +58,7 @@ class FresnicaApp(BaseFresnicaApp):
         if stored_theme and stored_theme in self.available_themes:
             self.theme = stored_theme
         self.watch(self, "theme", self._persist_theme, init=False)
-        # Textual dispatches Mount handlers through the class MRO, so the base
-        # on_mount is invoked automatically after this handler. Calling super()
-        # here initialized DataTable columns twice. Schedule cached presentation
-        # after the complete Mount dispatch instead.
-        self.call_later(self._apply_initial_cached_wallet)
-
-    def _apply_initial_cached_wallet(self) -> None:
+        super().on_mount()
         try:
             record = self.runtime.wallet_manager.get_record()
         except WalletNotFoundError:
@@ -184,32 +177,17 @@ class FresnicaApp(BaseFresnicaApp):
         table.clear()
         settings = getattr(self.runtime, "settings", None)
         use_local = bool(getattr(settings, "use_local_time", True))
-        hide_suspicious = bool(
-            getattr(settings, "hide_suspicious_claimables", False)
-        )
-        try:
-            session = self.runtime.wallet_manager.view()
-            account = session.wallet.address()
-            contacts, domains = activity_metadata(self.runtime, session.wallet)
-        except (FresnicaError, ValueError):
-            account = getattr(self._last_record, "address", "") if self._last_record else ""
-            contacts, domains = {}, {}
+        show_dust = bool(getattr(settings, "show_dust_activity", False))
         for item in self._last_history:
             if (
-                hide_suspicious
+                not show_dust
                 and hasattr(item, "operations")
-                and is_suspicious_claimable_activity(item)
+                and is_dust_activity(item)
             ):
                 continue
-            summary = activity_display_summary(
-                item,
-                account,
-                contacts,
-                domains,
-            )
             table.add_row(
                 format_timestamp(item.created_at, local=use_local),
-                activity_text(item, summary, account),
+                item.summary,
             )
         if table.columns:
             first_column = next(iter(table.columns.values()))
@@ -999,3 +977,7 @@ def _pending_resolution_message(resolutions) -> str | None:
     if expired:
         return f"Uncertain transaction not found after timeout · {expired[-1].pending.tx_hash}"
     return None
+
+
+def run_tui(runtime):
+    return FresnicaApp(runtime).run()
