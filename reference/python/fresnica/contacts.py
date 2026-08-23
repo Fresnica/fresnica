@@ -30,6 +30,29 @@ class Contact:
     memo: str | None = None
 
 
+@dataclass(frozen=True)
+class ResolvedDestination:
+    address: str
+    memo: str | None = None
+    contact_name: str | None = None
+
+
+def resolve_destination(
+    store: "ContactStore",
+    destination: str,
+    memo: str | None = None,
+) -> ResolvedDestination:
+    """Resolve a local contact alias while keeping explicit memo precedence."""
+    contact = store.find(destination)
+    if contact is None:
+        return ResolvedDestination(address=destination, memo=memo)
+    return ResolvedDestination(
+        address=contact.address,
+        memo=memo if memo is not None else contact.memo,
+        contact_name=contact.name,
+    )
+
+
 class ContactStore:
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser()
