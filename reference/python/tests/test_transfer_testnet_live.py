@@ -11,7 +11,6 @@ secret keys.
 import os
 
 import pytest
-from stellar_sdk import Asset as StellarAsset
 from stellar_sdk import Keypair, TransactionBuilder
 
 from fresnica.errors import MemoRequiredError
