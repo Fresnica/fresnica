@@ -227,11 +227,15 @@ class HistoryScreen(ModalScreen[None]):
         self._render_loaded()
 
     def action_refresh(self) -> None:
-        self.query_one("#history-status", Static).update("Refreshing recent activity from Horizon...")
+        self.query_one("#history-status", Static).update(
+            "Refreshing recent activity from Horizon..."
+        )
         self._refresh_history()
 
     def action_more(self) -> None:
-        self.query_one("#history-status", Static).update("Downloading 200 older operations from Horizon...")
+        self.query_one("#history-status", Static).update(
+            "Downloading 200 older operations from Horizon..."
+        )
         self._load_more()
 
     def action_toggle_suspicious(self) -> None:
@@ -323,8 +327,9 @@ class HistoryScreen(ModalScreen[None]):
     def _refresh_history(self) -> None:
         try:
             sync_recent = getattr(self.history_service, "sync_recent", None)
+            sync_result = None
             if sync_recent is not None:
-                sync_recent(self.wallet)
+                sync_result = sync_recent(self.wallet)
                 views = self.history_service.get_activity_views(
                     self.wallet,
                     limit=100000,
@@ -337,7 +342,17 @@ class HistoryScreen(ModalScreen[None]):
                     refresh=True,
                 )
             count = self._cached_operation_count(views)
-            self.app.call_from_thread(self._apply, views, count, "Activity updated", None)
+            caught_up = bool(getattr(sync_result, "caught_up", True))
+            fetched = int(getattr(sync_result, "fetched_count", 0))
+            message = (
+                "Activity updated"
+                if caught_up
+                else (
+                    f"Activity catch-up incomplete · {fetched} newer operations cached "
+                    "· refresh again"
+                )
+            )
+            self.app.call_from_thread(self._apply, views, count, message, None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], 0, "", exc)
 
@@ -352,7 +367,11 @@ class HistoryScreen(ModalScreen[None]):
                 refresh=False,
             )
             count = self._cached_operation_count(views)
-            message = f"Cached {added} older operations" if added else "No older operations returned"
+            message = (
+                f"Cached {added} older operations"
+                if added
+                else "No older operations returned"
+            )
             self.app.call_from_thread(self._apply, views, count, message, None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], 0, "", exc)
