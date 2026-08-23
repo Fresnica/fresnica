@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: codex/sep6-search-ux
       - name: Apply implementation
         shell: bash
         run: |
@@ -42,7 +44,6 @@ jobs:
         working-directory: reference/python
         run: uv run pytest -q
       - name: Commit tested implementation
-        if: github.event_name == 'push'
         shell: bash
         run: |
           if git diff --quiet; then
