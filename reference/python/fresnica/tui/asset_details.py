@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 import webbrowser
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -51,7 +52,7 @@ class PrefilledSendDialog(SendDialog):
             yield Input(placeholder="Memo (optional)", id="memo")
             yield Static("", id="form-error")
             with Horizontal(id="actions"):
-                yield Button("Cancel [Esc]", id="cancel")
+                yield Button(Text("Cancel [Esc]"), id="cancel")
                 yield Button("Review", id="review", variant="primary")
 
 
@@ -97,15 +98,15 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             yield Static("", id="asset-status")
             with Horizontal(id="asset-actions"):
                 if not self.asset.is_liquidity_pool:
-                    yield Button("Send [S]", id="send", variant="primary")
+                    yield Button(Text("Send [S]"), id="send", variant="primary")
                 if not self.asset.is_native and not self.asset.is_liquidity_pool:
-                    yield Button("Set limit [L]", id="set-limit")
-                    yield Button("Remove [X]", id="remove-trustline")
+                    yield Button(Text("Set limit [L]"), id="set-limit")
+                    yield Button(Text("Remove [X]"), id="remove-trustline")
                     if self.domain:
-                        yield Button("Discover anchor [A]", id="discover-anchor")
-                        yield Button("Deposit [D]", id="anchor-deposit")
-                        yield Button("Withdraw [W]", id="anchor-withdraw")
-                yield Button("Back [Esc]", id="close")
+                        yield Button(Text("Discover anchor [A]"), id="discover-anchor")
+                        yield Button(Text("Deposit [D]"), id="anchor-deposit")
+                        yield Button(Text("Withdraw [W]"), id="anchor-withdraw")
+                yield Button(Text("Back [Esc]"), id="close")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -176,7 +177,7 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
     def _start_anchor(self, kind: Literal["deposit", "withdraw"]) -> None:
         capabilities = self._anchor_capabilities
         if capabilities is None:
-            self.set_status("Discover anchor capabilities first [A].")
+            self.set_status("Discover anchor capabilities first (A).")
             return
         enabled = capabilities.sep24_deposit if kind == "deposit" else capabilities.sep24_withdraw
         if not enabled:
@@ -345,7 +346,7 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             return
         if balance is None:
             self.query_one("#asset-trustline", Static).update("Trustline removed")
-            self.set_status("Trustline removed · return to Assets [Esc].")
+            self.set_status("Trustline removed · return to Assets (Esc).")
             for selector in ("#set-limit", "#remove-trustline"):
                 widgets = self.query(selector)
                 if widgets:
@@ -409,7 +410,7 @@ def _anchor_initial_text(balance: BalanceView) -> str:
         return ""
     domain = str(balance.raw.get(ISSUER_DOMAIN_CACHE_KEY) or "").strip()
     if domain:
-        return f"Anchor metadata available from {domain} · Discover [A] only when you want transfer services"
+        return f"Anchor metadata available from {domain} · press A to discover transfer services"
     return "Anchor discovery: issuer has no home_domain"
 
 
