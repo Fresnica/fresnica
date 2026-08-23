@@ -23,7 +23,8 @@ from ..manager import WalletState
 from ..models import OfferIntent
 from ..presentation import offer_outcome_summary
 from .app_base import FresnicaApp as BaseFresnicaApp
-from .dex import DexOfferAction, DexScreen, MarketPairDialog, OfferReviewDialog
+from .dex import DexOfferAction, DexScreen, MarketPairDialog
+from .review_dialog import ReviewPresentationDialog
 from .screens import ConfirmDialog
 from .wallet_management import WalletManagerDialog
 
@@ -64,6 +65,11 @@ class FresnicaApp(BaseFresnicaApp):
         if not record.watch_only and not self._ensure_write_clear(record):
             return
         super().action_send()
+
+    def _show_review(self, wallet, services, prepared, network: str) -> None:
+        self._pending_send = (wallet, services, prepared, network)
+        self._set_status("Transaction ready for review")
+        self.push_screen(ReviewPresentationDialog(prepared.review), self._on_review)
 
     def action_dex(self) -> None:
         try:
@@ -196,6 +202,7 @@ class FresnicaApp(BaseFresnicaApp):
                     record.name,
                     session.wallet,
                     action.offer,
+                    pair=action.pair,
                 )
             else:
                 if action.side not in ("buy", "sell"):
@@ -300,7 +307,7 @@ class FresnicaApp(BaseFresnicaApp):
             return
         self._pending_dex_submit = (screen, wallet, services, prepared, network)
         screen.set_status("DEX operation ready for review.")
-        self.push_screen(OfferReviewDialog(prepared.review), self._on_dex_review)
+        self.push_screen(ReviewPresentationDialog(prepared.review), self._on_dex_review)
 
     def _on_dex_review(self, confirmed: bool) -> None:
         pending = self._pending_dex_submit
