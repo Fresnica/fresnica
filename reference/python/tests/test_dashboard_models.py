@@ -152,7 +152,7 @@ def test_history_syncs_200_locally_then_incrementally_and_humanizes_activity():
     first = service.get_views(wallet, limit=20, refresh=True)
     assert adapter.calls[0][1:] == (200, None, True)
     assert first[0].summary.startswith("Received 1 XLM from")
-    assert "Sell offer: 100 XRP" in first[1].summary
+    assert "Updated #77 SELL 100 XRP" in first[1].summary
 
     second = service.get_views(wallet, limit=20, refresh=True)
     assert adapter.calls[1][1:] == (200, "100", False)

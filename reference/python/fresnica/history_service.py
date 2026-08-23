@@ -48,6 +48,15 @@ class HistoryService:
             self.datastore.save_operations(self.network_name, address, response)
         return len(records)
 
+    def cached_operation_count(self, wallet) -> int:
+        return len(
+            self.datastore.get_operations(
+                self.network_name,
+                wallet.address(),
+                limit=100000,
+            )
+        )
+
     def get_operations(self, wallet, limit: int = 20, refresh: bool = True) -> list[dict]:
         address = wallet.address()
         if refresh:
@@ -71,11 +80,13 @@ class HistoryService:
         address = wallet.address()
         if refresh:
             self.sync_recent(wallet)
-        operation_limit = max(limit * 4, SYNC_PAGE_LIMIT)
+        # Multi-operation transactions mean N displayed activities can require more
+        # than N raw operations. Read the full local cache so loading older pages is
+        # immediately reflected instead of being hidden behind a fixed 200-op window.
         raw_operations = self.datastore.get_operations(
             self.network_name,
             address,
-            limit=operation_limit,
+            limit=100000,
         )
         operations = [self._view(item, address) for item in raw_operations]
         return _group_activities(operations)[:limit]
@@ -126,6 +137,40 @@ def _group_activities(operations: list[OperationView]) -> list[ActivityView]:
     return activities
 
 
+def is_dust_activity(activity: ActivityView) -> bool:
+    """Return true for unsolicited inbound claimable-balance entries.
+
+    This deliberately avoids an arbitrary amount threshold: a tiny legitimate
+    payment is still a payment. The toggle targets the common claimable-balance
+    spam pattern where another account creates an entry naming this wallet.
+    """
+    return any(bool(item.raw.get("_fresnica_unsolicited_claimable")) for item in activity.operations)
+
+
+def activity_counterparties(activity: ActivityView, account: str) -> list[str]:
+    """Return G-addresses useful for contact creation from an activity."""
+    values: list[str] = []
+    for operation in activity.operations:
+        raw = operation.raw
+        candidates = [
+            raw.get("from"),
+            raw.get("to"),
+            raw.get("source_account"),
+            raw.get("funder"),
+            raw.get("account"),
+            raw.get("into"),
+        ]
+        candidates.extend(
+            claimant.get("destination")
+            for claimant in raw.get("claimants", []) or []
+            if isinstance(claimant, dict)
+        )
+        for value in candidates:
+            if isinstance(value, str) and value.startswith("G") and value != account and value not in values:
+                values.append(value)
+    return values
+
+
 def _activity_summary(operations: list[OperationView]) -> str:
     if len(operations) == 1:
         return operations[0].summary
@@ -160,25 +205,30 @@ def _summary(raw: dict, account: str) -> str:
         return f"Created {short_address(created)} with {amount} XLM"
 
     if operation_type in {"manage_sell_offer", "create_passive_sell_offer"}:
-        offer_id = raw.get("offer_id") or raw.get("id") or "?"
+        offer_id = str(raw.get("offer_id") or "0")
         amount = format_amount(raw.get("amount", "?"))
         if amount == "0":
             return f"Cancelled offer #{offer_id}"
         selling = _asset_from_fields(raw, "selling_")
         buying = _asset_from_fields(raw, "buying_")
         price = format_amount(raw.get("price", "?"))
-        verb = "Placed passive offer" if operation_type == "create_passive_sell_offer" else "Sell offer"
-        return f"{verb}: {amount} {selling} -> {buying} @ {price}"
+        if operation_type == "create_passive_sell_offer":
+            return f"Placed passive SELL {amount} {selling} @ {price} {buying}/{selling}"
+        verb = "Placed" if offer_id == "0" else f"Updated #{offer_id}"
+        return f"{verb} SELL {amount} {selling} @ {price} {buying}/{selling}"
 
     if operation_type == "manage_buy_offer":
-        offer_id = raw.get("offer_id") or raw.get("id") or "?"
-        amount = format_amount(raw.get("buy_amount", "?"))
+        offer_id = str(raw.get("offer_id") or "0")
+        # Horizon's Manage Buy Offer operation object calls this field `amount`:
+        # it is the quantity of buying_asset the account wants to buy.
+        amount = format_amount(raw.get("amount", "?"))
         if amount == "0":
             return f"Cancelled offer #{offer_id}"
         selling = _asset_from_fields(raw, "selling_")
         buying = _asset_from_fields(raw, "buying_")
         price = format_amount(raw.get("price", "?"))
-        return f"Buy offer: {amount} {buying} with {selling} @ {price}"
+        verb = "Placed" if offer_id == "0" else f"Updated #{offer_id}"
+        return f"{verb} BUY {amount} {buying} @ {price} {selling}/{buying}"
 
     if operation_type == "change_trust":
         asset = _asset_from_fields(raw)
@@ -188,7 +238,32 @@ def _summary(raw: dict, account: str) -> str:
         limit = format_amount(raw.get("limit", "?"))
         if limit == "0":
             return f"Removed trustline for {asset}"
-        return f"Set trustline for {asset}"
+        return f"Set trustline for {asset} · limit {limit}"
+
+    if operation_type == "create_claimable_balance":
+        source = raw.get("source_account") or "?"
+        amount = format_amount(raw.get("amount", "?"))
+        asset = _asset_from_sep11(raw.get("asset"))
+        claimants = [
+            item.get("destination")
+            for item in raw.get("claimants", []) or []
+            if isinstance(item, dict)
+        ]
+        if source == account:
+            recipients = [item for item in claimants if item and item != account]
+            target = short_address(recipients[0]) if recipients else "claimant"
+            return f"Created claimable payment: {amount} {asset} for {target}"
+        if account in claimants:
+            raw["_fresnica_unsolicited_claimable"] = True
+            return (
+                f"Incoming claimable asset: {amount} {asset} from {short_address(source)} "
+                "· review before claiming"
+            )
+        return f"Claimable asset created: {amount} {asset}"
+
+    if operation_type == "claim_claimable_balance":
+        balance_id = str(raw.get("balance_id") or raw.get("id") or "?")
+        return f"Claimed claimable balance {balance_id[:12]}..."
 
     if operation_type == "liquidity_pool_deposit":
         reserves = _reserve_summary(raw.get("reserves_deposited", []))
@@ -213,6 +288,16 @@ def _summary(raw: dict, account: str) -> str:
         return f"Bumped sequence to {raw.get('bump_to', '?')}"
 
     return (operation_type or "unknown").replace("_", " ").capitalize()
+
+
+def _asset_from_sep11(value) -> str:
+    text = str(value or "asset")
+    if text.lower() == "native":
+        return "XLM"
+    if ":" in text:
+        code, issuer = text.split(":", 1)
+        return f"{code} ({short_address(issuer)})"
+    return text
 
 
 def _asset_from_fields(raw: dict, prefix: str = "") -> str:

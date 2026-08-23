@@ -1,6 +1,6 @@
 """Human-facing formatting shared by CLI and TUI presentations."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from .models import Asset
@@ -71,13 +71,20 @@ def offer_outcome_summary(outcome) -> str | None:
     return " · ".join(parts) or None
 
 
-def format_timestamp(value: str | None, compact: bool = True) -> str:
+def format_timestamp(
+    value: str | None,
+    compact: bool = True,
+    *,
+    local: bool = False,
+) -> str:
     if not value:
         return ""
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return value
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone() if local else parsed.astimezone(timezone.utc)
     if compact:
         return parsed.strftime("%m-%d %H:%M")
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
