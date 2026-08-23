@@ -135,11 +135,12 @@ class PendingTransactionService:
         items = self.store.list(self.network, account)
         return items[0] if items else None
 
-    def ensure_clear(self, account: str) -> None:
+    def ensure_clear(self, account: str) -> list[PendingResolution]:
         """Non-blocking local guard for UI event handlers."""
         pending = self.first_pending(account)
         if pending is not None:
             raise TransactionPendingError(pending.tx_hash)
+        return []
 
     def resolve(self, account: str) -> list[PendingResolution]:
         resolutions = []
