@@ -16,6 +16,10 @@ from fresnica.review import TrustlineReview
 from fresnica.review_presentation import project_review
 from fresnica.stellar_adapter import StellarAdapter
 from fresnica.transaction_service import _pending_kind
+from fresnica.trustline_policy import (
+    FRESNICA_TRUSTLINE_LIMIT,
+    FRESNICA_TRUSTLINE_LIMIT_TEXT,
+)
 from fresnica.trustline_service import TrustlineService
 
 
@@ -133,6 +137,37 @@ def test_add_requires_new_reserve_and_builds_change_trust():
     assert call["asset"] == asset
     assert call["limit"] == Decimal("250.5")
     assert call["base_fee_stroops"] == 100
+
+
+def test_add_uses_fresnica_marker_limit_by_default():
+    wallet = Wallet()
+    asset = Asset("USD", Keypair.random().public_key)
+    service, builder = _service(_account(native="2"))
+
+    service.prepare_add("main", wallet, asset)
+
+    assert builder.calls[-1]["limit"] == FRESNICA_TRUSTLINE_LIMIT
+
+
+def test_dex_embedded_change_trust_uses_same_fresnica_marker():
+    source = Keypair.random()
+    asset = Asset("USD", Keypair.random().public_key)
+    adapter = StellarAdapter(TESTNET)
+    adapter.server = BuildServer(source.public_key)
+
+    envelope = adapter.build_manage_sell_offer(
+        source=source.public_key,
+        selling=Asset("XLM"),
+        buying=asset,
+        amount="1",
+        price="1",
+        base_fee=100,
+        trustline_asset=asset,
+    )
+
+    operation = envelope.transaction.operations[0]
+    assert type(operation).__name__ == "ChangeTrust"
+    assert operation.limit == FRESNICA_TRUSTLINE_LIMIT_TEXT
 
 
 def test_add_rejects_existing_line_and_insufficient_new_reserve():

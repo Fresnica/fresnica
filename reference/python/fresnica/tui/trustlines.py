@@ -14,6 +14,7 @@ from textual.widgets import Button, DataTable, Footer, Input, Label, Static
 from ..errors import FresnicaError
 from ..models import Asset
 from ..presentation import format_amount
+from ..trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from .asset_picker import AssetPickerDialog
 
 
@@ -49,7 +50,11 @@ class TrustlineFormDialog(ModalScreen[TrustlineAction | None]):
         super().__init__()
         self.kind = kind
         self.asset = asset
-        self.limit = limit or ""
+        self.limit = (
+            limit
+            if limit is not None
+            else (FRESNICA_TRUSTLINE_LIMIT_TEXT if kind == "add" else "")
+        )
 
     def compose(self) -> ComposeResult:
         title = "Add Stellar trustline" if self.kind == "add" else "Change trustline limit"
@@ -63,7 +68,7 @@ class TrustlineFormDialog(ModalScreen[TrustlineAction | None]):
             yield Input(
                 value=self.limit,
                 placeholder=(
-                    "Limit (blank = Stellar maximum)"
+                    "Trustline limit (Fresnica default shown)"
                     if self.kind == "add"
                     else "New limit"
                 ),

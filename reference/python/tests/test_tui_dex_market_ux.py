@@ -12,7 +12,7 @@ from fresnica.models import AccountTradeSegment, Asset, BalanceView, MarketPair,
 from fresnica.settings import SettingsStore, UserSettings
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
-from fresnica.tui.dex import DexScreen, MarketPairDialog
+from fresnica.tui.dex import DexScreen, MarketPairDialog, _orderbook_grid
 
 
 class BalanceService:
@@ -217,6 +217,8 @@ def test_market_entry_favorites_realtime_book_trades_immediate_fill_and_swap(tmp
             await _settle(pilot, 8)
             assert isinstance(app.screen, MarketPairDialog)
             markets = app.screen.query_one("#market-list", DataTable)
+            assert app.screen.focused is markets
+            assert app.screen.query_one("#favorites", Button).label.plain == "★ Favorites [F]"
 
             # Popular follows Fex's held-asset ordering: XRP/XLM has two held
             # legs and therefore ranks ahead of default XLM/USDC.
@@ -242,19 +244,23 @@ def test_market_entry_favorites_realtime_book_trades_immediate_fill_and_swap(tmp
             assert isinstance(app.screen, DexScreen)
             assert "★ Stellar DEX" in str(app.screen.query_one("#dex-title", Static).render())
 
-            asks = app.screen.query_one("#dex-asks", DataTable)
-            bids = app.screen.query_one("#dex-bids", DataTable)
+            asks = app.screen.query_one("#dex-asks", Static)
+            bids = app.screen.query_one("#dex-bids", Static)
             trades = app.screen.query_one("#dex-trades", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
 
-            assert [str(column.label) for column in bids.columns.values()] == ["Amount", "Price"]
-            assert [str(column.label) for column in asks.columns.values()] == ["Price", "Amount"]
+            bid_grid = _orderbook_grid(app.screen._orderbook["bids"], "bid")
+            ask_grid = _orderbook_grid(app.screen._orderbook["asks"], "ask")
+            assert [column.justify for column in bid_grid.columns] == ["right", "right"]
+            assert [column.justify for column in ask_grid.columns] == ["left", "left"]
             assert [str(column.label) for column in trades.columns.values()] == ["Price", "Amount", "Time (UTC)"]
 
             # SSE replaces the REST book. Bid raw amount is quote amount:
-            # 4.1 XLM / 0.41 XLM/XRP = 10 XRP BASE amount.
-            assert _plain_row(bids, 0) == ["10.0000000", "0.4100000"]
-            assert _plain_row(asks, 0) == ["0.5100000", "20.0000000"]
+            # 4.1 XLM / 0.41 XLM/XRP = 10 XRP BASE amount. Header is cell 0.
+            assert bid_grid.columns[0]._cells[1].plain == "10.0000000"
+            assert bid_grid.columns[1]._cells[1].plain == "0.4100000"
+            assert ask_grid.columns[0]._cells[1].plain == "0.5100000"
+            assert ask_grid.columns[1]._cells[1].plain == "20.0000000"
 
             # REST duplicate + SSE cursor replay remain one trade-100 row;
             # trade-101 is the only new row. No mystery counter-amount Total.

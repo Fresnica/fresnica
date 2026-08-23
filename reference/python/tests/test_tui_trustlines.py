@@ -13,6 +13,7 @@ from fresnica.tui.app import FresnicaApp
 from fresnica.tui.asset_picker import AssetPickerDialog
 from fresnica.tui.review_dialog import ReviewPresentationDialog
 from fresnica.tui.screens import NoticeDialog, UnlockDialog
+from fresnica.trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from fresnica.tui.trustlines import TrustlineFormDialog, TrustlineScreen
 
 
@@ -216,6 +217,7 @@ def test_locked_wallet_add_uses_asset_picker_then_resumes_shared_pipeline():
 
             assert isinstance(app.screen, TrustlineFormDialog)
             assert str(app.screen.query_one("#asset-label", Static).render()) == runtime.recommended_asset
+            assert app.screen.query_one("#limit", Input).value == FRESNICA_TRUSTLINE_LIMIT_TEXT
             await pilot.click("#review")
             await _settle(pilot)
 
@@ -225,11 +227,13 @@ def test_locked_wallet_add_uses_asset_picker_then_resumes_shared_pipeline():
             await _settle(pilot, 8)
 
             assert runtime.wallet_manager.state() is WalletState.UNLOCKED
-            assert runtime.trustline_service.calls == [("add", runtime.recommended_asset, None)]
+            assert runtime.trustline_service.calls == [
+                ("add", runtime.recommended_asset, FRESNICA_TRUSTLINE_LIMIT_TEXT)
+            ]
             assert isinstance(app.screen, ReviewPresentationDialog)
             text = str(app.screen.query_one("#review-text", Static).render())
             assert f"Add trustline for {runtime.recommended_asset}" in text
-            assert "Limit: Stellar maximum" in text
+            assert f"Limit: {FRESNICA_TRUSTLINE_LIMIT_TEXT}" in text
 
             await pilot.click("#confirm")
             await _settle(pilot, 10)

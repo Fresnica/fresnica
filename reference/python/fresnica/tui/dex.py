@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Literal
 
+from rich.table import Table
 from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
@@ -48,7 +49,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         Binding("escape", "cancel", "Back"),
         Binding("enter", "open_selected", "Open", priority=True),
         Binding("p", "popular", "Popular"),
-        Binding("f", "favorites", "Starred"),
+        Binding("f", "favorites", "Favorites list"),
         Binding("a", "add_pair", "Add pair"),
         Binding("space", "toggle_favorite", "Star / Unstar"),
     ]
@@ -77,7 +78,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
             yield Label("Stellar DEX markets")
             with Horizontal(id="market-tabs"):
                 yield Button(Text("Popular [P]"), id="popular", variant="primary")
-                yield Button(Text("★ Starred [F]"), id="favorites")
+                yield Button(Text("★ Favorites [F]"), id="favorites")
                 yield Button(Text("Add pair [A]"), id="add-pair")
                 yield Button(Text("Back [Esc]"), id="cancel")
             yield Static("Loading market list...", id="market-status")
@@ -102,6 +103,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         self._load_cached_catalog()
         self._load_cached_popular()
         self._render_market_list()
+        self.call_later(lambda: self.set_focus(table))
         self._load_popular()
 
     def action_cancel(self) -> None:
@@ -475,10 +477,8 @@ class DexScreen(ModalScreen[None]):
     .dex-section { height: 1; text-style: bold; }
     #book-row { height: 2fr; min-height: 8; }
     .book-pane { width: 1fr; height: 1fr; padding: 0 1; }
-    #bids-pane { align-horizontal: right; }
-    .bid-section { text-align: right; }
-    #dex-bids { width: auto; min-width: 34; }
-    #dex-asks, #dex-bids { height: 1fr; }
+    .bid-section { width: 100%; text-align: right; }
+    #dex-asks, #dex-bids { width: 100%; height: 1fr; overflow-y: auto; }
     #dex-trades { height: 1fr; min-height: 6; }
     #account-row { height: 2fr; min-height: 8; }
     #offers-pane, #fills-pane { width: 1fr; height: 1fr; padding: 0 1; }
@@ -514,10 +514,10 @@ class DexScreen(ModalScreen[None]):
         with Horizontal(id="book-row"):
             with Vertical(id="bids-pane", classes="book-pane"):
                 yield Label("BID · BUY", classes="dex-section bid-section")
-                yield DataTable(id="dex-bids")
+                yield Static("", id="dex-bids")
             with Vertical(id="asks-pane", classes="book-pane"):
                 yield Label("ASK · SELL", classes="dex-section")
-                yield DataTable(id="dex-asks")
+                yield Static("", id="dex-asks")
         yield Label("Recent market trades · realtime", classes="dex-section")
         yield DataTable(id="dex-trades")
         with Horizontal(id="account-row"):
@@ -530,12 +530,6 @@ class DexScreen(ModalScreen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        bids = self.query_one("#dex-bids", DataTable)
-        bids.add_columns("Amount", "Price")
-        bids.cursor_type = "row"
-        asks = self.query_one("#dex-asks", DataTable)
-        asks.add_columns("Price", "Amount")
-        asks.cursor_type = "row"
         trades = self.query_one("#dex-trades", DataTable)
         trades.add_columns("Price", "Amount", self._time_column())
         trades.cursor_type = "row"
@@ -786,22 +780,12 @@ class DexScreen(ModalScreen[None]):
             self._start_realtime(pair)
 
     def _render_orderbook(self, orderbook: dict) -> None:
-        asks = self.query_one("#dex-asks", DataTable)
-        bids = self.query_one("#dex-bids", DataTable)
-        asks.clear()
-        bids.clear()
-        for row in orderbook.get("asks", []):
-            amount = _decimal(row.get("amount", "0"))
-            asks.add_row(
-                _stellar_decimal_text(_book_price(row), style="red"),
-                _stellar_decimal_text(amount),
-            )
-        for row in orderbook.get("bids", []):
-            amount = _bid_base_amount(row)
-            bids.add_row(
-                _stellar_decimal_text(amount, justify="right"),
-                _stellar_decimal_text(_book_price(row), style="green", justify="right"),
-            )
+        self.query_one("#dex-bids", Static).update(
+            _orderbook_grid(orderbook.get("bids", []), "bid")
+        )
+        self.query_one("#dex-asks", Static).update(
+            _orderbook_grid(orderbook.get("asks", []), "ask")
+        )
 
     def _render_recent_trades(self) -> None:
         table = self.query_one("#dex-trades", DataTable)
@@ -998,13 +982,10 @@ class DexScreen(ModalScreen[None]):
         )
 
     def _clear_market_tables(self) -> None:
-        for selector in (
-            "#dex-asks",
-            "#dex-bids",
-            "#dex-trades",
-            "#dex-offers",
-            "#dex-fills",
-        ):
+        for selector in ("#dex-asks", "#dex-bids"):
+            if self.query(selector):
+                self.query_one(selector, Static).update("")
+        for selector in ("#dex-trades", "#dex-offers", "#dex-fills"):
             if self.query(selector):
                 self.query_one(selector, DataTable).clear()
 
@@ -1079,6 +1060,35 @@ def _bid_base_amount(row: dict) -> Decimal:
             return amount * d / n
     price = _decimal(row.get("price", "0"))
     return amount / price if price > 0 else Decimal("0")
+
+
+def _orderbook_grid(rows, side: Literal["bid", "ask"]) -> Table:
+    """Render a full-width, non-focusable order-book side.
+
+    BID uses Amount | Price with both cells right-aligned so the bid price hugs
+    the center spread. ASK mirrors it as Price | Amount from the center outward.
+    """
+    table = Table.grid(expand=True, padding=(0, 1))
+    if side == "bid":
+        table.add_column(justify="right", ratio=1)
+        table.add_column(justify="right", ratio=1)
+        table.add_row(Text("Amount", style="bold dim"), Text("Price", style="bold dim"))
+        for row in rows:
+            table.add_row(
+                _stellar_decimal_text(_bid_base_amount(row)),
+                _stellar_decimal_text(_book_price(row), style="green"),
+            )
+        return table
+
+    table.add_column(justify="left", ratio=1)
+    table.add_column(justify="left", ratio=1)
+    table.add_row(Text("Price", style="bold dim"), Text("Amount", style="bold dim"))
+    for row in rows:
+        table.add_row(
+            _stellar_decimal_text(_book_price(row), style="red"),
+            _stellar_decimal_text(_decimal(row.get("amount", "0"))),
+        )
+    return table
 
 
 def _trade_price(raw: dict) -> Decimal:
