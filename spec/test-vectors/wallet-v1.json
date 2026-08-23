@@ -1,0 +1,46 @@
+{
+  "schema": "fresnica-wallet-v1",
+  "source": "SEP-0005 / stellar-sdk reference vectors",
+  "derivation": [
+    {
+      "name": "english-12-words-index-0",
+      "language": "english",
+      "mnemonic": "illness spike retreat truth genius clock brain pass fit cave bargain toe",
+      "passphrase": "",
+      "index": 0,
+      "expected_public_key": "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6"
+    },
+    {
+      "name": "english-12-words-index-1",
+      "language": "english",
+      "mnemonic": "illness spike retreat truth genius clock brain pass fit cave bargain toe",
+      "passphrase": "",
+      "index": 1,
+      "expected_public_key": "GBAW5XGWORWVFE2XTJYDTLDHXTY2Q2MO73HYCGB3XMFMQ562Q2W2GJQX"
+    },
+    {
+      "name": "english-12-words-index-2",
+      "language": "english",
+      "mnemonic": "illness spike retreat truth genius clock brain pass fit cave bargain toe",
+      "passphrase": "",
+      "index": 2,
+      "expected_public_key": "GAY5PRAHJ2HIYBYCLZXTHID6SPVELOOYH2LBPH3LD4RUMXUW3DOYTLXW"
+    },
+    {
+      "name": "english-24-words-passphrase-index-0",
+      "language": "english",
+      "mnemonic": "cable spray genius state float twenty onion head street palace net private method loan turn phrase state blanket interest dry amazing dress blast tube",
+      "passphrase": "p4ssphr4se",
+      "index": 0,
+      "expected_public_key": "GDAHPZ2NSYIIHZXM56Y36SBVTV5QKFIZGYMMBHOU53ETUSWTP62B63EQ"
+    },
+    {
+      "name": "english-24-words-passphrase-index-1",
+      "language": "english",
+      "mnemonic": "cable spray genius state float twenty onion head street palace net private method loan turn phrase state blanket interest dry amazing dress blast tube",
+      "passphrase": "p4ssphr4se",
+      "index": 1,
+      "expected_public_key": "GDY47CJARRHHL66JH3RJURDYXAMIQ5DMXZLP3TDAUJ6IN2GUOFX4OJOC"
+    }
+  ]
+}
