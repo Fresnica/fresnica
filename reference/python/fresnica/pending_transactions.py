@@ -135,6 +135,12 @@ class PendingTransactionService:
         items = self.store.list(self.network, account)
         return items[0] if items else None
 
+    def ensure_clear(self, account: str) -> None:
+        """Non-blocking local guard for UI event handlers."""
+        pending = self.first_pending(account)
+        if pending is not None:
+            raise TransactionPendingError(pending.tx_hash)
+
     def resolve(self, account: str) -> list[PendingResolution]:
         resolutions = []
         now = datetime.now(timezone.utc)
@@ -153,8 +159,8 @@ class PendingTransactionService:
                 resolutions.append(PendingResolution(pending, "pending"))
         return resolutions
 
-    def ensure_clear(self, account: str) -> list[PendingResolution]:
-        """Blocking reconciliation for CLI/write orchestration outside a UI event loop."""
+    def reconcile_and_ensure_clear(self, account: str) -> list[PendingResolution]:
+        """Blocking reconciliation for CLI/write orchestration outside an event loop."""
         resolutions = self.resolve(account)
         for item in resolutions:
             if item.status == "pending":
