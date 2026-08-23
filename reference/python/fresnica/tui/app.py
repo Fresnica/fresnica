@@ -7,6 +7,7 @@ information architecture, and pair-scoped SDEX presentation.
 
 from decimal import Decimal, InvalidOperation
 
+from rich.text import Text
 from textual import work
 from textual.binding import Binding
 
@@ -19,10 +20,12 @@ from ..errors import (
     WalletLockedError,
     WalletNotFoundError,
 )
+from ..history_service import is_dust_activity
 from ..manager import WalletState
 from ..models import OfferIntent
-from ..presentation import offer_outcome_summary
+from ..presentation import format_timestamp, offer_outcome_summary
 from .app_base import FresnicaApp as BaseFresnicaApp
+from .asset_details import AssetDetailAction, AssetDetailsScreen, PrefilledSendDialog
 from .dex import DexOfferAction, DexScreen, MarketPairDialog
 from .review_dialog import ReviewPresentationDialog
 from .screens import ConfirmDialog
@@ -43,10 +46,34 @@ class FresnicaApp(BaseFresnicaApp):
         self._show_zero_balances = bool(
             getattr(settings, "show_zero_balances", False)
         )
+        self._send_asset_override: str | None = None
         self._pending_dex_unlock = None
         self._pending_dex_submit = None
         self._pending_trustline_unlock = None
         self._pending_trustline_submit = None
+
+    def on_mount(self) -> None:
+        settings = getattr(self.runtime, "settings", None)
+        stored_theme = getattr(settings, "theme", None)
+        if stored_theme and stored_theme in self.available_themes:
+            self.theme = stored_theme
+        self.watch(self, "theme", self._persist_theme, init=False)
+        super().on_mount()
+        try:
+            record = self.runtime.wallet_manager.get_record()
+        except WalletNotFoundError:
+            return
+        self._apply_cached_wallet(record.name)
+
+    def _persist_theme(self, old_theme: str, new_theme: str) -> None:
+        if old_theme == new_theme:
+            return
+        settings = getattr(self.runtime, "settings", None)
+        store = getattr(self.runtime, "settings_store", None)
+        if settings is None or store is None:
+            return
+        settings.theme = new_theme
+        store.save(settings)
 
     def action_toggle_zero(self) -> None:
         self._show_zero_balances = not self._show_zero_balances
@@ -61,14 +88,111 @@ class FresnicaApp(BaseFresnicaApp):
         self._set_sync(f"Zero-balance assets {mode} · preference saved")
 
     def action_send(self) -> None:
+        if self._send_asset_override is None:
+            self._send_asset_override = self._selected_balance_asset()
         try:
             record = self.runtime.wallet_manager.get_record()
         except WalletNotFoundError:
+            self._send_asset_override = None
             super().action_send()
             return
         if not record.watch_only and not self._ensure_write_clear(record):
+            self._send_asset_override = None
             return
         super().action_send()
+
+    def _open_send(self) -> None:
+        asset = self._send_asset_override
+        self._send_asset_override = None
+        if asset is None:
+            super()._open_send()
+            return
+        record = self.runtime.wallet_manager.get_record()
+        self.push_screen(
+            PrefilledSendDialog(record.name, asset),
+            self._on_send_request,
+        )
+
+    def on_data_table_row_selected(self, event) -> None:
+        if getattr(event.data_table, "id", None) != "balances":
+            return
+        balance = self._selected_balance_view()
+        if balance is not None:
+            self.push_screen(AssetDetailsScreen(balance), self._on_asset_detail_action)
+
+    def _on_asset_detail_action(self, action: AssetDetailAction | None) -> None:
+        if action is None:
+            return
+        if action.kind == "send":
+            self._send_asset_override = action.asset
+            self.action_send()
+            return
+        if action.kind == "receive":
+            try:
+                record = self.runtime.wallet_manager.get_record()
+            except WalletNotFoundError:
+                return
+            self._show_notice(
+                f"Receive {action.asset.split(':', 1)[0]}",
+                f"Address:\n{record.address}\n\nAsset:\n{action.asset}",
+            )
+            return
+        if action.kind == "trustline":
+            self.action_trustlines()
+
+    def _visible_balance_views(self):
+        items = list(self._last_balances)
+        if not self._show_zero_balances:
+            items = [
+                item
+                for item in items
+                if not (
+                    item.balance == 0
+                    and item.selling_liabilities == 0
+                    and item.buying_liabilities == 0
+                )
+            ]
+        return items
+
+    def _selected_balance_view(self):
+        items = self._visible_balance_views()
+        if not items:
+            return None
+        table = self.query_one("#balances")
+        row = max(0, min(table.cursor_row, len(items) - 1))
+        return items[row]
+
+    def _selected_balance_asset(self) -> str | None:
+        if getattr(self.focused, "id", None) != "balances":
+            return None
+        balance = self._selected_balance_view()
+        if balance is None or balance.asset.is_liquidity_pool:
+            return None
+        if balance.asset.is_native:
+            return "XLM"
+        return f"{balance.asset.code}:{balance.asset.issuer}"
+
+    def _render_history(self) -> None:
+        table = self.query_one("#history")
+        table.clear()
+        settings = getattr(self.runtime, "settings", None)
+        use_local = bool(getattr(settings, "use_local_time", True))
+        show_dust = bool(getattr(settings, "show_dust_activity", False))
+        for item in self._last_history:
+            if (
+                not show_dust
+                and hasattr(item, "operations")
+                and is_dust_activity(item)
+            ):
+                continue
+            table.add_row(
+                format_timestamp(item.created_at, local=use_local),
+                item.summary,
+            )
+        if table.columns:
+            first_column = next(iter(table.columns.values()))
+            first_column.label = Text("Time (local)" if use_local else "Time (UTC)")
+            table.refresh()
 
     def _show_review(self, wallet, services, prepared, network: str) -> None:
         self._pending_send = (wallet, services, prepared, network)
@@ -204,6 +328,8 @@ class FresnicaApp(BaseFresnicaApp):
         password: str | None,
     ) -> None:
         if after not in {"dex", "trustline"}:
+            if after == "send" and password is None:
+                self._send_asset_override = None
             super()._on_unlock_response(wallet_name, after, password)
             return
         if password is None:
@@ -657,11 +783,15 @@ class FresnicaApp(BaseFresnicaApp):
             if balances or positions or history:
                 self._set_sync("Showing cached data · refreshing in background...")
             else:
-                self._set_sync("No cached data yet · refreshing in background...")
+                self._set_sync("No cached data yet · loading account from Horizon...")
         except (FresnicaError, ValueError):
             # Cache presentation is opportunistic. The background refresh remains
             # authoritative and will surface a real network/protocol error.
             return
+
+    def _set_refresh_stage(self, selected_name: str | None, message: str) -> None:
+        if self._is_current_wallet(selected_name):
+            self._set_sync(message)
 
     @work(thread=True, exit_on_error=False)
     def fund_wallet(self, wallet_name: str) -> None:
@@ -702,6 +832,11 @@ class FresnicaApp(BaseFresnicaApp):
             services = self.runtime.services_for(record.network)
             pending = getattr(services, "pending_transaction_service", None)
             if pending is not None:
+                self.call_from_thread(
+                    self._set_refresh_stage,
+                    selected_name,
+                    "Checking pending transaction state...",
+                )
                 pending_message = _pending_resolution_message(
                     pending.resolve(record.address)
                 )
@@ -722,6 +857,11 @@ class FresnicaApp(BaseFresnicaApp):
                 adapter = getattr(balance_service, "adapter", None)
                 exists_checker = getattr(adapter, "account_exists", None)
                 if exists_checker is not None:
+                    self.call_from_thread(
+                        self._set_refresh_stage,
+                        selected_name,
+                        "Checking Testnet account...",
+                    )
                     exists = bool(exists_checker(record.address))
                     if not exists:
                         self.call_from_thread(
@@ -732,12 +872,22 @@ class FresnicaApp(BaseFresnicaApp):
                         )
                         return
 
+            self.call_from_thread(
+                self._set_refresh_stage,
+                selected_name,
+                "Loading balances, issuer metadata, and liquidity...",
+            )
             balances, positions = balance_service.get_portfolio_views(session.wallet)
             history_service = services.history_service
             activity_getter = getattr(
                 history_service,
                 "get_activity_views",
                 history_service.get_views,
+            )
+            self.call_from_thread(
+                self._set_refresh_stage,
+                selected_name,
+                "Loading recent activity...",
             )
             history = activity_getter(session.wallet, limit=20)
             self.call_from_thread(
