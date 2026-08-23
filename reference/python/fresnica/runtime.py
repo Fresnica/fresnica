@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .anchor_cache import AnchorCapabilitiesStore
+from .anchor_transfer_service import AnchorTransferService
 from .asset_catalog import AssetCatalogService
 from .balance_service import BalanceService
 from .contacts import ContactStore
@@ -61,6 +62,7 @@ class Runtime:
         self.market_preferences = MarketPreferencesStore(self.home / "markets.json")
         self.asset_catalog = AssetCatalogService(self.home / "assets.json")
         self.anchor_capabilities_store = AnchorCapabilitiesStore(self.home / "anchors.json")
+        self.anchor_transfer_service = AnchorTransferService()
         self.wallet_manager = WalletManager(self.wallet_storage)
         self._services: dict[str, NetworkServices] = {}
 
