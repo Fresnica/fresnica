@@ -38,12 +38,12 @@ class ResolvedDestination:
 
 
 def resolve_destination(
-    store: "ContactStore",
+    store: "ContactStore | None",
     destination: str,
     memo: str | None = None,
 ) -> ResolvedDestination:
     """Resolve a local contact alias while keeping explicit memo precedence."""
-    contact = store.find(destination)
+    contact = store.find(destination) if store is not None else None
     if contact is None:
         return ResolvedDestination(address=destination, memo=memo)
     return ResolvedDestination(
