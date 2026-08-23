@@ -29,12 +29,26 @@ if "sep6_deposit_info=" not in text:
     )
     cache_test.write_text(text, encoding="utf-8")
 
+# Fix the test fake for stellar-sdk v15 Account, whose public account id is not
+# exposed as Account.account_id. Keep the asserted source separately.
+memo_test = PY / "tests" / "test_anchor_memo_types.py"
+text = memo_test.read_text(encoding="utf-8")
+text = text.replace(
+    '''class Server:\n    def __init__(self, account):\n        self.account = account\n\n    def load_account(self, source):\n        assert source == self.account.account_id\n        return self.account\n''',
+    '''class Server:\n    def __init__(self, account, source):\n        self.account = account\n        self.source = source\n\n    def load_account(self, source):\n        assert source == self.source\n        return self.account\n''',
+)
+text = text.replace(
+    '    adapter.server = Server(Account(keypair.public_key, 1))\n',
+    '    adapter.server = Server(Account(keypair.public_key, 1), keypair.public_key)\n',
+)
+memo_test.write_text(text, encoding="utf-8")
+
 # Guard against accidentally ignoring an earlier primary patch failure.
 checks = {
     PY / "fresnica" / "anchor_service.py": "class AnchorSep6Transfer",
     PY / "fresnica" / "tui" / "list_search.py": "class ListSearchDialog",
     PY / "fresnica" / "tui" / "asset_details.py": "class Sep6TransferDialog",
-    PY / "tests" / "test_anchor_memo_types.py": "test_anchor_hash_memo_builds_real_hash_memo",
+    PY / "tests" / "test_anchor_memo_types.py": "adapter.server = Server(Account(keypair.public_key, 1), keypair.public_key)",
 }
 for target, marker in checks.items():
     if not target.exists() or marker not in target.read_text(encoding="utf-8"):
