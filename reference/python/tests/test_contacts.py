@@ -1,0 +1,48 @@
+import json
+
+import pytest
+from stellar_sdk import Keypair
+
+from fresnica.contacts import ContactError, ContactExistsError, ContactNotFoundError, ContactStore
+
+
+def test_contact_store_persists_case_insensitive_names_and_default_memo(tmp_path):
+    path = tmp_path / "contacts.json"
+    address = Keypair.random().public_key
+    store = ContactStore(path)
+
+    contact = store.add("Alice", address, memo="12345")
+
+    assert contact.name == "Alice"
+    assert contact.address == address
+    assert contact.memo == "12345"
+    assert ContactStore(path).get("alice") == contact
+    assert json.loads(path.read_text(encoding="utf-8")) == [
+        {"address": address, "memo": "12345", "name": "Alice"}
+    ]
+
+    with pytest.raises(ContactExistsError):
+        store.add("ALICE", Keypair.random().public_key)
+
+
+def test_contact_store_remove_and_missing_contact(tmp_path):
+    store = ContactStore(tmp_path / "contacts.json")
+    contact = store.add("Bob", Keypair.random().public_key)
+
+    removed = store.remove("bob")
+
+    assert removed == contact
+    assert store.list() == []
+    assert store.find("bob") is None
+    with pytest.raises(ContactNotFoundError):
+        store.get("bob")
+
+
+def test_contact_store_rejects_invalid_address_and_corrupt_file(tmp_path):
+    store = ContactStore(tmp_path / "contacts.json")
+    with pytest.raises(ContactError, match="valid Stellar"):
+        store.add("bad", "not-an-address")
+
+    store.path.write_text("not-json", encoding="utf-8")
+    with pytest.raises(ContactError, match="Unable to read contacts"):
+        store.list()
