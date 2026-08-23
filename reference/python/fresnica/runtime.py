@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .balance_service import BalanceService
+from .contacts import ContactStore
 from .datastore import SQLiteDataStore
 from .dex_service import DexService
 from .history_service import HistoryService
@@ -51,6 +52,7 @@ class Runtime:
         )
         self.settings_store = SettingsStore(self.home / "settings.json")
         self.settings = self.settings_store.load()
+        self.contact_store = ContactStore(self.home / "contacts.json")
         self.wallet_manager = WalletManager(self.wallet_storage)
         self._services: dict[str, NetworkServices] = {}
 

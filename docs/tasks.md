@@ -40,7 +40,7 @@
 - [x] wallet lifecycle commands
 - [x] Human transaction review + Y/n confirmation
 - [x] `--json` balance output
-- [ ] Contact/address book integration
+- [x] Contact/address book integration
 
 ## TUI
 

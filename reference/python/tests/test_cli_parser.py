@@ -60,6 +60,22 @@ def test_wallet_backup_and_restore_parse():
     assert restore.name == "copy"
 
 
+def test_contact_commands_parse():
+    add = parse_args(["contact", "add", "Alice", "GDEST", "--memo", "42"])
+    assert add.command == "contact"
+    assert add.contact_command == "add"
+    assert add.name == "Alice"
+    assert add.address == "GDEST"
+    assert add.memo == "42"
+
+    remove = parse_args(["contact", "remove", "Alice"])
+    assert remove.contact_command == "remove"
+    assert remove.name == "Alice"
+
+    listing = parse_args(["contact", "list"])
+    assert listing.contact_command == "list"
+
+
 def test_wallet_help_is_grouped(capsys):
     with pytest.raises(SystemExit) as exc:
         parse_args(["wallet", "--help"])

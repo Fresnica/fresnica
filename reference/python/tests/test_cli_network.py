@@ -84,6 +84,7 @@ class Renderer:
 
 class TransferService:
     def prepare(self, **kwargs):
+        self.prepared_kwargs = kwargs
         return SimpleNamespace(review="review", envelope="transaction")
 
     def sign(self, wallet, prepared):
@@ -94,11 +95,13 @@ class TransferService:
 
 
 class Runtime:
-    def __init__(self, network="testnet", record=None):
+    def __init__(self, network="testnet", record=None, contacts=None):
         self.network = network
         self.wallet_manager = Manager(record)
         self.datastore = SimpleNamespace(get_balances=lambda network, address: [])
         self.transfer_service = TransferService()
+        contacts = contacts or {}
+        self.contact_store = SimpleNamespace(find=lambda name: contacts.get(name.casefold()))
         self.services = SimpleNamespace(
             testnet_service=(
                 SimpleNamespace(fund=lambda address: {"hash": "friendbot-hash"})
@@ -174,3 +177,49 @@ def test_send_uses_runtime_network_and_locks_wallet():
     assert result.hash == "hash"
     assert renderer.results == [(result, "testnet")]
     assert runtime.wallet_manager.locked is True
+
+
+def test_send_resolves_contact_and_uses_default_memo():
+    contact = SimpleNamespace(name="Alice", address="GALICE", memo="account-42")
+    runtime = Runtime("testnet", contacts={"alice": contact})
+    args = parse_args(["--network", "testnet", "send", "1", "XLM", "to", "Alice", "-y"])
+
+    execute_send(
+        runtime,
+        args,
+        Renderer(),
+        password_provider=lambda prompt: "password",
+    )
+
+    prepared = runtime.transfer_service.prepared_kwargs
+    assert prepared["destination"] == "GALICE"
+    assert prepared["memo"] == "account-42"
+    assert prepared["contact_name"] == "Alice"
+
+
+def test_explicit_send_memo_overrides_contact_default():
+    contact = SimpleNamespace(name="Alice", address="GALICE", memo="default")
+    runtime = Runtime("testnet", contacts={"alice": contact})
+    args = parse_args(
+        [
+            "--network",
+            "testnet",
+            "send",
+            "1",
+            "XLM",
+            "to",
+            "Alice",
+            "--memo",
+            "explicit",
+            "-y",
+        ]
+    )
+
+    execute_send(
+        runtime,
+        args,
+        Renderer(),
+        password_provider=lambda prompt: "password",
+    )
+
+    assert runtime.transfer_service.prepared_kwargs["memo"] == "explicit"

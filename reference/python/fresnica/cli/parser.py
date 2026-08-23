@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("amount")
     send.add_argument("asset")
     send.add_argument("to_keyword")
-    send.add_argument("destination")
+    send.add_argument("destination", help="Stellar G... address or local contact name")
     send.add_argument("--wallet", help="Wallet name; defaults to active wallet")
     send.add_argument("--memo")
     send.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
@@ -155,6 +155,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--name",
         help="Restore under a different local wallet name",
     )
+
+    contact = sub.add_parser("contact", help="Manage the local address book")
+    contact_sub = contact.add_subparsers(dest="contact_command", required=True)
+    contact_sub.add_parser("list", help="List local contacts")
+    contact_add = contact_sub.add_parser("add", help="Add a Stellar contact")
+    contact_add.add_argument("name")
+    contact_add.add_argument("address")
+    contact_add.add_argument("--memo", help="Default text memo for sends to this contact")
+    contact_remove = contact_sub.add_parser("remove", help="Remove a local contact")
+    contact_remove.add_argument("name")
 
     dex = sub.add_parser("dex", help="Read and trade on the Stellar DEX")
     dex_sub = dex.add_subparsers(dest="dex_command", required=True)

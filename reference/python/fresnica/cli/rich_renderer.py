@@ -221,6 +221,19 @@ class RichRenderer:
             )
         self.console.print(table)
 
+    def render_contacts(self, contacts) -> None:
+        table = Table(title="Contacts")
+        table.add_column("Name", style="bold")
+        table.add_column("Address")
+        table.add_column("Default memo")
+        for contact in contacts:
+            table.add_row(
+                contact.name,
+                short_address(contact.address),
+                contact.memo or "-",
+            )
+        self.console.print(table)
+
     def render_info(self, record) -> None:
         text = Text()
         text.append(f"Name: {record.name}\n", style="bold")
