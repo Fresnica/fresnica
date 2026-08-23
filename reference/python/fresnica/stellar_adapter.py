@@ -104,15 +104,23 @@ class StellarAdapter:
                 details=_sdk_error_details(exc),
             ) from exc
 
-    def get_offers(self, address: str, limit: int = 20) -> dict:
+    def get_offers(
+        self,
+        address: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        desc: bool = True,
+    ) -> dict:
         try:
-            return (
+            builder = (
                 self.server.offers()
                 .for_account(address)
-                .order(desc=True)
+                .order(desc=desc)
                 .limit(limit)
-                .call()
             )
+            if cursor is not None:
+                builder = builder.cursor(cursor)
+            return builder.call()
         except SdkError as exc:
             raise NetworkError(
                 f"Unable to load offers for {address}",

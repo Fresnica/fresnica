@@ -1,5 +1,7 @@
 """SDEX market and account data built on Horizon through the Stellar SDK."""
 
+from dataclasses import dataclass
+
 from .models import Asset
 from .offer_service import open_offer_from_horizon
 from .trade_segments import account_trade_from_horizon, compress_account_trades
@@ -13,8 +15,15 @@ RESOLUTIONS = {
     "1d": 86_400_000,
     "1w": 604_800_000,
 }
+OFFER_PAGE_LIMIT = 200
 ACCOUNT_TRADE_PAGE_LIMIT = 200
 ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES = 5
+
+
+@dataclass(frozen=True)
+class AccountTradeSegmentSnapshot:
+    segments: list
+    caught_up: bool
 
 
 class DexService:
@@ -22,6 +31,7 @@ class DexService:
         self.adapter = adapter
         self.datastore = datastore
         self.network_name = network_name
+        self._account_trade_caught_up: dict[str, bool] = {}
 
     def get_orderbook(self, selling, buying) -> dict:
         selling_asset = _asset(selling)
@@ -31,10 +41,29 @@ class DexService:
     def get_offers(self, wallet, limit: int = 20, refresh: bool = True) -> list[dict]:
         address = wallet.address()
         if refresh:
-            response = self.adapter.get_offers(address, limit=limit)
-            self.datastore.save_offers(self.network_name, address, response)
-            return _records(response)
+            self._sync_offers_snapshot(address)
         return self.datastore.get_offers(self.network_name, address, limit=limit)
+
+    def _sync_offers_snapshot(self, address: str) -> int:
+        records: list[dict] = []
+        cursor: str | None = None
+        while True:
+            response = self.adapter.get_offers(
+                address,
+                limit=OFFER_PAGE_LIMIT,
+                cursor=cursor,
+                desc=True,
+            )
+            page = _records(response)
+            records.extend(page)
+            if len(page) < OFFER_PAGE_LIMIT:
+                break
+            next_cursor = _paging_token(page[-1])
+            if next_cursor is None or next_cursor == cursor:
+                raise ValueError("Offer pagination stalled before a complete snapshot")
+            cursor = next_cursor
+        self.datastore.save_offers(self.network_name, address, records)
+        return len(records)
 
     def get_open_offers(self, wallet, limit: int = 20, refresh: bool = True):
         return [
@@ -54,9 +83,22 @@ class DexService:
         limit: int = 1000,
         refresh: bool = True,
     ):
-        """Sync wallet trades incrementally, then aggregate consecutive offer fills."""
+        return self.get_account_trade_segment_snapshot(
+            wallet,
+            limit=limit,
+            refresh=refresh,
+        ).segments
+
+    def get_account_trade_segment_snapshot(
+        self,
+        wallet,
+        limit: int = 1000,
+        refresh: bool = True,
+    ) -> AccountTradeSegmentSnapshot:
+        """Return cached fill segments plus whether bounded sync reached Horizon head."""
         address = wallet.address()
         cache_key = account_trade_cache_key(address)
+        caught_up = self._account_trade_caught_up.get(address, False)
         if refresh:
             latest = self.datastore.get_trades(
                 self.network_name,
@@ -65,7 +107,7 @@ class DexService:
             )
             cursor = _paging_token(latest[0]) if latest else None
             if cursor:
-                self._sync_account_trade_increment(address, cache_key, cursor)
+                caught_up = self._sync_account_trade_increment(address, cache_key, cursor)
             else:
                 response = self.adapter.get_account_trades(
                     address,
@@ -77,6 +119,8 @@ class DexService:
                     cache_key,
                     response,
                 )
+                caught_up = True
+            self._account_trade_caught_up[address] = caught_up
 
         raw = self.datastore.get_trades(
             self.network_name,
@@ -84,14 +128,17 @@ class DexService:
             limit=limit,
         )
         trades = [account_trade_from_horizon(item, address) for item in raw]
-        return compress_account_trades(trades, address)
+        return AccountTradeSegmentSnapshot(
+            segments=compress_account_trades(trades, address),
+            caught_up=caught_up,
+        )
 
     def _sync_account_trade_increment(
         self,
         address: str,
         cache_key: str,
         cursor: str,
-    ) -> None:
+    ) -> bool:
         next_cursor = cursor
         for _ in range(ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES):
             response = self.adapter.get_account_trades(
@@ -102,14 +149,15 @@ class DexService:
             )
             records = _records(response)
             if not records:
-                return
+                return True
             self.datastore.save_trades(self.network_name, cache_key, records)
             last_cursor = _paging_token(records[-1])
             if last_cursor is None or last_cursor == next_cursor:
-                return
+                return False
             next_cursor = last_cursor
             if len(records) < ACCOUNT_TRADE_PAGE_LIMIT:
-                return
+                return True
+        return False
 
     def get_trades(
         self,

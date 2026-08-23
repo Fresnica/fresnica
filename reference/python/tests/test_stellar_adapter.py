@@ -182,3 +182,51 @@ def test_base_reserve_is_loaded_once_per_adapter_instance():
     assert adapter.get_base_reserve_stroops() == 5_000_000
     assert adapter.get_base_reserve_stroops() == 5_000_000
     assert calls == 1
+
+
+class OffersBuilder:
+    def __init__(self):
+        self.steps = []
+
+    def for_account(self, address):
+        self.steps.append(("account", address))
+        return self
+
+    def order(self, desc=True):
+        self.steps.append(("order", desc))
+        return self
+
+    def limit(self, limit):
+        self.steps.append(("limit", limit))
+        return self
+
+    def cursor(self, cursor):
+        self.steps.append(("cursor", cursor))
+        return self
+
+    def call(self):
+        return {"_embedded": {"records": []}}
+
+
+class OffersServer:
+    def __init__(self):
+        self.builder = OffersBuilder()
+
+    def offers(self):
+        return self.builder
+
+
+def test_adapter_account_offers_support_cursor_and_order():
+    adapter = StellarAdapter(TESTNET)
+    server = OffersServer()
+    adapter.server = server
+
+    assert adapter.get_offers("GACCOUNT", limit=200, cursor="123", desc=False) == {
+        "_embedded": {"records": []}
+    }
+    assert server.builder.steps == [
+        ("account", "GACCOUNT"),
+        ("order", False),
+        ("limit", 200),
+        ("cursor", "123"),
+    ]

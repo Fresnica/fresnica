@@ -534,6 +534,7 @@ class DexScreen(ModalScreen[None]):
         self._orderbook_live = False
         self._trades_live = False
         self._counts = (0, 0, 0, 0, 0)
+        self._fills_caught_up = True
 
     def compose(self) -> ComposeResult:
         yield Static("", id="dex-title")
@@ -645,6 +646,7 @@ class DexScreen(ModalScreen[None]):
         self._recent_trades = []
         self._orderbook = {}
         self._counts = (0, 0, 0, 0, 0)
+        self._fills_caught_up = True
         self._clear_market_tables()
         self._update_pair_labels()
         self.set_status("Pair swapped · refreshing market orientation...")
@@ -727,11 +729,26 @@ class DexScreen(ModalScreen[None]):
                 view = offer_view_for_pair(offer, pair)
                 if view is not None:
                     offer_rows.append((offer, view))
-            segments = services.dex_service.get_account_trade_segments(
-                session.wallet,
-                limit=1000,
-                refresh=True,
+            snapshot_getter = getattr(
+                services.dex_service,
+                "get_account_trade_segment_snapshot",
+                None,
             )
+            if snapshot_getter is not None:
+                fill_snapshot = snapshot_getter(
+                    session.wallet,
+                    limit=1000,
+                    refresh=True,
+                )
+                segments = fill_snapshot.segments
+                fills_caught_up = bool(fill_snapshot.caught_up)
+            else:
+                segments = services.dex_service.get_account_trade_segments(
+                    session.wallet,
+                    limit=1000,
+                    refresh=True,
+                )
+                fills_caught_up = True
             fills = [
                 projected
                 for segment in segments
@@ -744,6 +761,7 @@ class DexScreen(ModalScreen[None]):
                 orderbook,
                 offer_rows,
                 fills,
+                fills_caught_up,
                 recent_trades,
                 None,
             )
@@ -755,6 +773,7 @@ class DexScreen(ModalScreen[None]):
                 {},
                 [],
                 [],
+                False,
                 [],
                 exc,
             )
@@ -766,6 +785,7 @@ class DexScreen(ModalScreen[None]):
         orderbook,
         offer_rows,
         fills,
+        fills_caught_up,
         recent_trades,
         error,
     ) -> None:
@@ -793,6 +813,7 @@ class DexScreen(ModalScreen[None]):
             )
 
         self._visible_fills = list(fills)
+        self._fills_caught_up = bool(fills_caught_up)
         self._render_fills()
 
         self._counts = (
@@ -980,9 +1001,10 @@ class DexScreen(ModalScreen[None]):
 
     def _set_market_status(self, suffix: str) -> None:
         asks, bids, trades, offers, fills = self._counts
+        fill_sync = "" if self._fills_caught_up else " · fill sync partial · R continue"
         self.set_status(
             f"{asks} asks · {bids} bids · {trades} trades · "
-            f"{offers} open offers · {fills} fill segments · {suffix}"
+            f"{offers} open offers · {fills} fill segments · {suffix}{fill_sync}"
         )
 
     def _update_pair_labels(self) -> None:
