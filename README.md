@@ -197,19 +197,36 @@ If an XLM destination does not exist, `send` reviews and submits a Stellar
 `CreateAccount` operation instead of a `Payment`. Issued assets still require an
 existing destination account and trustline.
 
-### Read-only SDEX
+### SDEX
 
-The current SDEX milestone is intentionally read-only. Asset syntax is `XLM` or
-`CODE:GISSUER...`.
+Asset syntax is `XLM` or `CODE:GISSUER...`. Fresnica separates the canonical
+Stellar offer stored by the ledger from the BUY/SELL view a user sees for an
+explicitly oriented market pair.
+
+For a pair `BASE/COUNTER`, both sides use one human convention:
+
+```text
+amount = BASE units
+price  = COUNTER units per one BASE unit
+```
+
+For example, both `BUY 100 XRP @ 0.325 USDC/XRP` and
+`SELL 100 XRP @ 0.325 USDC/XRP` use `100` and `0.325`; Fresnica chooses
+`ManageBuyOffer` or `ManageSellOffer` when encoding that intent.
+
+Read market and account state:
 
 ```bash
-# Selling XLM, buying USDC
+# Canonical order book direction
 uv run fresnica --network mainnet dex orderbook XLM USDC:GISSUER...
 
-# Offers owned by the selected wallet
+# Current offers owned by the selected wallet
 uv run fresnica --network mainnet dex offers --limit 20
 
-# Recent trades for an explicitly oriented pair
+# Wallet fills, aggregated by consecutive offer fills at exact price_r
+uv run fresnica --network mainnet dex fills --limit 200
+
+# Recent public trades for an explicitly oriented pair
 uv run fresnica --network mainnet dex trades XLM USDC:GISSUER... --limit 20
 
 # Horizon trade aggregations / candles
@@ -217,14 +234,57 @@ uv run fresnica --network mainnet dex candles XLM USDC:GISSUER... \
   --resolution 1h --limit 24
 ```
 
-Supported aggregation resolutions are `1m`, `5m`, `15m`, `1h`, `1d`, and `1w`.
-Offers, trades, and trade aggregations retain their raw Horizon JSON in the local
-SQLite cache while indexing fields useful for wallet and market views.
+Create, update, and cancel limit offers:
 
-Manage-offer and cancel-offer write operations are deliberately deferred until
-the state-driven wallet/session UX is stable; they will reuse the same
-unlock/review/sign/submit pipeline rather than introducing a separate signing
-path.
+```bash
+# BUY and SELL both use BASE amount and COUNTER/BASE price
+uv run fresnica --network mainnet dex buy  XRP:GISSUER... USDC:GISSUER... 100 0.325
+uv run fresnica --network mainnet dex sell XRP:GISSUER... USDC:GISSUER... 100 0.325
+
+# The current BUY/SELL side is inferred from the canonical offer plus this pair.
+# The original operation type is neither required nor persisted as correctness state.
+uv run fresnica --network mainnet dex update 12345 XRP:GISSUER... USDC:GISSUER... 90 0.33
+
+# Cancellation uses the current canonical selling/buying/price and amount=0.
+uv run fresnica --network mainnet dex cancel 12345
+```
+
+Creating an offer uses a fresh account snapshot to preflight selling balance,
+existing selling liabilities, transaction fees, and the XLM minimum reserve for
+the new offer subentry. If the receiving issued asset is missing a trustline,
+Fresnica requires explicit approval before building `ChangeTrust + ManageOffer`
+in one transaction:
+
+```bash
+uv run fresnica --network mainnet dex buy XRP:GISSUER... XLM 100 0.325 \
+  --allow-trustline
+```
+
+These checks intentionally do not attempt to reimplement Stellar Core. Protocol
+races, authorization/capacity rules, and update-time liability replacement remain
+Core-authoritative and surface through Horizon result codes.
+
+Current offers retain Horizon's exact `price_r`; reverse BUY views invert that
+fraction rather than round-tripping a decimal reciprocal. A partially filled BUY
+offer's displayed remaining BASE amount is a projection of current canonical
+ledger state, not reconstruction of its historical creation intent.
+
+Wallet fill history uses `/trades?for_account` rather than transaction history.
+Raw fills are cached in SQLite. The first load establishes a recent baseline and
+later refreshes continue ascending from the newest cached paging token. Fresnica
+merges only consecutive fills that have the same pair, side, exact `price_r`, and
+user offer ID. Trades without a user offer ID are kept separate rather than
+being guessed into one order.
+
+Supported candle resolutions are `1m`, `5m`, `15m`, `1h`, `1d`, and `1w`.
+Offers, trades, account fills, and trade aggregations retain their raw Horizon
+JSON in the local SQLite cache while indexing fields useful for wallet and
+market views.
+
+The SDEX write semantics and CLI are implemented in the Python reference. The
+state-driven TUI trading screen is a separate presentation slice; it will consume
+the same `MarketPair`, `OpenOffer`, `OfferView`, `OfferIntent`, and `OfferService`
+models rather than duplicate protocol logic.
 
 Other one-shot commands:
 
@@ -238,7 +298,7 @@ uv run fresnica send 25 USDC:GISSUER... to G...
 
 Sensitive mnemonic/secret material is encrypted at rest. Public metadata such
 as wallet name, address, and network remains readable. Chain-derived data is
-kept separately in a SQLite cache. One-shot send commands release the unlocked
+kept separately in a SQLite cache. One-shot write commands release the unlocked
 signer before returning.
 
 ## Current architecture
@@ -246,23 +306,25 @@ signer before returning.
 ```text
 CLI (Rich) / TUI (Textual)
           |
-  wallet / portfolio / activity models
+ wallet / portfolio / activity / SDEX models
           |
         Runtime
           |
-   +------+-------+
-   |              |
-WalletManager   Services
-   |          /    |      \
-WalletStorage Balance History  DEX
-               \    |      /
-                 DataStore
-                    |
-               StellarAdapter
-                    |
-                stellar-sdk
+   +------+------------------+
+   |                         |
+WalletManager             Services
+   |              /     /      \       \
+WalletStorage        Balance History   DEX   Offer
+                     \       |       /       /
+                         DataStore   Transactions
+                              \       /
+                           StellarAdapter
+                                |
+                            stellar-sdk
 ```
 
 `WalletManager` owns lifecycle and session state. `Wallet` represents identity
 plus optional signing capability. A watch-only wallet therefore uses the same
-balance/history/market services but cannot enter a signing state.
+balance/history/market services but cannot enter a signing state. Payment and
+SDEX writes share the same transaction builder, signer, submit service, review
+boundary, and wallet session lifecycle.
