@@ -103,6 +103,7 @@ class BalanceService:
             for raw in balances
             if raw.get("asset_issuer") and ISSUER_DOMAIN_CACHE_KEY in raw
         }
+        attempted = set(domains)
         for raw in balances:
             issuer = raw.get("asset_issuer")
             if not issuer or raw.get("asset_type") in {"native", "liquidity_pool_shares"}:
@@ -113,6 +114,9 @@ class BalanceService:
             if issuer in domains:
                 raw[ISSUER_DOMAIN_CACHE_KEY] = domains[issuer]
                 continue
+            if issuer in attempted:
+                continue
+            attempted.add(issuer)
             try:
                 issuer_account = self.adapter.get_account(issuer)
             except FresnicaError:
