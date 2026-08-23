@@ -29,6 +29,14 @@ class InvalidPasswordError(WalletError):
     pass
 
 
+class ProtectionError(WalletError):
+    pass
+
+
+class ProtectionUnavailableError(ProtectionError):
+    pass
+
+
 class SignerError(FresnicaError):
     pass
 
