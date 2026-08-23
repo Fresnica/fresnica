@@ -1,76 +1,87 @@
-"""Best-effort public market suggestions for the DEX chooser."""
+"""Fex-style popular market derivation from the shared asset catalog."""
 
-import re
-
-import requests
-
+from .asset_catalog import AssetCatalogEntry, AssetCatalogService
 from .models import Asset, MarketPair
 
 
-STELLAR_EXPERT_ASSETS = "https://api.stellar.expert/explorer/public/asset"
-REQUEST_TIMEOUT = 5
-_ASSET_ID = re.compile(r"^(.+)-(G[A-Z2-7]{55})-\d+$")
-
-
 class MarketDiscoveryService:
-    def __init__(self, session=None, timeout: int = REQUEST_TIMEOUT):
-        self.session = session or requests.Session()
-        self.timeout = timeout
+    def __init__(self, catalog: AssetCatalogService):
+        self.catalog = catalog
 
-    def popular_pairs(self, network: str, limit: int = 10) -> list[MarketPair]:
+    def popular_pairs(
+        self,
+        network: str,
+        limit: int = 12,
+        held_assets: list[Asset] | tuple[Asset, ...] = (),
+        refresh: bool = True,
+    ) -> list[MarketPair]:
         if network != "mainnet":
             return []
-        response = self.session.get(
-            STELLAR_EXPERT_ASSETS,
-            params={
-                "sort": "volume7d",
-                "order": "desc",
-                "limit": str(limit + 6),
-            },
-            timeout=self.timeout,
+        entries = self.catalog.recommended(
+            network,
+            limit=max(limit + 6, 18),
+            refresh=refresh,
         )
-        response.raise_for_status()
-        payload = response.json()
-        records = payload.get("_embedded", {}).get("records", []) if isinstance(payload, dict) else []
-        assets = []
-        for raw in records:
-            asset = _asset(raw)
-            if asset is not None and asset not in assets:
-                assets.append(asset)
-
-        usdc = next(
-            (
-                item
-                for item, domain in assets
-                if item.code.upper() == "USDC" and "circle.com" in domain.lower()
-            ),
-            None,
-        )
-        pairs: list[MarketPair] = []
-        if usdc is not None:
-            pairs.append(MarketPair(Asset("XLM"), usdc))
-        for asset, _domain in assets:
-            if usdc is not None and asset == usdc:
-                continue
-            pair = MarketPair(asset, Asset("XLM"))
-            if pair not in pairs:
-                pairs.append(pair)
-            if usdc is not None and asset.code.upper() in {"XRP", "YXLM", "AQUA"}:
-                pair = MarketPair(asset, usdc)
-                if pair not in pairs:
-                    pairs.append(pair)
-            if len(pairs) >= limit:
-                break
-        return pairs[:limit]
+        pairs = popular_pairs_from_assets(entries, limit=limit)
+        return order_pairs_by_held_assets(pairs, held_assets)
 
 
-def _asset(raw) -> tuple[Asset, str] | None:
-    if not isinstance(raw, dict):
-        return None
-    match = _ASSET_ID.match(str(raw.get("asset") or ""))
-    if match is None:
-        return None
-    domain = str(raw.get("domain") or "").strip()
-    if not domain:
-        return None
-    return Asset(match.group(1), match.group(2)), domain
+def popular_pairs_from_assets(
+    entries: list[AssetCatalogEntry] | tuple[AssetCatalogEntry, ...],
+    limit: int = 12,
+) -> list[MarketPair]:
+    """Match Fex's source-order popular pair construction."""
+    issued = [
+        item
+        for item in entries
+        if not item.asset.is_native and not item.asset.is_liquidity_pool and item.asset.issuer
+    ]
+    usdc = next(
+        (
+            item.asset
+            for item in issued
+            if item.asset.code.upper() == "USDC"
+            and item.domain
+            and "circle.com" in item.domain.lower()
+        ),
+        None,
+    )
+
+    native = Asset("XLM")
+    pairs: list[MarketPair] = []
+    if usdc is not None:
+        pairs.append(MarketPair(native, usdc))
+
+    for entry in issued:
+        asset = entry.asset
+        if usdc is not None and asset == usdc:
+            continue
+        _append_unique(pairs, MarketPair(asset, native))
+        if (
+            usdc is not None
+            and len(pairs) < limit
+            and asset.code.upper() in {"XRP", "YXLM", "AQUA"}
+        ):
+            _append_unique(pairs, MarketPair(asset, usdc))
+        if len(pairs) >= limit:
+            break
+    return pairs[:limit]
+
+
+def order_pairs_by_held_assets(
+    pairs: list[MarketPair] | tuple[MarketPair, ...],
+    held_assets: list[Asset] | tuple[Asset, ...],
+) -> list[MarketPair]:
+    """Stable Fex ordering: 2 held legs, then 1, then 0."""
+    if not held_assets:
+        return list(pairs)
+    held = set(held_assets)
+    return sorted(
+        pairs,
+        key=lambda pair: -int(pair.base in held) - int(pair.counter in held),
+    )
+
+
+def _append_unique(items: list[MarketPair], pair: MarketPair) -> None:
+    if pair.base != pair.counter and pair not in items:
+        items.append(pair)

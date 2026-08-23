@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from stellar_sdk import Keypair
 from textual.widgets import DataTable, Input, Static
 
+from fresnica.asset_catalog import AssetCatalogEntry
 from fresnica.errors import TrustlineConfirmationRequired
 from fresnica.manager import WalletManager, WalletState
 from fresnica.models import (
@@ -19,6 +20,7 @@ from fresnica.offer_service import offer_view_for_pair
 from fresnica.review import OfferReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
+from fresnica.tui.asset_picker import AssetPickerDialog
 from fresnica.tui.dex import DexScreen, MarketPairDialog, OfferFormDialog
 from fresnica.tui.review_dialog import ReviewPresentationDialog
 from fresnica.tui.screens import ConfirmDialog, NoticeDialog, UnlockDialog
@@ -194,6 +196,20 @@ class FakeOfferService:
         )
 
 
+class FakeAssetCatalog:
+    def __init__(self, asset):
+        self.entries = [
+            AssetCatalogEntry(Asset("XLM"), source="native"),
+            AssetCatalogEntry(asset, domain="example.org", name="XRP"),
+        ]
+
+    def cached(self, network):
+        return self.entries
+
+    def recommended(self, network, limit=30, refresh=True):
+        return self.entries
+
+
 class FakeRuntime:
     def __init__(self, watch_only=False):
         self.network = "testnet"
@@ -203,6 +219,7 @@ class FakeRuntime:
         self.wallet_manager = WalletManager(self.wallet_storage)
         self.issuer = Keypair.random().public_key
         self.pair = MarketPair(Asset("XRP", self.issuer), Asset("XLM"))
+        self.asset_catalog = FakeAssetCatalog(self.pair.base)
         if watch_only:
             self.wallet_manager.add_watch(
                 "main",
@@ -239,19 +256,28 @@ def _identity(asset):
     return "XLM" if asset.is_native else f"{asset.code}:{asset.issuer}"
 
 
-def _open_pair(app, runtime):
-    dialog = app.screen
-    assert isinstance(dialog, MarketPairDialog)
-    dialog.query_one("#base", Input).value = f"XRP:{runtime.issuer}"
-    dialog.query_one("#counter", Input).value = "XLM"
+def _plain_row(table, row):
+    return [value.plain if hasattr(value, "plain") else str(value) for value in table.get_row_at(row)]
 
 
 async def _enter_market(app, runtime, pilot):
     await pilot.press("d")
-    _open_pair(app, runtime)
-    await pilot.click("#open")
+    await _settle(pilot, 3)
+    assert isinstance(app.screen, MarketPairDialog)
+    await pilot.press("a")
+    await _settle(pilot, 3)
+    assert isinstance(app.screen, AssetPickerDialog)
+    picker = app.screen.query_one("#asset-picker-table", DataTable)
+    picker.move_cursor(row=1)
+    await pilot.press("enter")
+    await _settle(pilot, 3)
+    assert isinstance(app.screen, AssetPickerDialog)
+    picker = app.screen.query_one("#asset-picker-table", DataTable)
+    picker.move_cursor(row=0)
+    await pilot.press("enter")
     await _settle(pilot, 8)
     assert isinstance(app.screen, DexScreen)
+    assert app.screen.pair == runtime.pair
 
 
 def test_dex_screen_projects_reverse_offer_and_fill_into_selected_pair():
@@ -268,12 +294,12 @@ def test_dex_screen_projects_reverse_offer_and_fill_into_selected_pair():
             bids = app.screen.query_one("#dex-bids", DataTable)
             assert asks.row_count == 1
             assert bids.row_count == 1
-            assert asks.get_row_at(0) == ["0.33", "100", "33"]
-            assert bids.get_row_at(0) == ["0.32", "625", "200"]
+            assert _plain_row(asks, 0) == ["100", "0.3300000"]
+            assert _plain_row(bids, 0) == ["0.3200000", "625"]
             assert offers.row_count == 1
             assert fills.row_count == 1
-            assert offers.get_row_at(0) == ["BUY", "100", "0.325", "32.5", "42"]
-            assert fills.get_row_at(0)[1:] == ["BUY", "100", "0.325", "32.5", "3", "42"]
+            assert _plain_row(offers, 0) == ["BUY", "100", "0.3250000", "32.5", "42"]
+            assert _plain_row(fills, 0)[1:] == ["BUY", "100", "0.3250000", "32.5", "3", "42"]
             assert "1 open offers" in str(
                 app.screen.query_one("#dex-status", Static).render()
             )
