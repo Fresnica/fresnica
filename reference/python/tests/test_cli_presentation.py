@@ -6,6 +6,7 @@ from stellar_sdk import Keypair
 
 from fresnica.cli.rich_renderer import RichRenderer
 from fresnica.models import Asset, BalanceView, OperationView
+from fresnica.review import OfferReview
 
 
 def test_cli_balance_and_history_use_human_portfolio_activity_semantics():
@@ -54,3 +55,52 @@ def test_cli_balance_and_history_use_human_portfolio_activity_semantics():
     history_text = console.export_text()
     assert "Activity" in history_text
     assert "Received 1 XLM" in history_text
+
+
+def test_offer_review_surfaces_confirmed_trustline_operation():
+    console = Console(record=True, width=120)
+    renderer = RichRenderer(console)
+    renderer.render_offer_review(
+        OfferReview(
+            wallet_name="main",
+            source=Keypair.random().public_key,
+            action="create",
+            side="buy",
+            base_asset="XRP",
+            counter_asset="XLM",
+            amount="2",
+            price="1.5",
+            total="3",
+            fee="0.00002",
+            network="testnet",
+            trustline_asset="XRP",
+        )
+    )
+
+    text = console.export_text()
+    assert "BUY limit offer" in text
+    assert "Also creates trustline: XRP" in text
+    assert "Fee: 0.00002 XLM" in text
+
+
+def test_trade_renderer_prefers_horizon_price_fraction_over_rounded_amount_ratio():
+    console = Console(record=True, width=120)
+    renderer = RichRenderer(console)
+    renderer.render_trades(
+        "USDC:GISSUER",
+        "XLM",
+        [
+            {
+                "ledger_close_time": "2026-08-23T00:00:00Z",
+                "base_amount": "0.0131638",
+                "counter_amount": "0.0781235",
+                "price": {"n": 2000, "d": 337},
+                "base_is_seller": True,
+            }
+        ],
+        "mainnet",
+    )
+
+    text = console.export_text()
+    assert "5.9347181" in text
+    assert "5.9347224" not in text
