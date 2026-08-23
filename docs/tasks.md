@@ -5,7 +5,7 @@
 - [x] Compose Runtime dependencies
 - [x] Per-network service composition
 - [x] Application home/config root (`FRESNICA_HOME`)
-- [ ] User configuration file
+- [x] User configuration file
 
 ## Wallet
 
@@ -16,7 +16,7 @@
 - [x] File wallet storage
 - [x] Lock/unlock lifecycle
 - [x] Wallet create/import/list/use/delete commands
-- [ ] Export/backup workflow
+- [x] Export/backup workflow
 - [ ] Hardware/external signer implementations
 
 ## Data
