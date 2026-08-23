@@ -1,5 +1,6 @@
 """Full account activity screen backed by the local operation cache."""
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -10,6 +11,7 @@ from textual.widgets import Button, DataTable, Footer, Label, Select, Static
 from ..errors import FresnicaError
 from ..history_service import activity_counterparties, is_dust_activity
 from ..presentation import format_timestamp, short_address
+from ..settings import UserSettings
 from .contact_book import AddContactDialog, ContactBookScreen
 
 
@@ -70,17 +72,25 @@ class ActivityDetailDialog(ModalScreen[str | None]):
         self.activity = activity
         self.account = account
         self.use_local_time = use_local_time
-        self.counterparties = activity_counterparties(activity, account)
+        self.operations = list(getattr(activity, "operations", []) or [activity])
+        self.counterparties = (
+            activity_counterparties(activity, account)
+            if hasattr(activity, "operations")
+            else []
+        )
 
     def compose(self) -> ComposeResult:
         zone = "local" if self.use_local_time else "UTC"
-        transaction = self.activity.transaction_hash or "-"
+        raw = getattr(self.activity, "raw", {})
+        transaction = getattr(self.activity, "transaction_hash", None)
+        if not transaction and isinstance(raw, dict):
+            transaction = raw.get("transaction_hash")
         counterparties = ", ".join(short_address(item) for item in self.counterparties) or "-"
         text = (
             f"{self.activity.summary}\n"
             f"Time ({zone}): {format_timestamp(self.activity.created_at, compact=False, local=self.use_local_time)}\n"
-            f"Transaction: {transaction}\n"
-            f"Operations: {self.activity.operation_count}\n"
+            f"Transaction: {transaction or '-'}\n"
+            f"Operations: {len(self.operations)}\n"
             f"Counterparties: {counterparties}"
         )
         with Vertical(id="dialog"):
@@ -96,7 +106,7 @@ class ActivityDetailDialog(ModalScreen[str | None]):
         table = self.query_one("#activity-ops", DataTable)
         table.add_columns("#", "Operation", "Details")
         table.cursor_type = "row"
-        for index, operation in enumerate(self.activity.operations, start=1):
+        for index, operation in enumerate(self.operations, start=1):
             raw = operation.raw
             details = operation.summary
             source = raw.get("source_account")
@@ -151,6 +161,8 @@ class HistoryScreen(ModalScreen[None]):
         self.wallet_name = wallet_name
         self.limit = initial_limit
         self._visible_views = []
+        self._fallback_settings = UserSettings()
+        self._time_column_key = None
 
     def compose(self) -> ComposeResult:
         yield Static(f"Activity · {self.wallet_name}", id="history-title")
@@ -160,7 +172,8 @@ class HistoryScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         table = self.query_one("#history-table", DataTable)
-        table.add_columns(self._time_column(), "Activity")
+        self._time_column_key = table.add_column(self._time_column())
+        table.add_column("Activity")
         table.cursor_type = "row"
         self._load_cached()
 
@@ -186,7 +199,11 @@ class HistoryScreen(ModalScreen[None]):
         settings.use_local_time = not settings.use_local_time
         self._save_settings()
         table = self.query_one("#history-table", DataTable)
-        table.columns[0].label = self._time_column()
+        if self._time_column_key is not None:
+            column = table.columns.get(self._time_column_key)
+            if column is not None:
+                column.label = Text(self._time_column())
+                table.refresh()
         self._load_cached()
 
     def action_contacts(self) -> None:
@@ -209,7 +226,7 @@ class HistoryScreen(ModalScreen[None]):
         )
 
     def _detail_result(self, activity, result: str | None) -> None:
-        if result is None:
+        if result is None or not hasattr(activity, "operations"):
             return
         addresses = activity_counterparties(activity, self.wallet.address())
         if result == "__choose__":
@@ -233,7 +250,7 @@ class HistoryScreen(ModalScreen[None]):
                 limit=100000,
                 refresh=False,
             )
-            count = self.history_service.cached_operation_count(self.wallet)
+            count = self._cached_operation_count(views)
             self.app.call_from_thread(self._apply, views, count, "Local activity", None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], 0, "", exc)
@@ -241,13 +258,21 @@ class HistoryScreen(ModalScreen[None]):
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _refresh_history(self) -> None:
         try:
-            self.history_service.sync_recent(self.wallet)
-            views = self.history_service.get_activity_views(
-                self.wallet,
-                limit=100000,
-                refresh=False,
-            )
-            count = self.history_service.cached_operation_count(self.wallet)
+            sync_recent = getattr(self.history_service, "sync_recent", None)
+            if sync_recent is not None:
+                sync_recent(self.wallet)
+                views = self.history_service.get_activity_views(
+                    self.wallet,
+                    limit=100000,
+                    refresh=False,
+                )
+            else:
+                views = self.history_service.get_activity_views(
+                    self.wallet,
+                    limit=100000,
+                    refresh=True,
+                )
+            count = self._cached_operation_count(views)
             self.app.call_from_thread(self._apply, views, count, "Activity updated", None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], 0, "", exc)
@@ -262,17 +287,28 @@ class HistoryScreen(ModalScreen[None]):
                 limit=100000,
                 refresh=False,
             )
-            count = self.history_service.cached_operation_count(self.wallet)
+            count = self._cached_operation_count(views)
             message = f"Cached {added} older operations" if added else "No older operations returned"
             self.app.call_from_thread(self._apply, views, count, message, None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply, [], 0, "", exc)
 
+    def _cached_operation_count(self, views) -> int:
+        counter = getattr(self.history_service, "cached_operation_count", None)
+        return counter(self.wallet) if counter is not None else len(views)
+
     def _apply(self, views, cached_operations: int, message: str, error) -> None:
         table = self.query_one("#history-table", DataTable)
         table.clear()
         settings = self._settings()
-        filtered = views if settings.show_dust_activity else [item for item in views if not is_dust_activity(item)]
+        if settings.show_dust_activity:
+            filtered = views
+        else:
+            filtered = [
+                item
+                for item in views
+                if not (hasattr(item, "operations") and is_dust_activity(item))
+            ]
         self._visible_views = list(filtered[: self.limit])
         for item in self._visible_views:
             table.add_row(
@@ -295,10 +331,13 @@ class HistoryScreen(ModalScreen[None]):
         )
 
     def _settings(self):
-        return self.app.runtime.settings
+        return getattr(self.app.runtime, "settings", self._fallback_settings)
 
     def _save_settings(self) -> None:
-        self.app.runtime.settings_store.save(self.app.runtime.settings)
+        settings = getattr(self.app.runtime, "settings", None)
+        store = getattr(self.app.runtime, "settings_store", None)
+        if settings is not None and store is not None:
+            store.save(settings)
 
     def _time_column(self) -> str:
         settings = self._settings()
