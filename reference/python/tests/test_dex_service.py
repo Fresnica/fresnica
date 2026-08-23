@@ -1,6 +1,7 @@
 from stellar_sdk import Keypair
 
 from fresnica.datastore import MemoryDataStore
+import fresnica.dex_service as dex_service_module
 from fresnica.dex_service import DexService, asset_pair_key, resolution_value
 from fresnica.models import Asset
 from fresnica.wallet import Wallet
@@ -33,13 +34,17 @@ class FakeAdapter:
         }
         self.account_trade_baseline = []
         self.account_trade_increment = []
+        self.account_trade_increment_pages = {}
+        self.offer_pages = {}
 
     def get_orderbook(self, selling, buying):
         self.calls.append(("orderbook", selling, buying))
         return {"bids": [{"price": "1", "amount": "2"}], "asks": []}
 
-    def get_offers(self, address, limit=20):
-        self.calls.append(("offers", address, limit))
+    def get_offers(self, address, limit=20, cursor=None, desc=True):
+        self.calls.append(("offers", address, limit, cursor, desc))
+        if self.offer_pages:
+            return {"_embedded": {"records": list(self.offer_pages.get(cursor, []))}}
         return self.offers
 
     def get_offer(self, offer_id):
@@ -52,7 +57,12 @@ class FakeAdapter:
 
     def get_account_trades(self, address, limit=200, cursor=None, desc=True):
         self.calls.append(("account-trades", address, limit, cursor, desc))
-        records = self.account_trade_baseline if cursor is None else self.account_trade_increment
+        if cursor is None:
+            records = self.account_trade_baseline
+        else:
+            records = self.account_trade_increment_pages.get(
+                cursor, self.account_trade_increment
+            )
         return {"_embedded": {"records": list(records)}}
 
     def get_trade_aggregations(
@@ -114,6 +124,7 @@ def test_dex_service_uses_asset_direction_and_cache():
 
     wallet = Wallet.from_address(Keypair.random().public_key)
     assert service.get_offers(wallet, limit=5) == adapter.offers["_embedded"]["records"]
+    assert adapter.calls[-1] == ("offers", wallet.address(), 200, None, True)
     adapter.offers = {"_embedded": {"records": []}}
     assert service.get_offers(wallet, limit=5, refresh=False)[0]["id"] == "1"
 
@@ -214,3 +225,91 @@ def test_resolution_and_pair_keys_are_explicit():
         assert "Unsupported" in str(exc)
     else:
         raise AssertionError("unsupported resolution must fail")
+
+
+def test_account_offers_refresh_pages_complete_snapshot_and_removes_stale_cache(monkeypatch):
+    monkeypatch.setattr(dex_service_module, "OFFER_PAGE_LIMIT", 2)
+    adapter = FakeAdapter()
+    store = MemoryDataStore()
+    service = DexService(adapter, store, "mainnet")
+    wallet = Wallet.from_address(Keypair.random().public_key)
+    adapter.offer_pages = {
+        None: [
+            {"id": "4", "paging_token": "4"},
+            {"id": "3", "paging_token": "3"},
+        ],
+        "3": [
+            {"id": "2", "paging_token": "2"},
+            {"id": "1", "paging_token": "1"},
+        ],
+        "1": [],
+    }
+
+    assert [item["id"] for item in service.get_offers(wallet, limit=10)] == [
+        "4", "3", "2", "1"
+    ]
+    assert [call[3] for call in adapter.calls if call[0] == "offers"] == [None, "3", "1"]
+
+    adapter.offer_pages = {None: [{"id": "5", "paging_token": "5"}]}
+    assert [item["id"] for item in service.get_offers(wallet, limit=10)] == ["5"]
+    assert [item["id"] for item in service.get_offers(wallet, limit=10, refresh=False)] == ["5"]
+
+
+def test_account_trade_snapshot_reports_bounded_incremental_sync_until_caught_up(monkeypatch):
+    monkeypatch.setattr(dex_service_module, "ACCOUNT_TRADE_PAGE_LIMIT", 2)
+    monkeypatch.setattr(dex_service_module, "ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES", 2)
+    adapter = FakeAdapter()
+    store = MemoryDataStore()
+    service = DexService(adapter, store, "mainnet")
+    address = Keypair.random().public_key
+    wallet = Wallet.from_address(address)
+    issuer = Keypair.random().public_key
+    adapter.account_trade_baseline = [
+        _account_trade(address, issuer, "1-0", "2026-08-23T00:01:00Z"),
+    ]
+    baseline = service.get_account_trade_segment_snapshot(wallet)
+    assert baseline.caught_up is True
+
+    adapter.account_trade_increment_pages = {
+        "1-0": [
+            _account_trade(address, issuer, "2-0", "2026-08-23T00:02:00Z"),
+            _account_trade(address, issuer, "3-0", "2026-08-23T00:03:00Z"),
+        ],
+        "3-0": [
+            _account_trade(address, issuer, "4-0", "2026-08-23T00:04:00Z"),
+            _account_trade(address, issuer, "5-0", "2026-08-23T00:05:00Z"),
+        ],
+        "5-0": [
+            _account_trade(address, issuer, "6-0", "2026-08-23T00:06:00Z"),
+        ],
+    }
+    partial = service.get_account_trade_segment_snapshot(wallet)
+    assert partial.caught_up is False
+    assert partial.segments[0].trade_count == 5
+
+    caught_up = service.get_account_trade_segment_snapshot(wallet)
+    assert caught_up.caught_up is True
+    assert caught_up.segments[0].trade_count == 6
+    cached = service.get_account_trade_segment_snapshot(wallet, refresh=False)
+    assert cached.caught_up is True
+
+
+def test_account_trade_increment_stall_is_never_reported_as_caught_up(monkeypatch):
+    monkeypatch.setattr(dex_service_module, "ACCOUNT_TRADE_PAGE_LIMIT", 2)
+    adapter = FakeAdapter()
+    store = MemoryDataStore()
+    service = DexService(adapter, store, "mainnet")
+    address = Keypair.random().public_key
+    wallet = Wallet.from_address(address)
+    issuer = Keypair.random().public_key
+    adapter.account_trade_baseline = [
+        _account_trade(address, issuer, "1-0", "2026-08-23T00:01:00Z"),
+    ]
+    service.get_account_trade_segment_snapshot(wallet)
+    adapter.account_trade_increment_pages = {
+        "1-0": [
+            _account_trade(address, issuer, "2-0", "2026-08-23T00:02:00Z"),
+            _account_trade(address, issuer, "1-0", "2026-08-23T00:01:00Z"),
+        ]
+    }
+    assert service.get_account_trade_segment_snapshot(wallet).caught_up is False
