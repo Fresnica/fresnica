@@ -17,7 +17,8 @@
 - [x] Lock/unlock lifecycle
 - [x] Wallet create/import/list/use/delete commands
 - [x] Export/backup workflow
-- [ ] Hardware/external signer implementations
+- [x] Verified external Ed25519 signer adapter
+- [ ] Hardware transport adapters
 
 ## Data
 
