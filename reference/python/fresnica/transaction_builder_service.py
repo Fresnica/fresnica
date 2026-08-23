@@ -63,20 +63,26 @@ class TransactionBuilderService:
         action: str,
         limit: Decimal | None = None,
     ) -> PreparedTransaction:
-        limit_text = _amount_text(limit) if limit is not None else None
+        operation_limit = _amount_text(limit) if limit is not None else None
         envelope = self.adapter.build_change_trust(
             source=wallet.address(),
             asset=asset,
-            limit=limit_text,
+            limit=operation_limit,
             base_fee=base_fee_stroops,
         )
+        if action == "add" and operation_limit is None:
+            review_limit = "Stellar maximum"
+        elif action == "remove":
+            review_limit = None
+        else:
+            review_limit = operation_limit
         fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
         review = TrustlineReview(
             wallet_name=wallet_name,
             source=wallet.address(),
             action=action,
             asset=_review_asset(asset),
-            limit=limit_text,
+            limit=review_limit,
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
         )
