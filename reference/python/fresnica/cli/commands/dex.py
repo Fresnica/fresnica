@@ -1,6 +1,6 @@
 """SDEX command handlers."""
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from getpass import getpass
 
 from ...errors import UserCancelled, WatchOnlyError
@@ -112,10 +112,15 @@ def _execute_offer_write(
             intent = OfferIntent(
                 pair=pair,
                 side=args.dex_command,
-                amount=Decimal(args.amount),
-                price=Decimal(args.price),
+                amount=_decimal_arg(args.amount, "amount"),
+                price=_decimal_arg(args.price, "price"),
             )
-            prepared = offer_service.prepare_create(record.name, session.wallet, intent)
+            prepared = offer_service.prepare_create(
+                record.name,
+                session.wallet,
+                intent,
+                allow_trustline=args.allow_trustline,
+            )
 
         elif args.dex_command == "update":
             pair = _pair(args.base, args.counter)
@@ -128,8 +133,8 @@ def _execute_offer_write(
             intent = OfferIntent(
                 pair=pair,
                 side=view.side,
-                amount=Decimal(args.amount),
-                price=Decimal(args.price),
+                amount=_decimal_arg(args.amount, "amount"),
+                price=_decimal_arg(args.price, "price"),
             )
             prepared = offer_service.prepare_update(
                 record.name,
@@ -166,6 +171,13 @@ def _find_offer(service, wallet, offer_id: str):
 
 def _pair(base: str, counter: str) -> MarketPair:
     return MarketPair(base=Asset.parse(base), counter=Asset.parse(counter))
+
+
+def _decimal_arg(value: str, label: str) -> Decimal:
+    try:
+        return Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"Invalid offer {label}: {value}") from exc
 
 
 def _view_wallet(runtime, wallet_name):
