@@ -272,6 +272,14 @@ def test_market_entry_favorites_realtime_book_trades_immediate_fill_and_swap(tmp
             status = str(app.screen.query_one("#dex-status", Static).render())
             assert "realtime order book + trades" in status
 
+            network_calls = len(runtime.dex_service.calls)
+            await pilot.press("u")
+            await _settle(pilot, 3)
+            assert runtime.settings_store.load().use_local_time is True
+            assert len(runtime.dex_service.calls) == network_calls
+            assert [str(column.label) for column in trades.columns.values()][-1] == "Time (local)"
+            assert [str(column.label) for column in fills.columns.values()][0] == "Time (local)"
+
             preferences = runtime.market_preferences.get(
                 "mainnet", runtime.keypair.public_key
             )

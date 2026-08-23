@@ -300,7 +300,7 @@ def test_history_suspicious_toggle_timezone_details_and_contact_refresh(tmp_path
             await pilot.press("enter")
             await _settle(pilot, 3)
             assert isinstance(app.screen, ActivityDetailDialog)
-            assert app.screen.query_one("#activity-ops", DataTable).row_count == 2
+            assert len(app.screen.query(".activity-op")) == 2
             assert "tx-normal" in str(app.screen.query_one("#activity-detail", Static).render())
 
             await pilot.click("#add-contact")
@@ -315,7 +315,7 @@ def test_history_suspicious_toggle_timezone_details_and_contact_refresh(tmp_path
             # No restart is required: the History row is rebuilt from raw ops.
             assert isinstance(app.screen, HistoryScreen)
             table = app.screen.query_one("#history-table", DataTable)
-            assert "Sender ·" in str(table.get_row_at(0)[1])
+            assert "👤 Sender ·" in str(table.get_row_at(0)[1])
 
             await pilot.press("c")
             await _settle(pilot, 3)
