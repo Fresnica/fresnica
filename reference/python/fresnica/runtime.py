@@ -10,6 +10,7 @@ from .dex_service import DexService
 from .history_service import HistoryService
 from .manager import WalletManager
 from .network import get_network
+from .offer_service import OfferService
 from .settings import SettingsStore
 from .stellar_adapter import StellarAdapter
 from .storage import FileWalletStorage
@@ -26,6 +27,7 @@ class NetworkServices:
     balance_service: BalanceService
     history_service: HistoryService
     dex_service: DexService
+    offer_service: OfferService
     transaction_builder: TransactionBuilderService
     submit_service: SubmitService
     transaction_service: TransactionService
@@ -61,6 +63,7 @@ class Runtime:
                 balance_service=balance,
                 history_service=HistoryService(adapter, self.datastore, network.name),
                 dex_service=DexService(adapter, self.datastore, network.name),
+                offer_service=OfferService(builder, transaction),
                 transaction_builder=builder,
                 submit_service=submit,
                 transaction_service=transaction,
