@@ -1,5 +1,7 @@
 """Persistent recovery for transaction submissions with an uncertain HTTP result."""
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
