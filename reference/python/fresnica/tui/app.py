@@ -19,6 +19,7 @@ from ..errors import (
 )
 from ..manager import WalletState
 from ..models import OfferIntent
+from ..presentation import offer_outcome_summary
 from .app_base import FresnicaApp as BaseFresnicaApp
 from .dex import DexOfferAction, DexScreen, MarketPairDialog, OfferReviewDialog
 from .screens import ConfirmDialog
@@ -287,6 +288,9 @@ class FresnicaApp(BaseFresnicaApp):
             f"DEX transaction submitted on {network}: {result.hash}"
             + (f" · ledger {result.ledger}" if result.ledger is not None else "")
         )
+        outcome = offer_outcome_summary(getattr(result, "offer_outcome", None))
+        if outcome:
+            message += f" · {outcome}"
         if screen.is_mounted:
             screen.set_status(message)
             screen.refresh_market()
