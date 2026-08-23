@@ -477,7 +477,9 @@ class DexScreen(ModalScreen[None]):
     .dex-section { height: 1; text-style: bold; }
     #book-row { height: 2fr; min-height: 8; }
     .book-pane { width: 1fr; height: 1fr; padding: 0 1; }
-    .bid-section { width: 100%; text-align: right; }
+    .book-section { width: 100%; padding: 0 1; }
+    .bid-section { text-align: right; color: $success; background: $success 18%; }
+    .ask-section { text-align: left; color: $error; background: $error 18%; }
     #dex-asks, #dex-bids { width: 100%; height: 1fr; overflow-y: auto; }
     #dex-trades { height: 1fr; min-height: 6; }
     #account-row { height: 2fr; min-height: 8; }
@@ -513,10 +515,10 @@ class DexScreen(ModalScreen[None]):
         yield Static("Loading market snapshot...", id="dex-status")
         with Horizontal(id="book-row"):
             with Vertical(id="bids-pane", classes="book-pane"):
-                yield Label("BID · BUY", classes="dex-section bid-section")
+                yield Label("BID · BUY", classes="dex-section book-section bid-section")
                 yield Static("", id="dex-bids")
             with Vertical(id="asks-pane", classes="book-pane"):
-                yield Label("ASK · SELL", classes="dex-section")
+                yield Label("ASK · SELL", classes="dex-section book-section ask-section")
                 yield Static("", id="dex-asks")
         yield Label("Recent market trades · realtime", classes="dex-section")
         yield DataTable(id="dex-trades")
@@ -540,6 +542,7 @@ class DexScreen(ModalScreen[None]):
         fills.add_columns(self._time_column(), "Side", "Amount", "Price", "Total", "Fills", "Offer")
         fills.cursor_type = "row"
         self.call_later(self._update_pair_labels)
+        self.call_later(lambda: self.set_focus(offers))
         self.refresh_market()
 
     def on_unmount(self) -> None:
