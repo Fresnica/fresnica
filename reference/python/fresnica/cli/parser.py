@@ -173,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     fills = dex_sub.add_parser("fills", help="Show recent wallet offer fills")
     fills.add_argument("--wallet", help="Wallet name; defaults to active wallet")
     fills.add_argument("--limit", type=int, default=200)
+    fills.add_argument("--cached", action="store_true", help="Use local cache only")
 
     trades = dex_sub.add_parser("trades", help="Show recent trades for an asset pair")
     trades.add_argument("base")
