@@ -209,6 +209,11 @@ class RichRenderer:
             text.append(f"\nTotal: {review.total} {review.counter_asset}", style="dim")
             if review.offer_id:
                 text.append(f"\nOffer: #{review.offer_id}", style="dim")
+            if review.trustline_asset:
+                text.append(
+                    f"\nAlso creates trustline: {review.trustline_asset}",
+                    style="bold yellow",
+                )
         text.append(f"\n\nFee: {review.fee} XLM", style="dim")
         text.append(f"\nNetwork: {review.network}", style="dim")
         self.console.print(Panel(text, title="Confirm offer", border_style="yellow"))
@@ -291,6 +296,12 @@ def _horizon_asset(raw: dict) -> str:
 
 
 def _trade_price(raw: dict) -> str:
+    price = raw.get("price")
+    if isinstance(price, dict) and price.get("d") not in (None, "0", 0):
+        try:
+            return format_amount(Decimal(str(price["n"])) / Decimal(str(price["d"])))
+        except (InvalidOperation, KeyError):
+            pass
     try:
         base = Decimal(str(raw.get("base_amount")))
         counter = Decimal(str(raw.get("counter_amount")))
@@ -298,12 +309,6 @@ def _trade_price(raw: dict) -> str:
             return format_amount(counter / base)
     except (InvalidOperation, TypeError, ValueError):
         pass
-    price = raw.get("price")
-    if isinstance(price, dict) and price.get("d") not in (None, "0", 0):
-        try:
-            return format_amount(Decimal(str(price["n"])) / Decimal(str(price["d"])))
-        except (InvalidOperation, KeyError):
-            pass
     return "?"
 
 
