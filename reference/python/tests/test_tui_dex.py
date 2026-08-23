@@ -15,10 +15,12 @@ from fresnica.models import (
     PriceRatio,
     TransactionResult,
 )
+from fresnica.offer_service import offer_view_for_pair
 from fresnica.review import OfferReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
-from fresnica.tui.dex import DexScreen, MarketPairDialog, OfferFormDialog, OfferReviewDialog
+from fresnica.tui.dex import DexScreen, MarketPairDialog, OfferFormDialog
+from fresnica.tui.review_dialog import ReviewPresentationDialog
 from fresnica.tui.screens import ConfirmDialog, NoticeDialog, UnlockDialog
 
 
@@ -153,20 +155,22 @@ class FakeOfferService:
             ),
         )
 
-    def prepare_cancel(self, wallet_name, wallet, offer):
-        self.prepared.append(("cancel", offer))
+    def prepare_cancel(self, wallet_name, wallet, offer, pair):
+        view = offer_view_for_pair(offer, pair)
+        assert view is not None
+        self.prepared.append(("cancel", offer, pair))
         return SimpleNamespace(
             envelope=object(),
             review=OfferReview(
                 wallet_name=wallet_name,
                 source=wallet.address(),
                 action="cancel",
-                side=None,
-                base_asset=_identity(offer.selling),
-                counter_asset=_identity(offer.buying),
-                amount=None,
-                price=None,
-                total=None,
+                side=view.side,
+                base_asset=_identity(pair.base),
+                counter_asset=_identity(pair.counter),
+                amount=str(view.amount),
+                price=str(view.price),
+                total=str(view.total),
                 fee="0.00001",
                 network="testnet",
                 offer_id=offer.offer_id,
@@ -291,12 +295,15 @@ def test_locked_wallet_resumes_buy_after_unlock_and_reuses_offer_pipeline():
             await _settle(pilot, 8)
 
             assert runtime.wallet_manager.state() is WalletState.UNLOCKED
-            assert isinstance(app.screen, OfferReviewDialog)
+            assert isinstance(app.screen, ReviewPresentationDialog)
             assert runtime.offer_service.prepared[0][0] == "create"
             intent = runtime.offer_service.prepared[0][1]
             assert intent.side == "buy"
             assert intent.amount == Decimal("100")
             assert intent.price == Decimal("0.325")
+            review_text = str(app.screen.query_one("#review-text", Static).render())
+            assert "Create BUY limit offer" in review_text
+            assert "Max spend: 32.500 XLM" in review_text
 
             await pilot.click("#confirm")
             await _settle(pilot, 10)
@@ -329,7 +336,7 @@ def test_edit_reverse_buy_offer_keeps_buy_side_and_cancel_uses_selected_offer():
             await pilot.click("#review")
             await _settle(pilot, 6)
 
-            assert isinstance(app.screen, OfferReviewDialog)
+            assert isinstance(app.screen, ReviewPresentationDialog)
             kind, offer, intent = runtime.offer_service.prepared[-1]
             assert kind == "update"
             assert offer.offer_id == "42"
@@ -342,10 +349,17 @@ def test_edit_reverse_buy_offer_keeps_buy_side_and_cancel_uses_selected_offer():
             assert isinstance(app.screen, DexScreen)
             await pilot.press("x")
             await _settle(pilot, 6)
-            assert isinstance(app.screen, OfferReviewDialog)
-            kind, offer = runtime.offer_service.prepared[-1]
+            assert isinstance(app.screen, ReviewPresentationDialog)
+            kind, offer, pair = runtime.offer_service.prepared[-1]
             assert kind == "cancel"
             assert offer.offer_id == "42"
+            assert pair == runtime.pair
+            review_text = str(app.screen.query_one("#review-text", Static).render())
+            assert "Cancel BUY limit offer" in review_text
+            assert f"Pair: XRP:{runtime.issuer} / XLM" in review_text
+            assert f"Remaining: 100 XRP:{runtime.issuer}" in review_text
+            assert "Limit price: 0.325 XLM/XRP:" in review_text
+            assert "Max spend: 32.5 XLM" in review_text
 
     asyncio.run(scenario())
 
@@ -371,10 +385,10 @@ def test_missing_trustline_requires_separate_confirmation_before_final_review():
             await pilot.click("#confirm")
             await _settle(pilot, 8)
 
-            assert isinstance(app.screen, OfferReviewDialog)
+            assert isinstance(app.screen, ReviewPresentationDialog)
             assert [call[2] for call in runtime.offer_service.prepared] == [False, True]
             review_text = str(app.screen.query_one("#review-text", Static).render())
-            assert "Also create trustline" in review_text
+            assert "Warning: Creates trustline for" in review_text
             assert f"XRP:{runtime.issuer}" in review_text
 
     asyncio.run(scenario())
