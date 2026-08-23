@@ -540,7 +540,7 @@ class DexScreen(ModalScreen[None]):
         fills = self.query_one("#dex-fills", DataTable)
         fills.add_columns("Time", "Side", "Amount", "Price", "Total", "Fills", "Offer")
         fills.cursor_type = "row"
-        self._update_pair_labels()
+        self.call_later(self._update_pair_labels)
         self.refresh_market()
 
     def on_unmount(self) -> None:
