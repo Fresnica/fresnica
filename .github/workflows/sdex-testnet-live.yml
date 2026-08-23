@@ -2,7 +2,13 @@ name: SDEX Testnet live probe
 
 on:
   workflow_dispatch:
-  pull_request:
+  push:
+    branches:
+      - feature/sdex-outcomes-validation
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   sdex-testnet-live:
@@ -21,3 +27,8 @@ jobs:
         env:
           FRESNICA_LIVE_TESTNET: "1"
         run: uv run pytest -q -s tests/test_sdex_testnet_live.py
+      - name: Report validation result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 16 --body "Temporary real-Testnet validation run: **${{ job.status }}** for commit `${{ github.sha }}`."
