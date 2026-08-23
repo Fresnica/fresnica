@@ -1,9 +1,9 @@
 name: History retention temporary
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/history-retention-model
+      - main
 
 permissions:
   contents: write
