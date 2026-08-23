@@ -130,6 +130,8 @@ def test_sell_and_buy_intent_keep_one_human_price_direction():
     assert kwargs["offer_id"] == 0
     assert kwargs["trustline_asset"] is None
     assert prepared.review.side == "sell"
+    assert prepared.review.base_asset == f"XRP:{pair.base.issuer}"
+    assert prepared.review.counter_asset == f"USDC:{pair.counter.issuer}"
     assert prepared.review.total == "32.5"
 
     buy = OfferIntent(pair, "buy", Decimal("100"), Decimal("0.325"))
@@ -170,8 +172,27 @@ def test_missing_receiving_trustline_requires_explicit_approval():
     kind, kwargs = adapter.calls[-1]
     assert kind == "buy"
     assert kwargs["trustline_asset"] == pair.base
-    assert prepared.review.trustline_asset == "XRP"
+    assert prepared.review.trustline_asset == f"XRP:{pair.base.issuer}"
     assert prepared.review.fee == "0.00002"
+
+
+def test_issuer_can_sell_own_asset_without_a_trustline_balance():
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    issued = Asset("ISS", wallet.address())
+    pair = MarketPair(base=issued, counter=Asset("XLM"))
+    adapter = FakeAdapter(_account(wallet, [_balance(Asset("XLM"), "100")], subentry_count=0))
+    service = _service(adapter)
+
+    prepared = service.prepare_create(
+        "issuer",
+        wallet,
+        OfferIntent(pair, "sell", Decimal("1000000"), Decimal("1")),
+    )
+    kind, kwargs = adapter.calls[-1]
+    assert kind == "sell"
+    assert kwargs["selling"] == issued
+    assert kwargs["trustline_asset"] is None
+    assert prepared.review.base_asset == f"ISS:{wallet.address()}"
 
 
 def test_create_preflight_uses_fresh_selling_liabilities():
