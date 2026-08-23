@@ -1,18 +1,21 @@
 name: UX follow-up temporary
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/ux-followup-contacts-anchor-history-dex
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch-test-commit:
+    if: github.head_ref == 'codex/ux-followup-contacts-anchor-history-dex'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
       - name: Apply UX follow-up patch
         run: python tools/ux_followup_patch.py
       - name: Diff check
@@ -41,4 +44,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add reference/python/fresnica reference/python/tests
           git commit -m "Refine contacts anchor history and DEX UX"
-          git push origin HEAD:codex/ux-followup-contacts-anchor-history-dex
+          git push origin HEAD:${{ github.head_ref }}
