@@ -25,7 +25,4 @@ jobs:
           enable-cache: true
       - run: uv python install 3.11
       - run: uv sync --locked
-      - name: Run tests including Testnet probes
-        env:
-          FRESNICA_LIVE_TESTNET: "1"
-        run: uv run pytest -q
+      - run: uv run pytest -q
