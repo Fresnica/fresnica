@@ -3,8 +3,9 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from stellar_sdk import Keypair
-from textual.widgets import DataTable, Static
+from textual.widgets import Button, DataTable, Static
 
+from fresnica.asset_catalog import AssetCatalogEntry
 from fresnica.manager import WalletManager
 from fresnica.market_preferences import MarketPreferencesStore
 from fresnica.models import AccountTradeSegment, Asset, BalanceView, MarketPair, PriceRatio
@@ -54,11 +55,24 @@ class HistoryService:
     get_views = get_activity_views
 
 
+class Catalog:
+    def __init__(self, entries):
+        self.entries = entries
+
+    def cached(self, network):
+        return self.entries
+
+    def recommended(self, network, limit=30, refresh=True):
+        return self.entries
+
+
 class DexService:
     def __init__(self, pair):
         self.pair = pair
+        self.calls = []
 
     def get_orderbook(self, base, counter):
+        self.calls.append((base, counter))
         return {
             "asks": [
                 {"price": "0.5", "price_r": {"n": 1, "d": 2}, "amount": "10"}
@@ -69,17 +83,17 @@ class DexService:
         }
 
     def get_trades(self, base, counter, limit=30, refresh=True):
-        return [
-            {
-                "id": "trade-100",
-                "paging_token": "100-0",
-                "ledger_close_time": "2026-08-23T06:00:00Z",
-                "base_amount": "2",
-                "counter_amount": "1",
-                "price": {"n": 1, "d": 2},
-                "base_is_seller": True,
-            }
-        ]
+        trade = {
+            "id": "trade-100",
+            "paging_token": "100-0",
+            "ledger_close_time": "2026-08-23T06:00:00Z",
+            "base_amount": "2",
+            "counter_amount": "1",
+            "price": {"n": 1, "d": 2},
+            "base_is_seller": True,
+        }
+        # Duplicate REST records must not create duplicate rows.
+        return [trade, dict(trade)]
 
     def get_open_offers(self, wallet, limit=200, refresh=True):
         return []
@@ -116,6 +130,17 @@ class RealtimeAdapter:
 
     def stream_trades(self, base, counter, cursor=None):
         assert cursor == "100-0"
+        # Horizon may replay the cursor edge. It must replace, not duplicate,
+        # the REST row before a genuinely new trade arrives.
+        yield {
+            "id": "trade-100",
+            "paging_token": "100-0",
+            "ledger_close_time": "2026-08-23T06:00:00Z",
+            "base_amount": "2",
+            "counter_amount": "1",
+            "price": {"n": 1, "d": 2},
+            "base_is_seller": True,
+        }
         yield {
             "id": "trade-101",
             "paging_token": "101-0",
@@ -129,7 +154,7 @@ class RealtimeAdapter:
 
 class Runtime:
     def __init__(self, tmp_path):
-        self.network = "testnet"
+        self.network = "mainnet"
         self.settings_store = SettingsStore(tmp_path / "settings.json")
         self.settings = UserSettings(use_local_time=False)
         self.settings_store.save(self.settings)
@@ -141,12 +166,21 @@ class Runtime:
             "main",
             self.keypair.secret,
             "pw",
-            network="testnet",
+            network="mainnet",
             make_default=True,
         )
         self.issuer = Keypair.random().public_key
+        self.usdc_issuer = Keypair.random().public_key
         self.asset = Asset("XRP", self.issuer)
+        self.usdc = Asset("USDC", self.usdc_issuer)
         self.pair = MarketPair(self.asset, Asset("XLM"))
+        self.asset_catalog = Catalog(
+            [
+                AssetCatalogEntry(Asset("XLM"), source="native"),
+                AssetCatalogEntry(self.usdc, domain="circle.com", name="USD Coin"),
+                AssetCatalogEntry(self.asset, domain="example.org", name="XRP"),
+            ]
+        )
         self.balance_service = BalanceService(self.asset)
         self.history_service = HistoryService()
         self.dex_service = DexService(self.pair)
@@ -169,30 +203,42 @@ async def _settle(pilot, cycles=8):
         await pilot.pause(0.04)
 
 
-def test_market_entry_starred_realtime_two_sided_book_and_immediate_fill(tmp_path):
+def _plain_row(table, row):
+    return [value.plain if hasattr(value, "plain") else str(value) for value in table.get_row_at(row)]
+
+
+def test_market_entry_favorites_realtime_book_trades_immediate_fill_and_swap(tmp_path):
     async def scenario():
         runtime = Runtime(tmp_path)
         app = FresnicaApp(runtime)
-        async with app.run_test(size=(150, 56)) as pilot:
+        async with app.run_test(size=(150, 58)) as pilot:
             await _settle(pilot)
             await pilot.press("d")
-            await _settle(pilot, 4)
+            await _settle(pilot, 8)
             assert isinstance(app.screen, MarketPairDialog)
             markets = app.screen.query_one("#market-list", DataTable)
-            assert markets.row_count == 1
-            assert markets.get_row_at(0)[1] == "XRP/XLM"
-            assert markets.get_row_at(0)[4] == "Held asset"
+
+            # Popular follows Fex's held-asset ordering: XRP/XLM has two held
+            # legs and therefore ranks ahead of default XLM/USDC.
+            assert markets.row_count == 3
+            assert _plain_row(markets, 0)[1:] == ["XRP/XLM", "example.org", "Stellar native"]
+            assert "Recent: —" in str(app.screen.query_one("#market-recent", Static).render())
+
+            await pilot.press("space")
+            await _settle(pilot, 2)
+            preferences = runtime.market_preferences.get(
+                "mainnet", runtime.keypair.public_key
+            )
+            assert preferences.favorites == (runtime.pair,)
+            assert _plain_row(markets, 0)[0] == "★"
 
             await pilot.press("f")
             await _settle(pilot, 2)
-            preferences = runtime.market_preferences.get(
-                "testnet", runtime.keypair.public_key
-            )
-            assert preferences.favorites == (runtime.pair,)
-            assert markets.get_row_at(0)[0] == "★"
+            assert markets.row_count == 1
+            assert _plain_row(markets, 0)[1] == "XRP/XLM"
 
             await pilot.press("enter")
-            await _settle(pilot, 12)
+            await _settle(pilot, 14)
             assert isinstance(app.screen, DexScreen)
             assert "★ Stellar DEX" in str(app.screen.query_one("#dex-title", Static).render())
 
@@ -201,19 +247,45 @@ def test_market_entry_starred_realtime_two_sided_book_and_immediate_fill(tmp_pat
             trades = app.screen.query_one("#dex-trades", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
 
-            # SSE snapshot replaces the initial REST book. Bid raw amount is quote
-            # amount; 4.1 XLM / 0.41 XLM/XRP = 10 XRP displayed as BASE amount.
-            assert asks.get_row_at(0) == ["0.51", "20", "10.2"]
-            assert bids.get_row_at(0) == ["0.41", "10", "4.1"]
-            assert trades.get_row_at(0)[1:] == ["BUY", "4", "0.51", "2.04"]
-            assert fills.get_row_at(0)[3] == "0.3333333333"
-            assert fills.get_row_at(0)[6] == "Immediate"
+            assert [str(column.label) for column in asks.columns.values()] == ["Amount", "Price"]
+            assert [str(column.label) for column in bids.columns.values()] == ["Price", "Amount"]
+            assert [str(column.label) for column in trades.columns.values()] == ["Price", "Amount", "Time"]
+
+            # SSE replaces the REST book. Bid raw amount is quote amount:
+            # 4.1 XLM / 0.41 XLM/XRP = 10 XRP BASE amount.
+            assert _plain_row(asks, 0) == ["20", "0.5100000"]
+            assert _plain_row(bids, 0) == ["0.4100000", "10"]
+
+            # REST duplicate + SSE cursor replay remain one trade-100 row;
+            # trade-101 is the only new row. No mystery counter-amount Total.
+            assert trades.row_count == 2
+            assert _plain_row(trades, 0)[:2] == ["0.5100000", "4"]
+            assert _plain_row(trades, 1)[:2] == ["0.5000000", "2"]
+            assert fills.row_count == 1
+            assert _plain_row(fills, 0)[3] == "0.3333333"
+            assert _plain_row(fills, 0)[6] == "Immediate"
+
+            assert "Buy [B]" == app.screen.query_one("#buy", Button).label.plain
+            assert "Sell [S]" == app.screen.query_one("#sell", Button).label.plain
+            assert "⇄ Swap [W]" == app.screen.query_one("#swap", Button).label.plain
+            assert "★ Star [F]" == app.screen.query_one("#favorite", Button).label.plain
             status = str(app.screen.query_one("#dex-status", Static).render())
             assert "realtime order book + trades" in status
 
             preferences = runtime.market_preferences.get(
-                "testnet", runtime.keypair.public_key
+                "mainnet", runtime.keypair.public_key
             )
             assert preferences.recents[0] == runtime.pair
+
+            await pilot.press("w")
+            await _settle(pilot, 14)
+            swapped = MarketPair(Asset("XLM"), runtime.asset)
+            assert app.screen.pair == swapped
+            assert "XLM/XRP" in str(app.screen.query_one("#dex-title", Static).render())
+            assert runtime.dex_service.calls[-1] == (swapped.base, swapped.counter)
+            preferences = runtime.market_preferences.get(
+                "mainnet", runtime.keypair.public_key
+            )
+            assert preferences.recents[0] == swapped
 
     asyncio.run(scenario())
