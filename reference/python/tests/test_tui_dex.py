@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 
 from stellar_sdk import Keypair
@@ -64,15 +65,15 @@ class FakeDexService:
             offer_id="42",
             selling=pair.counter,
             buying=pair.base,
-            selling_amount=32.5,
+            selling_amount=Decimal("32.5"),
             price_r=PriceRatio(40, 13),
         )
         self.fill = AccountTradeSegment(
             segment_key="raw",
             pair=MarketPair(pair.counter, pair.base),
             side="sell",
-            base_amount=32.5,
-            counter_amount=100,
+            base_amount=Decimal("32.5"),
+            counter_amount=Decimal("100"),
             price_r=PriceRatio(40, 13),
             user_offer_id="42",
             trade_count=3,
@@ -286,8 +287,8 @@ def test_locked_wallet_resumes_buy_after_unlock_and_reuses_offer_pipeline():
             assert runtime.offer_service.prepared[0][0] == "create"
             intent = runtime.offer_service.prepared[0][1]
             assert intent.side == "buy"
-            assert intent.amount == 100
-            assert intent.price == 0.325
+            assert intent.amount == Decimal("100")
+            assert intent.price == Decimal("0.325")
 
             await pilot.click("#confirm")
             await _settle(pilot, 10)
