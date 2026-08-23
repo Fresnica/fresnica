@@ -225,6 +225,10 @@ class HistoryScreen(ModalScreen[None]):
             lambda result: self._detail_result(activity, result),
         )
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id == "history-table":
+            self.action_details()
+
     def _detail_result(self, activity, result: str | None) -> None:
         if result is None or not hasattr(activity, "operations"):
             return
