@@ -249,6 +249,7 @@ class StellarAdapter:
         price,
         base_fee: int,
         offer_id: int = 0,
+        trustline_asset: Asset | None = None,
         timeout: int = 30,
     ):
         return self._build_offer_transaction(
@@ -260,6 +261,7 @@ class StellarAdapter:
             base_fee=base_fee,
             offer_id=offer_id,
             buy=False,
+            trustline_asset=trustline_asset,
             timeout=timeout,
         )
 
@@ -272,6 +274,7 @@ class StellarAdapter:
         price,
         base_fee: int,
         offer_id: int = 0,
+        trustline_asset: Asset | None = None,
         timeout: int = 30,
     ):
         return self._build_offer_transaction(
@@ -283,6 +286,7 @@ class StellarAdapter:
             base_fee=base_fee,
             offer_id=offer_id,
             buy=True,
+            trustline_asset=trustline_asset,
             timeout=timeout,
         )
 
@@ -296,6 +300,7 @@ class StellarAdapter:
         base_fee: int,
         offer_id: int,
         buy: bool,
+        trustline_asset: Asset | None,
         timeout: int,
     ):
         try:
@@ -305,6 +310,10 @@ class StellarAdapter:
                 network_passphrase=self.network.passphrase,
                 base_fee=base_fee,
             )
+            if trustline_asset is not None:
+                builder = builder.append_change_trust_op(
+                    asset=self.to_sdk_asset(trustline_asset)
+                )
             kwargs = {
                 "selling": self.to_sdk_asset(selling),
                 "buying": self.to_sdk_asset(buying),
