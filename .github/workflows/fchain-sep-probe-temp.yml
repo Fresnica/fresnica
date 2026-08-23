@@ -1,54 +1,50 @@
-name: Fchain SEP probe temporary
+name: SEP-6 search temporary
 
 on:
   push:
     branches:
       - codex/sep6-search-ux
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  probe:
+  patch-test-commit:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe stellar.toml and SEP-6 endpoints
+      - uses: actions/checkout@v4
+      - name: Apply implementation
         shell: bash
         run: |
-          set -euo pipefail
-          echo '--- stellar.toml ---'
-          curl -fsSL --max-time 10 https://fchain.io/.well-known/stellar.toml | tee /tmp/stellar.toml
-          echo
-          echo '--- endpoints ---'
-          python - <<'PY'
-          import tomllib, pathlib
-          data = tomllib.loads(pathlib.Path('/tmp/stellar.toml').read_text())
-          for key in ('TRANSFER_SERVER','TRANSFER_SERVER_SEP0024','WEB_AUTH_ENDPOINT','KYC_SERVER','SIGNING_KEY'):
-              print(f'{key}={data.get(key)}')
-          print('XRP currency:', next((x for x in data.get('CURRENCIES',[]) if x.get('code') == 'XRP'), None))
-          pathlib.Path('/tmp/sep6').write_text(str(data.get('TRANSFER_SERVER') or ''))
-          PY
-          SEP6=$(cat /tmp/sep6)
-          if [ -n "$SEP6" ]; then
-            echo
-            echo '--- SEP-6 /info ---'
-            curl -fsSL --max-time 10 "${SEP6%/}/info"
-            echo
-            echo '--- SEP-6 /deposit XRP ---'
-            curl -sS --max-time 10 -G "${SEP6%/}/deposit" \
-              --data-urlencode 'asset_code=XRP' \
-              --data-urlencode 'account=GBXRPL45NPHCVMFFAYZVUVFFVKSIZ362ZXFP7I2ETNQ3QKZMFLPRDTD5' \
-              -w '\nHTTP %{http_code}\n'
-            echo
-            echo '--- SEP-6 /withdraw XRP ---'
-            curl -sS --max-time 10 -G "${SEP6%/}/withdraw" \
-              --data-urlencode 'type=crypto' \
-              --data-urlencode 'asset_code=XRP' \
-              --data-urlencode 'dest=rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn' \
-              --data-urlencode 'amount=5' \
-              --data-urlencode 'account=GBXRPL45NPHCVMFFAYZVUVFFVKSIZ362ZXFP7I2ETNQ3QKZMFLPRDTD5' \
-              -w '\nHTTP %{http_code}\n'
+          if grep -q 'class AnchorSep6Transfer' reference/python/fresnica/anchor_service.py; then
+            echo 'implementation already applied'
+          else
+            python tools/sep6_search_patch.py
           fi
+      - name: Diff check
+        run: git diff --check
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.5"
+          enable-cache: true
+      - name: Install Python
+        working-directory: reference/python
+        run: uv python install 3.11
+      - name: Sync
+        working-directory: reference/python
+        run: uv sync --locked
+      - name: Test
+        working-directory: reference/python
+        run: uv run pytest -q
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reference/python/fresnica reference/python/tests
+          git commit -m "Add native SEP-6 transfers and slash search"
+          git push origin HEAD:codex/sep6-search-ux
