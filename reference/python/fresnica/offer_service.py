@@ -128,14 +128,24 @@ class OfferService:
             action="update",
         )
 
-    def prepare_cancel(self, wallet_name: str, wallet, offer: OpenOffer):
+    def prepare_cancel(
+        self,
+        wallet_name: str,
+        wallet,
+        offer: OpenOffer,
+        pair: MarketPair | None = None,
+    ):
         self._validate_wallet(wallet)
+        view = offer_view_for_pair(offer, pair) if pair is not None else None
+        if pair is not None and view is None:
+            raise TransactionError("Offer cancellation pair does not match the current offer")
         fee = self.transaction_builder.adapter.fetch_base_fee()
         return self.transaction_builder.build_cancel_offer(
             wallet_name=wallet_name,
             wallet=wallet,
             offer=offer,
             base_fee_stroops=fee,
+            view=view,
         )
 
     def sign(self, wallet, prepared):
