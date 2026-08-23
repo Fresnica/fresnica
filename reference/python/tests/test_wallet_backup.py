@@ -108,6 +108,30 @@ def test_restore_rejects_unsupported_or_malformed_backup(tmp_path):
         read_wallet_backup(malformed)
 
 
+def test_restore_rejects_unknown_network_as_backup_error(tmp_path):
+    path = tmp_path / "unknown-network.json"
+    path.write_text(
+        json.dumps(
+            {
+                "format": BACKUP_FORMAT,
+                "version": BACKUP_VERSION,
+                "wallet": {
+                    "name": "observer",
+                    "address": Keypair.random().public_key,
+                    "wallet_type": "watch-only",
+                    "network": "future-net",
+                    "secret": None,
+                    "metadata": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WalletError, match="unknown network future-net"):
+        read_wallet_backup(path)
+
+
 def test_restore_rejects_watch_only_record_with_secret_envelope(tmp_path):
     path = tmp_path / "bad-watch.json"
     path.write_text(
