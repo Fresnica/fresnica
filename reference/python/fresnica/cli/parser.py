@@ -149,6 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("amount", help="Base-asset amount")
         command.add_argument("price", help="Counter units per one base unit")
         command.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+        command.add_argument(
+            "--allow-trustline",
+            action="store_true",
+            help="Explicitly approve creating a missing receiving trustline",
+        )
         command.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
 
     update = dex_sub.add_parser("update", help="Update an existing offer")
