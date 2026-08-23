@@ -128,7 +128,6 @@ class TrustlineScreen(ModalScreen[None]):
         Binding("escape", "close", "Back"),
         Binding("r", "refresh", "Refresh"),
         Binding("a", "add", "Add"),
-        Binding("e", "edit", "Set limit"),
         Binding("x", "remove", "Remove"),
     ]
 
@@ -146,8 +145,8 @@ class TrustlineScreen(ModalScreen[None]):
         self._visible_lines: list[dict] = []
 
     def compose(self) -> ComposeResult:
-        yield Static("Stellar trustlines", id="trust-title")
-        yield Static("Loading trustlines...", id="trust-status")
+        yield Static("Manage Assets", id="trust-title")
+        yield Static("Loading issued assets...", id="trust-status")
         yield DataTable(id="trustlines")
         yield Footer()
 
@@ -170,7 +169,7 @@ class TrustlineScreen(ModalScreen[None]):
             AssetPickerDialog(
                 self.runtime,
                 allow_native=False,
-                title="Choose asset for trustline",
+                title="Choose asset to add",
             ),
             self._on_add_asset,
         )
@@ -234,7 +233,7 @@ class TrustlineScreen(ModalScreen[None]):
             self._apply_trustlines(lines, None, cached=True)
 
     def refresh_trustlines(self) -> None:
-        self.set_status("Refreshing trustlines...")
+        self.set_status("Refreshing issued assets...")
         self._refresh_trustlines()
 
     @work(exclusive=True, thread=True, exit_on_error=False)
@@ -274,7 +273,7 @@ class TrustlineScreen(ModalScreen[None]):
             return
         suffix = " · cached; refreshing..." if cached else ""
         self.set_status(
-            f"{len(lines)} trustlines · A add · E set limit · X remove{suffix}"
+            f"{len(lines)} issued assets · A add · X remove{suffix}"
         )
 
     def set_status(self, message: str) -> None:

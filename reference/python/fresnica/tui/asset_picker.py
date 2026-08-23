@@ -44,7 +44,7 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
         with Vertical(id="dialog"):
             yield Label(self.title)
             yield Static(
-                "Recommended assets are cached locally. Full issuer identity remains authoritative.",
+                "Curated: Lobstr + Soroswap + StellarExpert · cached locally · full issuer identity remains authoritative.",
                 id="asset-picker-status",
             )
             yield DataTable(id="asset-picker-table")
@@ -115,7 +115,8 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
             return []
         try:
             record = self.runtime.wallet_manager.get_record()
-            entries = store.cached(record.network)
+            getter = getattr(store, "cached_curated", store.cached)
+            entries = getter(record.network)
         except (FresnicaError, ValueError):
             return []
         return self._filter(entries)
@@ -127,7 +128,8 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
             return
         try:
             record = self.runtime.wallet_manager.get_record()
-            entries = store.recommended(record.network, limit=30, refresh=True)
+            getter = getattr(store, "curated", store.recommended)
+            entries = getter(record.network, limit=50, refresh=True)
             self.app.call_from_thread(self._apply_refresh, self._filter(entries), None)
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply_refresh, [], exc)
@@ -141,9 +143,9 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
         if error is not None:
             status.update("Recommended assets unavailable · cached/manual selection remains available")
         elif entries:
-            status.update(f"{len(entries)} recommended assets · R refresh · full issuer identity retained")
+            status.update(f"{len(entries)} curated assets · Lobstr + Soroswap + StellarExpert · R refresh")
         elif not self._entries:
-            status.update("No recommended assets cached · enter a full asset identity below")
+            status.update("No curated assets cached · enter a full asset identity below")
 
     def _filter(self, entries: list[AssetCatalogEntry]) -> list[AssetCatalogEntry]:
         return [

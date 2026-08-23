@@ -39,7 +39,7 @@ class FresnicaApp(BaseFresnicaApp):
     BINDINGS = [
         *BaseFresnicaApp.BINDINGS,
         Binding("d", "dex", "DEX"),
-        Binding("t", "trustlines", "Trustlines"),
+        Binding("t", "trustlines", "Manage Assets"),
     ]
 
     def __init__(self, runtime):
@@ -266,7 +266,7 @@ class FresnicaApp(BaseFresnicaApp):
         try:
             self.runtime.wallet_manager.get_record()
         except WalletNotFoundError:
-            self._show_notice("No wallet", "Add or import a wallet before managing trustlines.")
+            self._show_notice("No wallet", "Add or import a wallet before managing assets.")
             return
         self.push_screen(TrustlineScreen(self.runtime, self._on_trustline_action))
 
@@ -280,14 +280,14 @@ class FresnicaApp(BaseFresnicaApp):
             record = manager.get_record()
             state = manager.state(record.name)
         except WalletNotFoundError:
-            self._show_notice("No wallet", "Add or import a wallet before changing trustlines.")
+            self._show_notice("No wallet", "Add or import a wallet before changing assets.")
             return
 
         if state is WalletState.WATCH_ONLY:
-            screen.set_status("Watch-only wallet · trustlines are read-only.")
+            screen.set_status("Watch-only wallet · issued assets are read-only.")
             self._show_notice(
                 "Watch-only wallet",
-                "This wallet can inspect trustlines but cannot sign ChangeTrust operations.",
+                "This wallet can inspect issued assets but cannot sign ChangeTrust operations.",
             )
             return
 

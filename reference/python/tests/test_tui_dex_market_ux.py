@@ -248,6 +248,8 @@ def test_market_entry_favorites_realtime_book_trades_immediate_fill_and_swap(tmp
             bids = app.screen.query_one("#dex-bids", Static)
             trades = app.screen.query_one("#dex-trades", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
+            offers = app.screen.query_one("#dex-offers", DataTable)
+            assert app.screen.focused is offers
 
             bid_grid = _orderbook_grid(app.screen._orderbook["bids"], "bid")
             ask_grid = _orderbook_grid(app.screen._orderbook["asks"], "ask")

@@ -3,7 +3,7 @@ import json
 import requests
 from stellar_sdk import Keypair
 
-from fresnica.asset_catalog import AssetCatalogService
+from fresnica.asset_catalog import ASSET_LIST_CATALOGUE, AssetCatalogService
 
 
 class Response:
@@ -23,7 +23,7 @@ class Session:
         self.error = error
         self.calls = []
 
-    def get(self, url, params, timeout):
+    def get(self, url, params=None, timeout=None):
         self.calls.append((url, params, timeout))
         if self.error is not None:
             raise self.error
@@ -104,3 +104,46 @@ def test_testnet_catalog_never_fetches_public_mainnet_recommendations(tmp_path):
 
     assert [item.identity for item in entries] == ["XLM"]
     assert session.calls == []
+
+
+class MultiSession:
+    def __init__(self, payloads):
+        self.payloads = payloads
+        self.calls = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append((url, params, timeout))
+        return Response(self.payloads[url])
+
+
+def test_curated_catalog_merges_lobstr_soroswap_and_stellarexpert(tmp_path):
+    usdc = Keypair.random().public_key
+    aqua = Keypair.random().public_key
+    xrp = Keypair.random().public_key
+    lobstr_url = "https://lists.example/lobstr.json"
+    soroswap_url = "https://lists.example/soroswap.json"
+    expert_url = "https://lists.example/stellar-expert.json"
+    descriptors = [
+        {"name": "Lobstr Curated List", "provider": "UltraStellar", "url": lobstr_url},
+        {"name": "Soroswap List", "provider": "SoroswapFinance", "url": soroswap_url},
+        {"name": "StellarExpert Top 50", "provider": "StellarExpert", "url": expert_url},
+    ]
+    payloads = {
+        ASSET_LIST_CATALOGUE: descriptors,
+        lobstr_url: {"assets": [{"code": "USDC", "issuer": usdc, "name": "USD Coin", "domain": "circle.com"}]},
+        soroswap_url: {"assets": [{"code": "USDC", "issuer": usdc}, {"code": "AQUA", "issuer": aqua, "domain": "aqua.network"}]},
+        expert_url: {"assets": [{"code": "USDC", "issuer": usdc}, {"code": "XRP", "issuer": xrp, "domain": "fchain.io"}]},
+    }
+    path = tmp_path / "assets.json"
+    service = AssetCatalogService(path, session=MultiSession(payloads))
+
+    entries = service.curated("mainnet", limit=50)
+
+    assert [item.identity for item in entries] == [
+        "XLM", f"USDC:{usdc}", f"AQUA:{aqua}", f"XRP:{xrp}"
+    ]
+    assert entries[1].source == "lobstr+soroswap+stellar-expert"
+    assert entries[1].domain == "circle.com"
+    assert service.curated_path.name == "assets.curated.json"
+    cached = AssetCatalogService(path).cached_curated("mainnet")
+    assert [item.identity for item in cached] == [item.identity for item in entries]

@@ -188,6 +188,8 @@ def test_trustline_screen_lists_full_asset_identity_and_limits():
             await _settle(pilot)
             await _enter_trustlines(app, pilot)
 
+            assert str(app.screen.query_one("#trust-title", Static).render()) == "Manage Assets"
+            assert "E set limit" not in str(app.screen.query_one("#trust-status", Static).render())
             table = app.screen.query_one("#trustlines", DataTable)
             assert table.row_count == 1
             row = table.get_row_at(0)
@@ -255,7 +257,8 @@ def test_selected_trustline_limit_and_remove_keep_full_asset_identity():
             await _settle(pilot)
             await _enter_trustlines(app, pilot)
 
-            await pilot.press("e")
+            app.screen.action_edit()
+            await _settle(pilot)
             assert isinstance(app.screen, TrustlineFormDialog)
             assert str(app.screen.query_one("#asset-label", Static).render()) == runtime.asset
             app.screen.query_one("#limit", Input).value = "250"
