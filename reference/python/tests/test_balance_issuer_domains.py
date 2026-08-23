@@ -104,13 +104,15 @@ def test_successful_missing_home_domain_is_cached_and_presentation_falls_back_to
     assert adapter.issuer_lookups == 1
 
 
-def test_transient_issuer_lookup_failure_is_not_negative_cached():
+def test_transient_issuer_lookup_failure_is_retried_on_next_refresh():
     service, adapter, wallet, _ = _service(fail_first=True)
 
     first, _ = service.get_portfolio_views(wallet)
     first_issued = [item for item in first if not item.asset.is_native]
-    assert adapter.issuer_lookups == 2
-    assert all(item.raw[ISSUER_DOMAIN_CACHE_KEY] == "issuer.example" for item in first_issued)
+    assert adapter.issuer_lookups == 1
+    assert all(ISSUER_DOMAIN_CACHE_KEY not in item.raw for item in first_issued)
 
-    service.get_portfolio_views(wallet)
+    second, _ = service.get_portfolio_views(wallet)
+    second_issued = [item for item in second if not item.asset.is_native]
     assert adapter.issuer_lookups == 2
+    assert all(item.raw[ISSUER_DOMAIN_CACHE_KEY] == "issuer.example" for item in second_issued)
