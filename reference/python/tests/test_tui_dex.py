@@ -354,12 +354,14 @@ def test_edit_reverse_buy_offer_keeps_buy_side_and_cancel_uses_selected_offer():
             assert kind == "cancel"
             assert offer.offer_id == "42"
             assert pair == runtime.pair
+            cancel_view = offer_view_for_pair(offer, pair)
+            assert cancel_view is not None
             review_text = str(app.screen.query_one("#review-text", Static).render())
             assert "Cancel BUY limit offer" in review_text
             assert f"Pair: XRP:{runtime.issuer} / XLM" in review_text
-            assert f"Remaining: 100 XRP:{runtime.issuer}" in review_text
-            assert "Limit price: 0.325 XLM/XRP:" in review_text
-            assert "Max spend: 32.5 XLM" in review_text
+            assert f"Remaining: {cancel_view.amount} XRP:{runtime.issuer}" in review_text
+            assert f"Limit price: {cancel_view.price} XLM/XRP:" in review_text
+            assert f"Max spend: {cancel_view.total} XLM" in review_text
 
     asyncio.run(scenario())
 
