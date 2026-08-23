@@ -1,9 +1,9 @@
 name: Manage assets temporary
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/manage-assets-dex-focus
+      - main
 
 permissions:
   contents: write
@@ -13,8 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: codex/manage-assets-dex-focus
       - name: Apply patch
-        run: python tools/manage_assets_patch.py
+        run: python tools/manage_assets_patch_driver.py
       - name: Diff check
         run: git diff --check
       - name: Install uv
