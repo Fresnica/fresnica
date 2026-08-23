@@ -3,7 +3,7 @@ from stellar_sdk import Account, Keypair
 from stellar_sdk.exceptions import SdkError
 
 from fresnica.errors import TransactionError
-from fresnica.models import Asset
+from fresnica.models import Asset, PriceRatio
 from fresnica.network import TESTNET
 from fresnica.stellar_adapter import StellarAdapter
 
@@ -49,6 +49,60 @@ def test_adapter_builds_create_account_operation():
     )
 
     assert type(envelope.transaction.operations[0]).__name__ == "CreateAccount"
+
+
+def test_adapter_builds_manage_sell_and_manage_buy_offer_operations():
+    source = Keypair.random()
+    issued = Asset("USD", Keypair.random().public_key)
+    adapter = StellarAdapter(TESTNET)
+    adapter.server = BuildServer(source.public_key)
+
+    sell_envelope = adapter.build_manage_sell_offer(
+        source=source.public_key,
+        selling=Asset("XLM"),
+        buying=issued,
+        amount="12.5",
+        price="2.4",
+        base_fee=100,
+        offer_id=7,
+    )
+    sell = sell_envelope.transaction.operations[0]
+    assert type(sell).__name__ == "ManageSellOffer"
+    assert str(sell.amount) == "12.5"
+    assert sell.offer_id == 7
+
+    buy_envelope = adapter.build_manage_buy_offer(
+        source=source.public_key,
+        selling=issued,
+        buying=Asset("XLM"),
+        buy_amount="3",
+        price="0.4",
+        base_fee=100,
+        offer_id=8,
+    )
+    buy = buy_envelope.transaction.operations[0]
+    assert type(buy).__name__ == "ManageBuyOffer"
+    assert str(buy.amount) == "3"
+    assert buy.offer_id == 8
+
+
+def test_adapter_preserves_exact_price_fraction_for_cancel():
+    source = Keypair.random()
+    adapter = StellarAdapter(TESTNET)
+    adapter.server = BuildServer(source.public_key)
+
+    envelope = adapter.build_manage_sell_offer(
+        source=source.public_key,
+        selling=Asset("XLM"),
+        buying=Asset("USD", Keypair.random().public_key),
+        amount="0",
+        price=PriceRatio(2000, 337),
+        base_fee=100,
+        offer_id=99,
+    )
+    operation = envelope.transaction.operations[0]
+    assert operation.price.n == 2000
+    assert operation.price.d == 337
 
 
 def test_submission_error_preserves_horizon_result_codes_for_developers():
