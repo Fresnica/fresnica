@@ -192,3 +192,80 @@ def test_sep24_rejects_challenge_for_another_account():
             "deposit",
             network_passphrase,
         )
+
+
+class Sep6Session:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append((url, params, headers, timeout))
+        return Response(json_body=self.payload)
+
+
+def test_sep6_accepts_fchain_style_deposit_instructions_without_structured_address():
+    issuer = Keypair.random().public_key
+    wallet = Wallet.from_address(Keypair.random().public_key)
+    session = Sep6Session(
+        {
+            "how": "Address: rDepositAddress, DT: 100005077",
+            "extra_info": {"message": "You MUST include the DestinationTag."},
+        }
+    )
+    capabilities = AnchorCapabilities(
+        domain="fchain.io",
+        sep6_url="https://api.fchain.io",
+        sep6_deposit=True,
+        sep6_deposit_info={"enabled": True, "fee_fixed": "0", "fee_percent": "0"},
+    )
+
+    transfer = AnchorService(session=session).start_sep6(
+        wallet,
+        Asset("XRP", issuer),
+        capabilities,
+        "deposit",
+        get_network("mainnet").passphrase,
+    )
+
+    assert transfer.payload["how"].startswith("Address:")
+    assert transfer.request == {"asset_code": "XRP", "account": wallet.address()}
+    assert session.calls[0][0] == "https://api.fchain.io/deposit"
+
+
+def test_sep6_withdraw_preserves_anchor_hash_memo_and_request_fields():
+    issuer = Keypair.random().public_key
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    memo = "AK4SOoVW88+RFUcRN2r7D4lPgys9xn9KUAAAAAAAAAA="
+    session = Sep6Session(
+        {
+            "account_id": Keypair.random().public_key,
+            "memo_type": "hash",
+            "memo": memo,
+            "fee_fixed": 0.001,
+            "fee_percent": 0.1,
+        }
+    )
+    capabilities = AnchorCapabilities(
+        domain="fchain.io",
+        sep6_url="https://api.fchain.io",
+        sep6_withdraw=True,
+        sep6_withdraw_info={
+            "enabled": True,
+            "types": {"crypto": {"fields": {"amount": {}, "dest": {}, "dest_extra": {"optional": True}}}},
+        },
+    )
+
+    transfer = AnchorService(session=session).start_sep6(
+        wallet,
+        Asset("XRP", issuer),
+        capabilities,
+        "withdraw",
+        get_network("mainnet").passphrase,
+        {"amount": "5", "dest": "rExample", "dest_extra": "123"},
+    )
+
+    assert transfer.request["type"] == "crypto"
+    assert transfer.request["amount"] == "5"
+    assert transfer.payload["memo_type"] == "hash"
+    assert transfer.payload["memo"] == memo

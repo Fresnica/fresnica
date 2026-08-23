@@ -14,6 +14,7 @@ from ..presentation import format_timestamp, short_address
 from ..settings import UserSettings
 from .activity_presentation import activity_display_summary, activity_metadata, activity_text
 from .contact_book import AddContactDialog, ContactBookScreen
+from .list_search import ListSearchDialog, matches_query
 
 
 class AddressPickerDialog(ModalScreen[str | None]):
@@ -160,6 +161,7 @@ class HistoryScreen(ModalScreen[None]):
         Binding("u", "toggle_timezone", "UTC / Local"),
         Binding("enter", "details", "Details"),
         Binding("c", "contacts", "Contacts"),
+        Binding("/", "search", "Search"),
     ]
 
     CSS = """
@@ -182,6 +184,11 @@ class HistoryScreen(ModalScreen[None]):
         self._visible_views = []
         self._fallback_settings = UserSettings()
         self._time_column_key = None
+        self._search_query = ""
+        self._loaded_views = []
+        self._loaded_count = 0
+        self._loaded_message = ""
+        self._loaded_error = None
 
     def compose(self) -> ComposeResult:
         yield Static(f"Activity · {self.wallet_name}", id="history-title")
@@ -202,6 +209,22 @@ class HistoryScreen(ModalScreen[None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_search(self) -> None:
+        self.app.push_screen(
+            ListSearchDialog(
+                self._search_query,
+                on_change=self._set_search_query,
+                label="Search activity",
+            ),
+            lambda _: self.call_later(
+                lambda: self.set_focus(self.query_one("#history-table", DataTable))
+            ),
+        )
+
+    def _set_search_query(self, query: str) -> None:
+        self._search_query = query
+        self._render_loaded()
 
     def action_refresh(self) -> None:
         self.query_one("#history-status", Static).update("Refreshing recent activity from Horizon...")
@@ -339,6 +362,17 @@ class HistoryScreen(ModalScreen[None]):
         return counter(self.wallet) if counter is not None else len(views)
 
     def _apply(self, views, cached_operations: int, message: str, error) -> None:
+        self._loaded_views = list(views)
+        self._loaded_count = cached_operations
+        self._loaded_message = message
+        self._loaded_error = error
+        self._render_loaded()
+
+    def _render_loaded(self) -> None:
+        views = self._loaded_views
+        cached_operations = self._loaded_count
+        message = self._loaded_message
+        error = self._loaded_error
         table = self.query_one("#history-table", DataTable)
         table.clear()
         settings = self._settings()
@@ -353,9 +387,22 @@ class HistoryScreen(ModalScreen[None]):
             ]
         else:
             filtered = views
-        self._visible_views = list(filtered[: self.limit])
         contacts, domains = activity_metadata(self.app.runtime, self.wallet)
         account = self.wallet.address()
+        if self._search_query:
+            searched = []
+            for item in filtered:
+                summary = activity_display_summary(item, account, contacts, domains)
+                if matches_query(
+                    self._search_query,
+                    summary,
+                    activity_text(item, summary, account),
+                    getattr(item, "transaction_hash", None),
+                    getattr(item, "raw", None),
+                ):
+                    searched.append(item)
+            filtered = searched
+        self._visible_views = list(filtered[: self.limit])
         for item in self._visible_views:
             summary = activity_display_summary(item, account, contacts, domains)
             table.add_row(
@@ -373,7 +420,7 @@ class HistoryScreen(ModalScreen[None]):
         suspicious = "hidden" if settings.hide_suspicious_claimables else "shown (dimmed)"
         zone = "local time" if settings.use_local_time else "UTC"
         status.update(
-            f"{message} · {len(self._visible_views)} activities shown · "
+            f"{message} · {len(self._visible_views)} activities shown · / search · "
             f"{cached_operations} operations cached · suspicious claimables {suspicious} · {zone}"
         )
 

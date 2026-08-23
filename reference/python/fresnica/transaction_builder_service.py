@@ -27,6 +27,7 @@ class TransactionBuilderService:
         amount: Decimal,
         base_fee_stroops: int,
         memo: str | None = None,
+        memo_type: str | None = None,
         contact_name: str | None = None,
         create_destination: bool = False,
     ) -> PreparedTransaction:
@@ -37,6 +38,7 @@ class TransactionBuilderService:
             amount=_amount_text(amount),
             base_fee=base_fee_stroops,
             memo=memo,
+            memo_type=memo_type,
             create_destination=create_destination,
         )
         fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
@@ -50,6 +52,7 @@ class TransactionBuilderService:
             network=self.adapter.network.name,
             operation="create_account" if create_destination else "payment",
             memo=memo,
+            memo_type=memo_type,
             contact_name=contact_name,
         )
         return PreparedTransaction(envelope=envelope, review=review)

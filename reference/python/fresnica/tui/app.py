@@ -27,7 +27,12 @@ from ..presentation import format_timestamp, offer_outcome_summary
 from ..trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from .activity_presentation import activity_display_summary, activity_metadata, activity_text
 from .app_base import FresnicaApp as BaseFresnicaApp
-from .asset_details import AssetDetailAction, AssetDetailsScreen, PrefilledSendDialog
+from .asset_details import (
+    AnchorWithdrawalRequest,
+    AssetDetailAction,
+    AssetDetailsScreen,
+    PrefilledSendDialog,
+)
 from .dex import DexOfferAction, DexScreen, MarketPairDialog
 from .review_dialog import ReviewPresentationDialog
 from .screens import ConfirmDialog
@@ -147,6 +152,71 @@ class FresnicaApp(BaseFresnicaApp):
             return
         if action.kind == "trustline":
             self.action_trustlines()
+
+    def prepare_anchor_withdrawal(
+        self,
+        screen: AssetDetailsScreen,
+        request: AnchorWithdrawalRequest,
+    ) -> None:
+        if not screen.is_mounted:
+            return
+        try:
+            record = self.runtime.wallet_manager.get_record()
+        except WalletNotFoundError:
+            screen.set_status("No wallet selected.")
+            return
+        if not self._ensure_write_clear(record, screen=screen):
+            return
+        screen.set_status("Preparing anchor withdrawal payment...")
+        self._prepare_anchor_withdrawal(screen, request)
+
+    @work(thread=True, exit_on_error=False)
+    def _prepare_anchor_withdrawal(
+        self,
+        screen: AssetDetailsScreen,
+        request: AnchorWithdrawalRequest,
+    ) -> None:
+        try:
+            manager = self.runtime.wallet_manager
+            record = manager.get_record()
+            session = manager.current()
+            if session is None or session.record.name != record.name:
+                raise WalletLockedError(f'Wallet "{record.name}" is locked')
+            services = self.runtime.services_for(record.network)
+            prepared = services.transfer_service.prepare(
+                wallet_name=record.name,
+                wallet=session.wallet,
+                destination=request.destination,
+                asset=request.asset,
+                amount=request.amount,
+                memo=request.memo,
+                memo_type=request.memo_type,
+            )
+            self.call_from_thread(
+                self._show_anchor_withdrawal_review,
+                screen,
+                session.wallet,
+                services,
+                prepared,
+                record.network,
+                request,
+            )
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(screen.set_status, f"Unable to prepare anchor withdrawal: {exc}")
+
+    def _show_anchor_withdrawal_review(
+        self,
+        screen,
+        wallet,
+        services,
+        prepared,
+        network: str,
+        request: AnchorWithdrawalRequest,
+    ) -> None:
+        if screen.is_mounted:
+            suffix = f" · {request.extra_info}" if request.extra_info else ""
+            screen.set_status(f"Anchor withdrawal ready for Stellar transaction review{suffix}")
+        self._show_review(wallet, services, prepared, network)
 
     def _visible_balance_views(self):
         items = list(self._last_balances)

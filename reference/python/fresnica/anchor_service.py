@@ -31,9 +31,18 @@ class AnchorCapabilities:
     direct_payment_url: str | None = None
     sep6_deposit: bool = False
     sep6_withdraw: bool = False
+    sep6_deposit_info: dict = field(default_factory=dict)
+    sep6_withdraw_info: dict = field(default_factory=dict)
     sep24_deposit: bool = False
     sep24_withdraw: bool = False
     warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class AnchorSep6Transfer:
+    kind: str
+    payload: dict
+    request: dict
 
 
 @dataclass(frozen=True)
@@ -67,11 +76,15 @@ class AnchorService:
         signing_key = _text(toml.get("SIGNING_KEY"))
         warnings: list[str] = []
         sep6_deposit = sep6_withdraw = False
+        sep6_deposit_info: dict = {}
+        sep6_withdraw_info: dict = {}
         sep24_deposit = sep24_withdraw = False
 
         if sep6:
             try:
                 info = self._json(urljoin(sep6.rstrip("/") + "/", "info"))
+                sep6_deposit_info = _asset_info(info.get("deposit"), asset.code) or {}
+                sep6_withdraw_info = _asset_info(info.get("withdraw"), asset.code) or {}
                 sep6_deposit = _asset_enabled(info.get("deposit"), asset.code)
                 sep6_withdraw = _asset_enabled(info.get("withdraw"), asset.code)
             except NetworkError as exc:
@@ -98,10 +111,55 @@ class AnchorService:
             direct_payment_url=_endpoint(toml.get("DIRECT_PAYMENT_SERVER")),
             sep6_deposit=sep6_deposit,
             sep6_withdraw=sep6_withdraw,
+            sep6_deposit_info=sep6_deposit_info,
+            sep6_withdraw_info=sep6_withdraw_info,
             sep24_deposit=sep24_deposit,
             sep24_withdraw=sep24_withdraw,
             warnings=tuple(warnings),
         )
+
+    def start_sep6(
+        self,
+        wallet,
+        asset: Asset,
+        capabilities: AnchorCapabilities,
+        kind: str,
+        network_passphrase: str,
+        fields: dict | None = None,
+    ) -> AnchorSep6Transfer:
+        if kind not in {"deposit", "withdraw"}:
+            raise ValueError(f"Unsupported anchor transfer kind: {kind}")
+        enabled = capabilities.sep6_deposit if kind == "deposit" else capabilities.sep6_withdraw
+        info = (
+            capabilities.sep6_deposit_info
+            if kind == "deposit"
+            else capabilities.sep6_withdraw_info
+        )
+        if not enabled or not capabilities.sep6_url:
+            raise AnchorError(f"SEP-6 {kind} is not available for {asset.code}")
+        if asset.is_native or asset.is_liquidity_pool or not asset.issuer:
+            raise AnchorError("SEP-6 asset must be an issued Stellar asset")
+
+        params = {"asset_code": asset.code, "account": wallet.address()}
+        for key, value in (fields or {}).items():
+            if value is not None and str(value).strip():
+                params[str(key)] = str(value).strip()
+        types = info.get("types") if isinstance(info, dict) else None
+        if kind == "withdraw" and "type" not in params and isinstance(types, dict) and len(types) == 1:
+            params["type"] = next(iter(types))
+
+        headers = None
+        if isinstance(info, dict) and bool(info.get("authentication_required", False)):
+            if not capabilities.web_auth_url or not capabilities.signing_key:
+                raise AnchorError("Anchor SEP-6 flow requires SEP-10 authentication metadata")
+            if not wallet.can_sign():
+                raise AnchorError("Watch-only wallet cannot sign SEP-10 authentication")
+            token = self._authenticate_sep10(wallet, capabilities, network_passphrase)
+            headers = {"Authorization": f"Bearer {token}"}
+
+        endpoint = urljoin(capabilities.sep6_url.rstrip("/") + "/", kind)
+        payload = self._get_json(endpoint, params=params, headers=headers, allow_403=True)
+        return AnchorSep6Transfer(kind=kind, payload=payload, request=params)
 
     def start_sep24(
         self,
@@ -225,6 +283,25 @@ class AnchorService:
             raise NetworkError(f"Anchor info from {url} is malformed")
         return value
 
+    def _get_json(self, url: str, *, params=None, headers=None, allow_403: bool = False) -> dict:
+        try:
+            kwargs = {"params": params, "timeout": self.timeout}
+            if headers:
+                kwargs["headers"] = headers
+            response = self.session.get(url, **kwargs)
+            try:
+                value = response.json()
+            except ValueError:
+                value = None
+            if allow_403 and getattr(response, "status_code", 200) == 403 and isinstance(value, dict):
+                return value
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise NetworkError(f"Unable to call anchor endpoint {url}") from exc
+        if not isinstance(value, dict):
+            raise AnchorError(f"Anchor response from {url} is malformed")
+        return value
+
     def _post_json(self, url: str, *, data=None, json_body=None, headers=None) -> dict:
         try:
             response = self.session.post(
@@ -286,12 +363,15 @@ def _currency_matches(toml: dict, asset: Asset) -> bool:
     return False
 
 
-def _asset_enabled(section, code: str) -> bool:
+def _asset_info(section, code: str) -> dict | None:
     if not isinstance(section, dict):
-        return False
+        return None
     value = section.get(code)
     if not isinstance(value, dict):
         value = section.get(code.upper()) or section.get(code.lower())
-    if not isinstance(value, dict):
-        return False
-    return bool(value.get("enabled", True))
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _asset_enabled(section, code: str) -> bool:
+    value = _asset_info(section, code)
+    return value is not None and bool(value.get("enabled", True))

@@ -27,6 +27,7 @@ class TransferService:
         asset,
         amount,
         memo: str | None = None,
+        memo_type: str | None = None,
         contact_name: str | None = None,
     ):
         if not wallet.can_sign():
@@ -70,6 +71,7 @@ class TransferService:
             amount=amount,
             base_fee_stroops=base_fee,
             memo=memo,
+            memo_type=memo_type,
             contact_name=contact_name,
             create_destination=create_destination,
         )

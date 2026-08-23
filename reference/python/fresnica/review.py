@@ -14,6 +14,7 @@ class TransactionReview:
     network: str
     operation: str = "payment"
     memo: str | None = None
+    memo_type: str | None = None
     contact_name: str | None = None
 
 

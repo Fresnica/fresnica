@@ -68,7 +68,8 @@ def _project_transfer(review: TransactionReview) -> ReviewPresentation:
         ReviewField("Starting balance" if create_account else "Amount", f"{review.amount} {review.asset}"),
     ]
     if review.memo:
-        fields.append(ReviewField("Memo", review.memo))
+        memo_label = f"Memo ({review.memo_type})" if review.memo_type and review.memo_type != "text" else "Memo"
+        fields.append(ReviewField(memo_label, review.memo))
     fields.extend(
         [
             ReviewField("Fee", f"{review.fee} XLM"),

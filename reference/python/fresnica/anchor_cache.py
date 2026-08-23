@@ -46,6 +46,8 @@ class AnchorCapabilitiesStore:
                 direct_payment_url=_optional_text(value.get("direct_payment_url")),
                 sep6_deposit=bool(value.get("sep6_deposit", False)),
                 sep6_withdraw=bool(value.get("sep6_withdraw", False)),
+                sep6_deposit_info=dict(value.get("sep6_deposit_info", {})) if isinstance(value.get("sep6_deposit_info", {}), dict) else {},
+                sep6_withdraw_info=dict(value.get("sep6_withdraw_info", {})) if isinstance(value.get("sep6_withdraw_info", {}), dict) else {},
                 sep24_deposit=bool(value.get("sep24_deposit", False)),
                 sep24_withdraw=bool(value.get("sep24_withdraw", False)),
                 warnings=tuple(
@@ -72,6 +74,8 @@ class AnchorCapabilitiesStore:
                 "direct_payment_url": capabilities.direct_payment_url,
                 "sep6_deposit": capabilities.sep6_deposit,
                 "sep6_withdraw": capabilities.sep6_withdraw,
+                "sep6_deposit_info": capabilities.sep6_deposit_info,
+                "sep6_withdraw_info": capabilities.sep6_withdraw_info,
                 "sep24_deposit": capabilities.sep24_deposit,
                 "sep24_withdraw": capabilities.sep24_withdraw,
                 "warnings": list(capabilities.warnings),

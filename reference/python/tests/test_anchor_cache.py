@@ -16,6 +16,8 @@ def test_anchor_capability_cache_round_trips_and_scopes_by_exact_asset(tmp_path)
         web_auth_url="https://anchor.example/auth",
         signing_key=Keypair.random().public_key,
         sep6_deposit=True,
+        sep6_deposit_info={"enabled": True, "fee_fixed": "0"},
+        sep6_withdraw_info={"enabled": True, "types": {"crypto": {"fields": {"dest": {}}}}},
         sep24_deposit=True,
         sep24_withdraw=True,
         warnings=("cached warning",),

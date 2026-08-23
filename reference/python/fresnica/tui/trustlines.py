@@ -16,6 +16,7 @@ from ..models import Asset
 from ..presentation import format_amount
 from ..trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from .asset_picker import AssetPickerDialog
+from .list_search import ListSearchDialog, matches_query
 
 
 TrustlineActionKind = Literal["add", "limit", "remove"]
@@ -129,6 +130,7 @@ class TrustlineScreen(ModalScreen[None]):
         Binding("r", "refresh", "Refresh"),
         Binding("a", "add", "Add"),
         Binding("x", "remove", "Remove"),
+        Binding("/", "search", "Search"),
     ]
 
     CSS = """
@@ -143,6 +145,8 @@ class TrustlineScreen(ModalScreen[None]):
         self.runtime = runtime
         self.on_trustline_action = on_trustline_action
         self._visible_lines: list[dict] = []
+        self._all_lines: list[dict] = []
+        self._search_query = ""
 
     def compose(self) -> ComposeResult:
         yield Static("Manage Assets", id="trust-title")
@@ -160,6 +164,22 @@ class TrustlineScreen(ModalScreen[None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_search(self) -> None:
+        self.app.push_screen(
+            ListSearchDialog(
+                self._search_query,
+                on_change=self._set_search_query,
+                label="Search assets",
+            ),
+            lambda _: self.call_later(
+                lambda: self.set_focus(self.query_one("#trustlines", DataTable))
+            ),
+        )
+
+    def _set_search_query(self, query: str) -> None:
+        self._search_query = query
+        self._render_lines()
 
     def action_refresh(self) -> None:
         self.refresh_trustlines()
@@ -253,17 +273,8 @@ class TrustlineScreen(ModalScreen[None]):
             self.app.call_from_thread(self._apply_trustlines, [], exc, False)
 
     def _apply_trustlines(self, lines, error, cached: bool = False) -> None:
-        table = self.query_one("#trustlines", DataTable)
-        table.clear()
-        self._visible_lines = list(lines)
-        for raw in lines:
-            table.add_row(
-                _raw_asset_identity(raw),
-                format_amount(Decimal(str(raw.get("balance", "0")))),
-                format_amount(Decimal(str(raw.get("limit", "0")))),
-                format_amount(Decimal(str(raw.get("buying_liabilities", "0")))),
-                format_amount(Decimal(str(raw.get("selling_liabilities", "0")))),
-            )
+        self._all_lines = list(lines)
+        self._render_lines()
         if error is not None:
             details = getattr(error, "details", None)
             text = f"ERROR {error}"
@@ -273,8 +284,30 @@ class TrustlineScreen(ModalScreen[None]):
             return
         suffix = " · cached; refreshing..." if cached else ""
         self.set_status(
-            f"{len(lines)} issued assets · A add · X remove{suffix}"
+            f"{len(self._visible_lines)}/{len(self._all_lines)} issued assets · / search · A add · X remove{suffix}"
         )
+
+    def _render_lines(self) -> None:
+        table = self.query_one("#trustlines", DataTable)
+        table.clear()
+        self._visible_lines = [
+            raw
+            for raw in self._all_lines
+            if matches_query(
+                self._search_query,
+                raw.get("asset_code"),
+                raw.get("asset_issuer"),
+                _raw_asset_identity(raw),
+            )
+        ]
+        for raw in self._visible_lines:
+            table.add_row(
+                _raw_asset_identity(raw),
+                format_amount(Decimal(str(raw.get("balance", "0")))),
+                format_amount(Decimal(str(raw.get("limit", "0")))),
+                format_amount(Decimal(str(raw.get("buying_liabilities", "0")))),
+                format_amount(Decimal(str(raw.get("selling_liabilities", "0")))),
+            )
 
     def set_status(self, message: str) -> None:
         if self.is_mounted:
