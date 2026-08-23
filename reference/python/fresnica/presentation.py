@@ -39,12 +39,12 @@ def short_pool_id(value: str | None) -> str:
     return f"{value[:8]}...{value[-6:]}"
 
 
-def asset_source(asset: Asset) -> str:
+def asset_source(asset: Asset, domain: str | None = None) -> str:
     if asset.is_native:
         return "Native"
     if asset.is_liquidity_pool:
         return f"Pool {short_pool_id(asset.liquidity_pool_id)}"
-    return short_address(asset.issuer)
+    return domain or short_address(asset.issuer)
 
 
 def asset_label(asset: Asset, include_source: bool = False) -> str:
