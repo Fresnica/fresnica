@@ -2,6 +2,7 @@
 
 from getpass import getpass
 
+from ...contacts import resolve_destination
 from ...errors import UserCancelled, WatchOnlyError
 from ...network import get_network
 from ..context import require_wallet_network
@@ -24,10 +25,7 @@ def execute_send(
     if record.watch_only:
         raise WatchOnlyError(f'Wallet "{record.name}" is watch-only')
 
-    contact = runtime.contact_store.find(args.destination)
-    destination = contact.address if contact is not None else args.destination
-    memo = args.memo if args.memo is not None else (contact.memo if contact else None)
-    contact_name = contact.name if contact is not None else None
+    destination = resolve_destination(runtime.contact_store, args.destination, args.memo)
 
     services = runtime.services_for()
     pending = getattr(services, "pending_transaction_service", None)
@@ -45,11 +43,11 @@ def execute_send(
         prepared = services.transfer_service.prepare(
             wallet_name=record.name,
             wallet=session.wallet,
-            destination=destination,
+            destination=destination.address,
             asset=args.asset,
             amount=args.amount,
-            memo=memo,
-            contact_name=contact_name,
+            memo=destination.memo,
+            contact_name=destination.contact_name,
         )
         renderer.render_review(prepared.review)
 
