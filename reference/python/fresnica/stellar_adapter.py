@@ -1,5 +1,7 @@
 """Thin boundary around Stellar Python SDK network operations."""
 
+import base64
+
 from stellar_sdk import Asset as StellarAsset
 from stellar_sdk import Price, Server, TransactionBuilder
 from stellar_sdk.exceptions import NotFoundError, SdkError
@@ -255,6 +257,7 @@ class StellarAdapter:
         amount: str,
         base_fee: int,
         memo: str | None = None,
+        memo_type: str | None = None,
         timeout: int = 30,
         create_destination: bool = False,
     ):
@@ -277,9 +280,25 @@ class StellarAdapter:
                     amount=amount,
                 )
             if memo:
-                builder = builder.add_text_memo(memo)
+                kind = (memo_type or "text").lower()
+                if kind == "text":
+                    builder = builder.add_text_memo(memo)
+                elif kind == "id":
+                    builder = builder.add_id_memo(int(memo))
+                elif kind == "hash":
+                    raw = base64.b64decode(memo, validate=True)
+                    if len(raw) != 32:
+                        raise ValueError("Hash memo must decode to exactly 32 bytes")
+                    builder = builder.add_hash_memo(raw)
+                elif kind in {"return", "return_hash"}:
+                    raw = base64.b64decode(memo, validate=True)
+                    if len(raw) != 32:
+                        raise ValueError("Return-hash memo must decode to exactly 32 bytes")
+                    builder = builder.add_return_hash_memo(raw)
+                else:
+                    raise ValueError(f"Unsupported Stellar memo type: {memo_type}")
             return builder.set_timeout(timeout).build()
-        except SdkError as exc:
+        except (SdkError, ValueError, TypeError) as exc:
             raise TransactionError(
                 "Unable to build Stellar payment transaction",
                 details=_sdk_error_details(exc),

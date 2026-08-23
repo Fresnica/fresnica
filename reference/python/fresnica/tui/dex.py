@@ -26,6 +26,7 @@ from ..sdex_presentation import (
 )
 from ..trade_segments import account_trade_segment_for_pair
 from .asset_picker import AssetPickerDialog
+from .list_search import ListSearchDialog, matches_query
 
 
 DexActionKind = Literal["create", "update", "cancel"]
@@ -52,6 +53,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         Binding("f", "favorites", "Favorites list"),
         Binding("a", "add_pair", "Add pair"),
         Binding("space", "toggle_favorite", "Star / Unstar"),
+        Binding("/", "search", "Search"),
     ]
 
     CSS = """
@@ -72,6 +74,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         self._popular: list[MarketPair] = []
         self._catalog_entries = []
         self._pending_base: Asset | None = None
+        self._search_query = ""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
@@ -108,6 +111,22 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_search(self) -> None:
+        self.app.push_screen(
+            ListSearchDialog(
+                self._search_query,
+                on_change=self._set_search_query,
+                label="Search markets",
+            ),
+            lambda _: self.call_later(
+                lambda: self.set_focus(self.query_one("#market-list", DataTable))
+            ),
+        )
+
+    def _set_search_query(self, query: str) -> None:
+        self._search_query = query
+        self._render_market_list()
 
     def action_open_selected(self) -> None:
         pair = self._selected_pair()
@@ -248,7 +267,19 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
     def _render_market_list(self, status: str | None = None) -> None:
         preferences = self._preferences()
         favorites = preferences.favorites if preferences is not None else ()
-        pairs = list(self._popular if self._tab == "popular" else favorites)
+        all_pairs = list(self._popular if self._tab == "popular" else favorites)
+        pairs = [
+            pair
+            for pair in all_pairs
+            if matches_query(
+                self._search_query,
+                _pair_label(pair),
+                _asset_identity(pair.base),
+                _asset_identity(pair.counter),
+                self._asset_source(pair.base),
+                self._asset_source(pair.counter),
+            )
+        ]
         self._pairs = pairs
 
         table = self.query_one("#market-list", DataTable)
@@ -281,7 +312,7 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         else:
             message = (
                 f"{'Popular' if self._tab == 'popular' else 'Starred'} · "
-                f"{len(pairs)} markets · Enter open · Space star/unstar"
+                f"{len(pairs)}/{len(all_pairs)} markets · / search · Enter open · Space star/unstar"
             )
         self.query_one("#market-status", Static).update(message)
 
@@ -477,9 +508,9 @@ class DexScreen(ModalScreen[None]):
     .dex-section { height: 1; text-style: bold; }
     #book-row { height: 2fr; min-height: 8; }
     .book-pane { width: 1fr; height: 1fr; padding: 0 1; }
-    .book-section { width: 100%; padding: 0 1; }
-    .bid-section { text-align: right; color: $success; background: $success 18%; }
-    .ask-section { text-align: left; color: $error; background: $error 18%; }
+    .book-section { width: 100%; padding: 0 1; color: $text; text-style: bold; }
+    .bid-section { text-align: right; background: $success 18%; }
+    .ask-section { text-align: left; background: $error 18%; }
     #dex-asks, #dex-bids { width: 100%; height: 1fr; overflow-y: auto; }
     #dex-trades { height: 1fr; min-height: 6; }
     #account-row { height: 2fr; min-height: 8; }

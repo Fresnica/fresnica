@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, Label, Static
 
-from ..anchor_service import AnchorCapabilities, AnchorService
+from ..anchor_service import AnchorCapabilities, AnchorSep6Transfer, AnchorService
 from ..balance_service import ISSUER_DOMAIN_CACHE_KEY
 from ..errors import FresnicaError, WalletLockedError
 from ..manager import WalletState
@@ -30,6 +30,82 @@ AssetDetailActionKind = Literal["send"]
 class AssetDetailAction:
     kind: AssetDetailActionKind
     asset: str
+
+
+@dataclass(frozen=True)
+class AnchorWithdrawalRequest:
+    asset: str
+    amount: str
+    destination: str
+    memo: str | None = None
+    memo_type: str | None = None
+    anchor_domain: str | None = None
+    extra_info: str | None = None
+
+
+class Sep6TransferDialog(ModalScreen[dict | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    CSS = """
+    Sep6TransferDialog { align: center middle; }
+    Sep6TransferDialog > #dialog { width: 94; height: auto; max-height: 90%; padding: 1 2; border: round $accent; background: $surface; }
+    Sep6TransferDialog Input { margin-top: 1; }
+    Sep6TransferDialog .field-help { color: $text-muted; height: auto; }
+    Sep6TransferDialog #form-error { color: $error; height: auto; margin-top: 1; }
+    Sep6TransferDialog #actions { height: auto; margin-top: 1; align-horizontal: right; }
+    Sep6TransferDialog Button { margin-left: 1; }
+    """
+
+    def __init__(self, kind: str, asset_code: str, info: dict):
+        super().__init__()
+        self.kind = kind
+        self.asset_code = asset_code
+        self.info = info if isinstance(info, dict) else {}
+        self.transfer_type, fields = _sep6_schema(self.info)
+        self.fields = [
+            (name, spec if isinstance(spec, dict) else {})
+            for name, spec in fields.items()
+            if name not in {"asset_code", "account"}
+        ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(f"SEP-6 {self.kind} · {self.asset_code}")
+            if self.transfer_type:
+                yield Static(f"Method: {self.transfer_type}", classes="field-help")
+            for index, (name, spec) in enumerate(self.fields):
+                optional = bool(spec.get("optional", False))
+                marker = "optional" if optional else "required"
+                description = str(spec.get("description") or "").strip()
+                yield Label(f"{name} ({marker})")
+                if description:
+                    yield Static(description, classes="field-help")
+                yield Input(placeholder=name, id=f"sep6-field-{index}")
+            yield Static("", id="form-error")
+            with Horizontal(id="actions"):
+                yield Button("Cancel [Esc]", id="cancel")
+                yield Button("Continue", id="continue", variant="primary")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.action_cancel()
+            return
+        if event.button.id != "continue":
+            return
+        result = {}
+        if self.transfer_type:
+            result["type"] = self.transfer_type
+        for index, (name, spec) in enumerate(self.fields):
+            value = self.query_one(f"#sep6-field-{index}", Input).value.strip()
+            if not value and not bool(spec.get("optional", False)):
+                self.query_one("#form-error", Static).update(f"{name} is required.")
+                return
+            if value:
+                result[name] = value
+        self.dismiss(result)
 
 
 class PrefilledSendDialog(SendDialog):
@@ -162,10 +238,22 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         if capabilities is None:
             self.set_status("Discover anchor capabilities first (A).")
             return
-        enabled = capabilities.sep24_deposit if kind == "deposit" else capabilities.sep24_withdraw
-        if not enabled:
-            self.set_status(f"SEP-24 {kind} is not available for this asset.")
+        sep24_enabled = (
+            capabilities.sep24_deposit if kind == "deposit" else capabilities.sep24_withdraw
+        )
+        sep24_ready = bool(
+            sep24_enabled and capabilities.web_auth_url and capabilities.signing_key
+        )
+        sep6_enabled = capabilities.sep6_deposit if kind == "deposit" else capabilities.sep6_withdraw
+        if sep24_ready:
+            self._start_sep24(kind)
             return
+        if sep6_enabled and capabilities.sep6_url:
+            self._start_sep6(kind)
+            return
+        self.set_status(f"No usable SEP-24/SEP-6 {kind} flow is advertised for this asset.")
+
+    def _start_sep24(self, kind: str) -> None:
         if self.runtime is None:
             self.set_status("Anchor transfers are unavailable in this runtime.")
             return
@@ -202,6 +290,126 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
     def _begin_anchor_transfer(self, kind: str) -> None:
         self.set_status(f"Authenticating with anchor for {kind}...")
         self._run_anchor_transfer(kind)
+
+    def _start_sep6(self, kind: str) -> None:
+        capabilities = self._anchor_capabilities
+        if capabilities is None:
+            return
+        info = capabilities.sep6_deposit_info if kind == "deposit" else capabilities.sep6_withdraw_info
+        transfer_type, fields = _sep6_schema(info)
+        visible_fields = [name for name in fields if name not in {"asset_code", "account"}]
+        if visible_fields or (kind == "withdraw" and transfer_type):
+            self.app.push_screen(
+                Sep6TransferDialog(kind, self.asset.code, info),
+                lambda values: self._begin_sep6_transfer(kind, values),
+            )
+            return
+        self._begin_sep6_transfer(kind, {})
+
+    def _begin_sep6_transfer(self, kind: str, fields: dict | None) -> None:
+        if fields is None or self.runtime is None or self._anchor_capabilities is None:
+            return
+        info = (
+            self._anchor_capabilities.sep6_deposit_info
+            if kind == "deposit"
+            else self._anchor_capabilities.sep6_withdraw_info
+        )
+        needs_signing = kind == "withdraw" or bool(info.get("authentication_required", False))
+        try:
+            record = self.runtime.wallet_manager.get_record()
+            state = self.runtime.wallet_manager.state(record.name)
+        except FresnicaError as exc:
+            self.set_status(str(exc))
+            return
+        if needs_signing and state is WalletState.WATCH_ONLY:
+            self.set_status("Watch-only wallet cannot complete this SEP-6 flow.")
+            return
+        if needs_signing and state is WalletState.LOCKED:
+            self.app.push_screen(
+                UnlockDialog(record.name),
+                lambda password: self._after_sep6_unlock(kind, fields, record.name, password),
+            )
+            return
+        session = self.runtime.wallet_manager.current() if needs_signing else self.runtime.wallet_manager.view()
+        if session is None:
+            self.set_status("Wallet is locked.")
+            return
+        self.set_status(f"Requesting SEP-6 {kind} instructions...")
+        self._run_sep6_transfer(kind, fields, session.wallet)
+
+    def _after_sep6_unlock(self, kind: str, fields: dict, wallet_name: str, password: str | None) -> None:
+        if password is None or self.runtime is None:
+            return
+        try:
+            self.runtime.wallet_manager.unlock(wallet_name, password)
+        except (FresnicaError, ValueError) as exc:
+            self.app.push_screen(
+                UnlockDialog(wallet_name, error=str(exc)),
+                lambda retry: self._after_sep6_unlock(kind, fields, wallet_name, retry),
+            )
+            return
+        self._begin_sep6_transfer(kind, fields)
+
+    @work(exclusive=True, thread=True, exit_on_error=False)
+    def _run_sep6_transfer(self, kind: str, fields: dict, wallet) -> None:
+        try:
+            if self.runtime is None or self._anchor_capabilities is None:
+                raise ValueError("Anchor transfer context is unavailable")
+            network = get_network(self.runtime.wallet_manager.get_record().network)
+            transfer = AnchorService().start_sep6(
+                wallet,
+                self.asset,
+                self._anchor_capabilities,
+                kind,
+                network.passphrase,
+                fields,
+            )
+            self.app.call_from_thread(self._finish_sep6_transfer, transfer, None)
+        except (FresnicaError, ValueError) as exc:
+            self.app.call_from_thread(self._finish_sep6_transfer, None, exc)
+
+    def _finish_sep6_transfer(self, transfer: AnchorSep6Transfer | None, error) -> None:
+        if not self.is_mounted:
+            return
+        if error is not None:
+            self.set_status(f"SEP-6 transfer failed: {error}")
+            return
+        assert transfer is not None
+        self.query_one("#asset-anchor", Static).update(_sep6_transfer_text(transfer))
+        response_type = str(transfer.payload.get("type") or "")
+        if response_type in {
+            "non_interactive_customer_info_needed",
+            "customer_info_status",
+        }:
+            self.set_status("Anchor requires customer information · SEP-12/KYC handoff is not exposed yet.")
+            return
+        if transfer.kind == "deposit":
+            self.set_status("SEP-6 deposit instructions ready.")
+            return
+        destination = str(transfer.payload.get("account_id") or "").strip()
+        amount = str(transfer.request.get("amount") or "").strip()
+        if not destination or not amount:
+            self.set_status("SEP-6 withdraw response is missing account_id or requested amount.")
+            return
+        handler = getattr(self.app, "prepare_anchor_withdrawal", None)
+        if handler is None:
+            self.set_status("Anchor withdrawal payment pipeline is unavailable.")
+            return
+        extra = transfer.payload.get("extra_info")
+        if isinstance(extra, dict):
+            extra = extra.get("message")
+        handler(
+            self,
+            AnchorWithdrawalRequest(
+                asset=_asset_identity(self.balance),
+                amount=amount,
+                destination=destination,
+                memo=_optional_payload_text(transfer.payload.get("memo")),
+                memo_type=_optional_payload_text(transfer.payload.get("memo_type")),
+                anchor_domain=self._anchor_capabilities.domain,
+                extra_info=_optional_payload_text(extra),
+            ),
+        )
 
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _run_anchor_transfer(self, kind: str) -> None:
@@ -306,8 +514,6 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         if capabilities.sep6_url:
             methods = _methods(capabilities.sep6_deposit, capabilities.sep6_withdraw)
             parts.append(f"Programmatic SEP-6: {methods}")
-            if not capabilities.sep24_url:
-                parts.append("SEP-6-only KYC flow is not exposed as a partial wallet action")
         if capabilities.web_auth_url:
             parts.append("SEP-10 authentication: available")
         parts.extend(f"Note: {warning}" for warning in capabilities.warnings)
@@ -322,15 +528,13 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         withdraw = self.query("#anchor-withdraw")
         if deposit:
             deposit.first().display = bool(
-                capabilities.sep24_deposit
-                and capabilities.web_auth_url
-                and capabilities.signing_key
+                (capabilities.sep24_deposit and capabilities.web_auth_url and capabilities.signing_key)
+                or capabilities.sep6_deposit
             )
         if withdraw:
             withdraw.first().display = bool(
-                capabilities.sep24_withdraw
-                and capabilities.web_auth_url
-                and capabilities.signing_key
+                (capabilities.sep24_withdraw and capabilities.web_auth_url and capabilities.signing_key)
+                or capabilities.sep6_withdraw
             )
 
     def refresh_trustlines(self) -> None:
@@ -389,6 +593,51 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
     def set_status(self, message: str) -> None:
         if self.is_mounted:
             self.query_one("#asset-status", Static).update(message)
+
+
+def _sep6_schema(info: dict) -> tuple[str | None, dict]:
+    if not isinstance(info, dict):
+        return None, {}
+    types = info.get("types")
+    if isinstance(types, dict) and types:
+        transfer_type = next(iter(types))
+        spec = types.get(transfer_type)
+        fields = spec.get("fields", {}) if isinstance(spec, dict) else {}
+        return transfer_type, fields if isinstance(fields, dict) else {}
+    fields = info.get("fields", {})
+    return None, fields if isinstance(fields, dict) else {}
+
+
+def _sep6_transfer_text(transfer: AnchorSep6Transfer) -> str:
+    payload = transfer.payload
+    lines = [f"SEP-6 {transfer.kind}:"]
+    how = _optional_payload_text(payload.get("how"))
+    if how:
+        lines.append(how)
+    for key, label in (
+        ("account_id", "Stellar account"),
+        ("memo_type", "Memo type"),
+        ("memo", "Memo"),
+        ("fee_fixed", "Fixed fee"),
+        ("fee_percent", "Fee percent"),
+        ("min_amount", "Minimum"),
+    ):
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            lines.append(f"{label}: {value}")
+    extra = payload.get("extra_info")
+    if isinstance(extra, dict):
+        extra = extra.get("message")
+    extra_text = _optional_payload_text(extra)
+    if extra_text:
+        lines.append(extra_text)
+    if len(lines) == 1:
+        lines.append(str(payload))
+    return "\n".join(lines)
+
+
+def _optional_payload_text(value) -> str | None:
+    return str(value).strip() if value is not None and str(value).strip() else None
 
 
 def _asset_identity(balance: BalanceView) -> str:

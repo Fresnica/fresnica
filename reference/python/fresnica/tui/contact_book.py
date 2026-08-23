@@ -8,6 +8,7 @@ from textual.widgets import Button, DataTable, Footer, Input, Label, Static
 
 from ..contacts import Contact, ContactError, ContactStore
 from ..presentation import short_address
+from .list_search import ListSearchDialog, matches_query
 from .screens import ConfirmDialog
 
 
@@ -65,6 +66,7 @@ class ContactBookScreen(ModalScreen[None]):
         Binding("escape", "close", "Back"),
         Binding("a", "add", "Add"),
         Binding("d", "delete", "Delete"),
+        Binding("/", "search", "Search"),
     ]
 
     CSS = """
@@ -78,6 +80,8 @@ class ContactBookScreen(ModalScreen[None]):
         super().__init__()
         self.store = store
         self._contacts: list[Contact] = []
+        self._all_contacts: list[Contact] = []
+        self._search_query = ""
 
     def compose(self) -> ComposeResult:
         yield Static("Contacts", id="contacts-title")
@@ -93,6 +97,22 @@ class ContactBookScreen(ModalScreen[None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_search(self) -> None:
+        self.app.push_screen(
+            ListSearchDialog(
+                self._search_query,
+                on_change=self._set_search_query,
+                label="Search contacts",
+            ),
+            lambda _: self.call_later(
+                lambda: self.set_focus(self.query_one("#contacts-table", DataTable))
+            ),
+        )
+
+    def _set_search_query(self, query: str) -> None:
+        self._search_query = query
+        self._render_contacts()
 
     def action_add(self) -> None:
         self.app.push_screen(AddContactDialog(self.store), self._after_add)
@@ -129,15 +149,29 @@ class ContactBookScreen(ModalScreen[None]):
         table = self.query_one("#contacts-table", DataTable)
         table.clear()
         try:
-            self._contacts = self.store.list()
+            self._all_contacts = self.store.list()
         except ContactError as exc:
+            self._all_contacts = []
             self._contacts = []
             self.query_one("#contacts-status", Static).update(str(exc))
             return
+        self._render_contacts(message)
+
+    def _render_contacts(self, message: str | None = None) -> None:
+        table = self.query_one("#contacts-table", DataTable)
+        table.clear()
+        self._contacts = [
+            contact
+            for contact in self._all_contacts
+            if matches_query(
+                self._search_query, contact.name, contact.address, contact.memo
+            )
+        ]
         for contact in self._contacts:
             table.add_row(contact.name, short_address(contact.address), contact.memo or "")
+        suffix = f' · filter "{self._search_query}"' if self._search_query else ""
         self.query_one("#contacts-status", Static).update(
-            message or f"{len(self._contacts)} contacts · stored locally"
+            message or f"{len(self._contacts)}/{len(self._all_contacts)} contacts · / search · stored locally{suffix}"
         )
 
     def _selected(self) -> Contact | None:

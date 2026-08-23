@@ -12,6 +12,7 @@ from ..asset_catalog import AssetCatalogEntry
 from ..errors import FresnicaError
 from ..models import Asset
 from ..presentation import short_address
+from .list_search import ListSearchDialog, matches_query
 
 
 class AssetPickerDialog(ModalScreen[Asset | None]):
@@ -19,6 +20,7 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
         Binding("escape", "cancel", "Cancel"),
         Binding("enter", "choose", "Choose"),
         Binding("r", "refresh", "Refresh"),
+        Binding("/", "search", "Search"),
     ]
 
     CSS = """
@@ -39,6 +41,8 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
         self.allow_native = allow_native
         self.title = title
         self._entries: list[AssetCatalogEntry] = []
+        self._source_entries: list[AssetCatalogEntry] = []
+        self._search_query = ""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
@@ -65,7 +69,24 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
             table.add_columns("Asset", "Domain / issuer", "Name", "Source")
         table.cursor_type = "row"
         self._render_entries(self._cached_entries())
+        self.call_later(lambda: self.set_focus(table))
         self._refresh_catalog()
+
+    def action_search(self) -> None:
+        self.app.push_screen(
+            ListSearchDialog(
+                self._search_query,
+                on_change=self._set_search_query,
+                label="Search assets",
+            ),
+            lambda _: self.call_later(
+                lambda: self.set_focus(self.query_one("#asset-picker-table", DataTable))
+            ),
+        )
+
+    def _set_search_query(self, query: str) -> None:
+        self._search_query = query
+        self._render_filtered_entries()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -155,7 +176,23 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
         ]
 
     def _render_entries(self, entries: list[AssetCatalogEntry]) -> None:
-        self._entries = list(entries)
+        self._source_entries = list(entries)
+        self._render_filtered_entries()
+
+    def _render_filtered_entries(self) -> None:
+        self._entries = [
+            entry
+            for entry in self._source_entries
+            if matches_query(
+                self._search_query,
+                entry.asset.display,
+                entry.asset.issuer,
+                entry.domain,
+                entry.name,
+                entry.org,
+                entry.source,
+            )
+        ]
         table = self.query_one("#asset-picker-table", DataTable)
         table.clear()
         for entry in self._entries:
