@@ -62,17 +62,21 @@ class UXBalanceService:
 
 
 class UXHistoryService:
-    def __init__(self, account, sender):
+    def __init__(self, account, sender, issuer):
         payment = OperationView(
             operation_type="payment",
             created_at="2026-08-23T06:00:00Z",
-            summary=f"Received 2 XLM from {sender[:6]}...{sender[-4:]}",
+            summary=f"Received 2 USDC from {sender[:6]}...{sender[-4:]}",
             raw={
                 "paging_token": "200",
                 "transaction_hash": "tx-normal",
                 "type": "payment",
                 "from": sender,
                 "to": account,
+                "amount": "2.0000000",
+                "asset_type": "credit_alphanum4",
+                "asset_code": "USDC",
+                "asset_issuer": issuer,
             },
         )
         data = OperationView(
@@ -84,17 +88,21 @@ class UXHistoryService:
                 "transaction_hash": "tx-normal",
                 "type": "manage_data",
                 "source_account": account,
+                "name": "profile",
             },
         )
-        dust_op = OperationView(
+        suspicious_op = OperationView(
             operation_type="create_claimable_balance",
             created_at="2026-08-23T05:00:00Z",
             summary="Incoming claimable asset: 0.0000001 SPAM · review before claiming",
             raw={
                 "paging_token": "198",
-                "transaction_hash": "tx-dust",
+                "transaction_hash": "tx-suspicious",
                 "type": "create_claimable_balance",
                 "source_account": sender,
+                "amount": "0.0000001",
+                "asset": f"SPAM:{issuer}",
+                "claimants": [{"destination": account, "predicate": {"unconditional": True}}],
                 "_fresnica_unsolicited_claimable": True,
             },
         )
@@ -102,7 +110,7 @@ class UXHistoryService:
             ActivityView(
                 operation_type="transaction",
                 created_at=payment.created_at,
-                summary="2 actions · Received 2 XLM · Updated account data: profile",
+                summary="2 actions · Received 2 USDC · Updated account data: profile",
                 transaction_hash="tx-normal",
                 operation_count=2,
                 operations=[payment, data],
@@ -110,12 +118,12 @@ class UXHistoryService:
             ),
             ActivityView(
                 operation_type="create_claimable_balance",
-                created_at=dust_op.created_at,
-                summary=dust_op.summary,
-                transaction_hash="tx-dust",
+                created_at=suspicious_op.created_at,
+                summary=suspicious_op.summary,
+                transaction_hash="tx-suspicious",
                 operation_count=1,
-                operations=[dust_op],
-                raw=[dust_op.raw],
+                operations=[suspicious_op],
+                raw=[suspicious_op.raw],
             ),
         ]
         self.refreshes = 0
@@ -157,11 +165,20 @@ class UXRuntime:
         )
         self.network = "mainnet"
         self.settings_store = SettingsStore(tmp_path / "settings.json")
-        self.settings = UserSettings(theme=theme)
+        if self.settings_store.path.exists():
+            self.settings = self.settings_store.load()
+        else:
+            self.settings = UserSettings()
+        if theme is not None:
+            self.settings.theme = theme
         self.settings_store.save(self.settings)
         self.contact_store = ContactStore(tmp_path / "contacts.json")
         self.balance_service = UXBalanceService(self.issuer)
-        self.history_service = UXHistoryService(self.keypair.public_key, self.sender)
+        self.history_service = UXHistoryService(
+            self.keypair.public_key,
+            self.sender,
+            self.issuer,
+        )
 
     def services_for(self, network=None):
         return SimpleNamespace(
@@ -186,6 +203,24 @@ def test_theme_is_loaded_and_future_theme_changes_are_persisted(tmp_path):
             app.theme = "textual-dark"
             await _settle(pilot, 3)
             assert runtime.settings_store.load().theme == "textual-dark"
+
+    asyncio.run(scenario())
+
+
+def test_dashboard_mount_initializes_columns_only_once(tmp_path):
+    async def scenario():
+        runtime = UXRuntime(tmp_path)
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(120, 42)) as pilot:
+            await _settle(pilot)
+            balances = app.query_one("#balances", DataTable)
+            history = app.query_one("#history", DataTable)
+            assert len(balances.columns) == 5
+            assert len(history.columns) == 2
+            assert [str(column.label) for column in history.columns.values()] == [
+                "Time (local)",
+                "Activity",
+            ]
 
     asyncio.run(scenario())
 
@@ -222,7 +257,7 @@ def test_balance_row_send_prefills_asset_and_enter_opens_asset_details(tmp_path)
     asyncio.run(scenario())
 
 
-def test_history_dust_timezone_details_and_contact_hook(tmp_path):
+def test_history_suspicious_toggle_timezone_details_and_contact_refresh(tmp_path):
     async def scenario():
         runtime = UXRuntime(tmp_path)
         app = FresnicaApp(runtime)
@@ -232,26 +267,36 @@ def test_history_dust_timezone_details_and_contact_hook(tmp_path):
             await _settle(pilot)
             assert isinstance(app.screen, HistoryScreen)
             table = app.screen.query_one("#history-table", DataTable)
-            assert table.row_count == 1
+
+            # Suspicious claimables are visible by default, but visually marked.
+            assert table.row_count == 2
+            assert "⚠" in str(table.get_row_at(1)[1])
+            assert "suspicious claimables shown (dimmed)" in str(
+                app.screen.query_one("#history-status", Static).render()
+            )
             assert "3 operations cached" in str(
                 app.screen.query_one("#history-status", Static).render()
             )
-            assert "local time" in str(app.screen.query_one("#history-status", Static).render())
 
-            await pilot.press("d")
-            await _settle(pilot, 4)
-            assert table.row_count == 2
-            assert runtime.settings_store.load().show_dust_activity is True
+            # Current issuer metadata is resolved at presentation time.
+            assert "USDC · anchor.example" in str(table.get_row_at(0)[1])
 
-            await pilot.press("d")
+            await pilot.press("p")
             await _settle(pilot, 4)
             assert table.row_count == 1
+            assert runtime.settings_store.load().hide_suspicious_claimables is True
+
+            await pilot.press("p")
+            await _settle(pilot, 4)
+            assert table.row_count == 2
+            assert runtime.settings_store.load().hide_suspicious_claimables is False
 
             await pilot.press("u")
             await _settle(pilot, 4)
             assert runtime.settings_store.load().use_local_time is False
             assert "UTC" in str(app.screen.query_one("#history-status", Static).render())
 
+            table.move_cursor(row=0)
             await pilot.press("enter")
             await _settle(pilot, 3)
             assert isinstance(app.screen, ActivityDetailDialog)
@@ -264,13 +309,47 @@ def test_history_dust_timezone_details_and_contact_hook(tmp_path):
             assert app.screen.query_one("#contact-address", Input).value == runtime.sender
             app.screen.query_one("#contact-name", Input).value = "Sender"
             await pilot.click("#add")
-            await _settle(pilot, 3)
+            await _settle(pilot, 5)
             assert runtime.contact_store.get("Sender").address == runtime.sender
 
+            # No restart is required: the History row is rebuilt from raw ops.
             assert isinstance(app.screen, HistoryScreen)
+            table = app.screen.query_one("#history-table", DataTable)
+            assert "Sender ·" in str(table.get_row_at(0)[1])
+
             await pilot.press("c")
             await _settle(pilot, 3)
             assert isinstance(app.screen, ContactBookScreen)
             assert app.screen.query_one("#contacts-table", DataTable).row_count == 1
 
     asyncio.run(scenario())
+
+
+def test_suspicious_visibility_preference_survives_restart(tmp_path):
+    async def first_run():
+        runtime = UXRuntime(tmp_path)
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(120, 44)) as pilot:
+            await _settle(pilot)
+            await pilot.press("h")
+            await _settle(pilot)
+            await pilot.press("p")
+            await _settle(pilot, 4)
+            assert runtime.settings_store.load().hide_suspicious_claimables is True
+
+    async def second_run():
+        runtime = UXRuntime(tmp_path)
+        assert runtime.settings.hide_suspicious_claimables is True
+        app = FresnicaApp(runtime)
+        async with app.run_test(size=(120, 44)) as pilot:
+            await _settle(pilot)
+            await pilot.press("h")
+            await _settle(pilot)
+            table = app.screen.query_one("#history-table", DataTable)
+            assert table.row_count == 1
+            assert "suspicious claimables hidden" in str(
+                app.screen.query_one("#history-status", Static).render()
+            )
+
+    asyncio.run(first_run())
+    asyncio.run(second_run())

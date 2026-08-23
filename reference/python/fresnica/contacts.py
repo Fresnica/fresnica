@@ -73,6 +73,17 @@ class ContactStore:
         except ContactNotFoundError:
             return None
 
+    def find_by_address(self, address: str) -> Contact | None:
+        """Return the current local label for an exact Stellar address."""
+        try:
+            canonical = Wallet.from_address(address.strip()).address()
+        except (AttributeError, TypeError, ValueError):
+            return None
+        for contact in self._load():
+            if contact.address == canonical:
+                return contact
+        return None
+
     def add(self, name: str, address: str, memo: str | None = None) -> Contact:
         contact = _contact(name, address, memo)
         items = self._load()
