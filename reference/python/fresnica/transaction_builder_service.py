@@ -99,15 +99,15 @@ class TransactionBuilderService:
             source=wallet.address(),
             action=action,
             side=intent.side,
-            base_asset=intent.pair.base.display,
-            counter_asset=intent.pair.counter.display,
+            base_asset=_review_asset(intent.pair.base),
+            counter_asset=_review_asset(intent.pair.counter),
             amount=amount,
             price=price,
             total=_amount_text(intent.amount * intent.price),
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
             offer_id=str(offer_id) if offer_id else None,
-            trustline_asset=trustline_asset.display if trustline_asset else None,
+            trustline_asset=_review_asset(trustline_asset) if trustline_asset else None,
         )
         return PreparedTransaction(envelope=envelope, review=review)
 
@@ -133,8 +133,8 @@ class TransactionBuilderService:
             source=wallet.address(),
             action="cancel",
             side=None,
-            base_asset=offer.selling.display,
-            counter_asset=offer.buying.display,
+            base_asset=_review_asset(offer.selling),
+            counter_asset=_review_asset(offer.buying),
             amount=None,
             price=None,
             total=None,
@@ -150,3 +150,11 @@ def _amount_text(value: Decimal) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _review_asset(asset: Asset) -> str:
+    if asset.is_native:
+        return "XLM"
+    if asset.is_liquidity_pool:
+        return asset.display
+    return f"{asset.code}:{asset.issuer}"
