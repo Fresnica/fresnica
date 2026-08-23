@@ -49,14 +49,13 @@ class FresnicaApp(App[None]):
         Binding("w", "manage_wallets", "Wallets"),
         Binding("h", "history", "History"),
         Binding("z", "toggle_zero", "Zero assets"),
-        Binding("s", "send", "Send", show=False),
-        Binding("l", "toggle_lock", "Lock / Unlock", show=False),
+        Binding("s", "send", "Send"),
+        Binding("l", "toggle_lock", "Lock / Unlock"),
         Binding("q", "quit", "Quit"),
     ]
 
     CSS = """
     #wallet { padding: 1 2 0 2; height: auto; text-style: bold; }
-    #wallet-actions { padding: 0 2; height: auto; color: $text-muted; }
     #status { padding: 0 2; height: auto; }
     #sync-status { padding: 0 2 1 2; height: 2; text-align: right; color: $text-muted; }
     .section-title { padding: 0 1; height: 1; text-style: bold; }
@@ -83,7 +82,6 @@ class FresnicaApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("Loading wallet...", id="wallet")
-        yield Static("", id="wallet-actions")
         yield Static("", id="status")
         yield Static("", id="sync-status")
         with Horizontal(id="dashboard"):
@@ -507,7 +505,6 @@ class FresnicaApp(App[None]):
 
     def _apply_wallet(self, record, balances, positions, history, ready_message, error) -> None:
         wallet_widget = self.query_one("#wallet", Static)
-        wallet_actions = self.query_one("#wallet-actions", Static)
 
         self._last_record = record
         self._last_balances = list(balances)
@@ -516,7 +513,6 @@ class FresnicaApp(App[None]):
 
         if record is None:
             wallet_widget.update("No wallet configured")
-            wallet_actions.update("")
             self._render_balances()
             self._render_liquidity()
             self._render_history()
@@ -531,7 +527,6 @@ class FresnicaApp(App[None]):
         wallet_widget.update(
             f"{record.name}\n{_wallet_meta(record, state)}\n{record.address}"
         )
-        wallet_actions.update(_signing_actions_for(state))
         self._render_balances()
         self._render_liquidity()
         self._render_history()
@@ -551,12 +546,15 @@ class FresnicaApp(App[None]):
         title = "Assets · showing zero" if self._show_zero_balances else "Assets · zero hidden"
         self.query_one("#assets-title", Label).update(title)
         for item in items:
+            domain = None
+            if isinstance(item.raw, dict):
+                domain = item.raw.get("_fresnica_issuer_domain") or None
             table.add_row(
                 asset_label(item.asset),
-                asset_source(item.asset),
+                asset_source(item.asset, domain),
                 format_amount(item.balance),
                 format_amount(item.available),
-                format_amount(item.selling_liabilities),
+                "" if item.selling_liabilities == 0 else format_amount(item.selling_liabilities),
             )
 
     def _render_liquidity(self) -> None:
@@ -618,14 +616,6 @@ def _wallet_meta(record, state: WalletState) -> str:
         return f"{network} · {wallet_type}"
     state_label = "Unlocked" if state is WalletState.UNLOCKED else "Locked"
     return f"{network} · {wallet_type} · {state_label}"
-
-
-def _signing_actions_for(state: WalletState) -> str:
-    if state is WalletState.WATCH_ONLY:
-        return ""
-    if state is WalletState.LOCKED:
-        return "S Send   L Unlock"
-    return "S Send   L Lock"
 
 
 def _zero_balance(item) -> bool:
