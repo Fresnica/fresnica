@@ -26,10 +26,10 @@ class FakeManager:
 
 class FakeDexService:
     def __init__(self, offers=None):
-        self.offers = list(offers or [])
+        self.offers = {offer.offer_id: offer for offer in (offers or [])}
 
-    def get_open_offers(self, wallet, limit=200, refresh=True):
-        return self.offers
+    def get_open_offer(self, wallet, offer_id):
+        return self.offers[str(offer_id)]
 
 
 class FakeOfferService:
