@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 
+from .asset_catalog import AssetCatalogService
 from .balance_service import BalanceService
 from .contacts import ContactStore
 from .datastore import SQLiteDataStore
@@ -57,6 +58,7 @@ class Runtime:
         self.settings = self.settings_store.load()
         self.contact_store = ContactStore(self.home / "contacts.json")
         self.market_preferences = MarketPreferencesStore(self.home / "markets.json")
+        self.asset_catalog = AssetCatalogService(self.home / "assets.json")
         self.wallet_manager = WalletManager(self.wallet_storage)
         self._services: dict[str, NetworkServices] = {}
 

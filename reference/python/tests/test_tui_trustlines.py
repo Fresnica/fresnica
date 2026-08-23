@@ -4,10 +4,13 @@ from types import SimpleNamespace
 from stellar_sdk import Keypair
 from textual.widgets import DataTable, Input, Static
 
+from fresnica.asset_catalog import AssetCatalogEntry
 from fresnica.manager import WalletManager, WalletState
+from fresnica.models import Asset
 from fresnica.review import TrustlineReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
+from fresnica.tui.asset_picker import AssetPickerDialog
 from fresnica.tui.review_dialog import ReviewPresentationDialog
 from fresnica.tui.screens import NoticeDialog, UnlockDialog
 from fresnica.tui.trustlines import TrustlineFormDialog, TrustlineScreen
@@ -102,6 +105,17 @@ class FakeTrustlineService:
         return SimpleNamespace(hash="trust-hash", ledger=77)
 
 
+class FakeAssetCatalog:
+    def __init__(self, entry):
+        self.entry = entry
+
+    def cached(self, network):
+        return [AssetCatalogEntry(Asset("XLM"), source="native"), self.entry]
+
+    def recommended(self, network, limit=30, refresh=True):
+        return self.cached(network)
+
+
 class FakeRuntime:
     def __init__(self, watch_only=False):
         self.network = "mainnet"
@@ -110,6 +124,15 @@ class FakeRuntime:
         self.wallet_manager = WalletManager(MemoryWalletStorage())
         self.issuer = Keypair.random().public_key
         self.asset = f"USD:{self.issuer}"
+        self.recommended_issuer = Keypair.random().public_key
+        self.recommended_asset = f"EUR:{self.recommended_issuer}"
+        self.asset_catalog = FakeAssetCatalog(
+            AssetCatalogEntry(
+                Asset("EUR", self.recommended_issuer),
+                domain="example.org",
+                name="Example Euro",
+            )
+        )
         self.line = {
             "asset_type": "credit_alphanum4",
             "asset_code": "USD",
@@ -173,11 +196,9 @@ def test_trustline_screen_lists_full_asset_identity_and_limits():
     asyncio.run(scenario())
 
 
-def test_locked_wallet_add_resumes_after_unlock_uses_shared_review_and_submits():
+def test_locked_wallet_add_uses_asset_picker_then_resumes_shared_pipeline():
     async def scenario():
         runtime = FakeRuntime()
-        new_issuer = Keypair.random().public_key
-        new_asset = f"EUR:{new_issuer}"
         app = FresnicaApp(runtime)
         async with app.run_test(size=(130, 45)) as pilot:
             await _settle(pilot)
@@ -185,8 +206,16 @@ def test_locked_wallet_add_resumes_after_unlock_uses_shared_review_and_submits()
             await _enter_trustlines(app, pilot)
 
             await pilot.press("a")
+            await _settle(pilot, 4)
+            assert isinstance(app.screen, AssetPickerDialog)
+            picker = app.screen.query_one("#asset-picker-table", DataTable)
+            assert picker.row_count == 1
+            assert picker.get_row_at(0)[0] == "EUR"
+            await pilot.press("enter")
+            await _settle(pilot, 3)
+
             assert isinstance(app.screen, TrustlineFormDialog)
-            app.screen.query_one("#asset", Input).value = new_asset
+            assert str(app.screen.query_one("#asset-label", Static).render()) == runtime.recommended_asset
             await pilot.click("#review")
             await _settle(pilot)
 
@@ -196,10 +225,10 @@ def test_locked_wallet_add_resumes_after_unlock_uses_shared_review_and_submits()
             await _settle(pilot, 8)
 
             assert runtime.wallet_manager.state() is WalletState.UNLOCKED
-            assert runtime.trustline_service.calls == [("add", new_asset, None)]
+            assert runtime.trustline_service.calls == [("add", runtime.recommended_asset, None)]
             assert isinstance(app.screen, ReviewPresentationDialog)
             text = str(app.screen.query_one("#review-text", Static).render())
-            assert f"Add trustline for {new_asset}" in text
+            assert f"Add trustline for {runtime.recommended_asset}" in text
             assert "Limit: Stellar maximum" in text
 
             await pilot.click("#confirm")
