@@ -13,6 +13,8 @@ from textual.binding import Binding
 from ..errors import (
     FresnicaError,
     NetworkError,
+    TransactionPendingError,
+    TransactionSubmissionUncertain,
     TrustlineConfirmationRequired,
     WalletLockedError,
     WalletNotFoundError,
@@ -53,6 +55,16 @@ class FresnicaApp(BaseFresnicaApp):
         mode = "shown" if self._show_zero_balances else "hidden"
         self._set_sync(f"Zero-balance assets {mode} · preference saved")
 
+    def action_send(self) -> None:
+        try:
+            record = self.runtime.wallet_manager.get_record()
+        except WalletNotFoundError:
+            super().action_send()
+            return
+        if not record.watch_only and not self._ensure_write_clear(record):
+            return
+        super().action_send()
+
     def action_dex(self) -> None:
         try:
             self.runtime.wallet_manager.get_record()
@@ -83,12 +95,54 @@ class FresnicaApp(BaseFresnicaApp):
             )
             return
 
+        if not self._ensure_write_clear(record, screen=screen):
+            return
+
         if state is WalletState.LOCKED:
             self._pending_dex_unlock = (screen, action)
             self._request_unlock(record.name, after="dex")
             return
 
         self._prepare_dex_action(screen, action)
+
+    def _ensure_write_clear(self, record, screen: DexScreen | None = None) -> bool:
+        services = self.runtime.services_for(record.network)
+        pending = getattr(services, "pending_transaction_service", None)
+        if pending is None:
+            return True
+        try:
+            resolutions = pending.ensure_clear(record.address)
+        except TransactionPendingError as exc:
+            message = (
+                "A previous submission still has unknown status. "
+                f"Fresnica will not create another transaction for this account until "
+                f"Horizon resolves {exc.tx_hash}."
+            )
+            if screen is not None and screen.is_mounted:
+                screen.set_status(f"Pending transaction · {exc.tx_hash}")
+            else:
+                self._set_status(f"Pending transaction · {exc.tx_hash}")
+            self._show_notice("Transaction pending", message)
+            return False
+        except NetworkError as exc:
+            self._show_error(exc)
+            return False
+
+        recovered = [item for item in resolutions if item.status == "confirmed"]
+        expired = [item for item in resolutions if item.status == "expired"]
+        if recovered:
+            message = _pending_resolution_message(recovered)
+            if screen is not None and screen.is_mounted:
+                screen.set_status(message)
+            else:
+                self._set_status(message)
+        elif expired:
+            message = _pending_resolution_message(expired)
+            if screen is not None and screen.is_mounted:
+                screen.set_status(message)
+            else:
+                self._set_status(message)
+        return True
 
     def _on_unlock_response(
         self,
@@ -278,6 +332,16 @@ class FresnicaApp(BaseFresnicaApp):
             self._pending_dex_submit = None
 
     def _finish_dex_submit(self, screen: DexScreen, result, network: str, error) -> None:
+        if isinstance(error, TransactionSubmissionUncertain):
+            message = f"Submission status unknown · {error.tx_hash}"
+            if screen.is_mounted:
+                screen.set_status(message)
+            self._show_notice(
+                "Submission status unknown",
+                f"The transaction may already be on Stellar. Fresnica saved {error.tx_hash} "
+                "and will resolve it by hash before allowing another write from this account.",
+            )
+            return
         if error is not None:
             if screen.is_mounted:
                 screen.set_status(f"DEX submission failed: {error}")
@@ -295,6 +359,17 @@ class FresnicaApp(BaseFresnicaApp):
             screen.set_status(message)
             screen.refresh_market()
         self.refresh_wallet(message)
+
+    def _finish_send(self, result, network: str, error) -> None:
+        if isinstance(error, TransactionSubmissionUncertain):
+            self._set_status(f"Submission status unknown · {error.tx_hash}")
+            self._show_notice(
+                "Submission status unknown",
+                f"The transaction may already be on Stellar. Fresnica saved {error.tx_hash} "
+                "and will resolve it by hash before allowing another write from this account.",
+            )
+            return
+        super()._finish_send(result, network, error)
 
     def _open_wallet_manager(self) -> None:
         manager = self.runtime.wallet_manager
@@ -417,6 +492,17 @@ class FresnicaApp(BaseFresnicaApp):
             record = session.record
             selected_name = record.name
             services = self.runtime.services_for(record.network)
+            pending = getattr(services, "pending_transaction_service", None)
+            if pending is not None:
+                pending_message = _pending_resolution_message(
+                    pending.resolve(record.address)
+                )
+                if pending_message:
+                    ready_message = (
+                        f"{ready_message} · {pending_message}"
+                        if ready_message
+                        else pending_message
+                    )
             balance_service = services.balance_service
 
             # A brand-new Testnet wallet is the one case where a full account
@@ -515,6 +601,24 @@ class FresnicaApp(BaseFresnicaApp):
         except WalletNotFoundError:
             current = None
         return current == wallet_name
+
+
+def _pending_resolution_message(resolutions) -> str | None:
+    if not resolutions:
+        return None
+    pending = [item for item in resolutions if item.status == "pending"]
+    if pending:
+        return f"Transaction pending · {pending[0].pending.tx_hash}"
+    confirmed = [item for item in resolutions if item.status == "confirmed"]
+    if confirmed:
+        item = confirmed[-1]
+        successful = bool((item.transaction or {}).get("successful", True))
+        state = "confirmed" if successful else "finalized as failed"
+        return f"Recovered transaction {state} · {item.pending.tx_hash}"
+    expired = [item for item in resolutions if item.status == "expired"]
+    if expired:
+        return f"Uncertain transaction not found after timeout · {expired[-1].pending.tx_hash}"
+    return None
 
 
 def run_tui(runtime):
