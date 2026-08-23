@@ -33,5 +33,11 @@ else:
         new = '            assert str(app.screen.query_one("#trust-title", Static).render()) == "Manage Assets"\n            assert "E set limit" not in str(app.screen.query_one("#trust-status", Static).render())\n            table = app.screen.query_one("#trustlines", DataTable)\n            assert table.row_count == 1\n'
         if old not in text:
             raise SystemExit("trustline UI test pattern not found")
+        text = text.replace(old, new, 1)
+
+        old = '            await pilot.press("e")\n            assert isinstance(app.screen, TrustlineFormDialog)\n'
+        new = '            app.screen.action_edit()\n            await _settle(pilot)\n            assert isinstance(app.screen, TrustlineFormDialog)\n'
+        if old not in text:
+            raise SystemExit("hidden limit behavior test pattern not found")
         trust_test.write_text(text.replace(old, new, 1), encoding="utf-8")
         print("manage-assets patch applied with evolved test recovery")
