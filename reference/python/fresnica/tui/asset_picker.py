@@ -1,5 +1,6 @@
 """Reusable cache-first asset picker for trustlines and DEX markets."""
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -54,16 +55,16 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
             )
             yield Static("", id="asset-picker-error")
             with Horizontal(id="asset-picker-actions"):
-                yield Button("Cancel [Esc]", id="cancel")
+                yield Button(Text("Cancel [Esc]"), id="cancel")
                 yield Button("Use manual", id="manual")
-                yield Button("Choose [Enter]", id="choose", variant="primary")
+                yield Button(Text("Choose [Enter]"), id="choose", variant="primary")
 
     def on_mount(self) -> None:
         table = self.query_one("#asset-picker-table", DataTable)
         if not table.columns:
             table.add_columns("Asset", "Domain / issuer", "Name", "Source")
         table.cursor_type = "row"
-        self._render(self._cached_entries())
+        self._render_entries(self._cached_entries())
         self._refresh_catalog()
 
     def action_cancel(self) -> None:
@@ -135,7 +136,7 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
         if not self.is_mounted:
             return
         if entries:
-            self._render(entries)
+            self._render_entries(entries)
         status = self.query_one("#asset-picker-status", Static)
         if error is not None:
             status.update("Recommended assets unavailable · cached/manual selection remains available")
@@ -151,7 +152,7 @@ class AssetPickerDialog(ModalScreen[Asset | None]):
             if not item.asset.is_liquidity_pool and (self.allow_native or not item.asset.is_native)
         ]
 
-    def _render(self, entries: list[AssetCatalogEntry]) -> None:
+    def _render_entries(self, entries: list[AssetCatalogEntry]) -> None:
         self._entries = list(entries)
         table = self.query_one("#asset-picker-table", DataTable)
         table.clear()
