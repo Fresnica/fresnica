@@ -1,0 +1,22 @@
+name: SDEX Testnet live probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sdex-testnet-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: reference/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Run live SDEX probe
+        env:
+          FRESNICA_LIVE_TESTNET: "1"
+        run: uv run pytest -q -s tests/test_sdex_testnet_live.py
