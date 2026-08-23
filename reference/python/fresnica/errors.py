@@ -29,6 +29,14 @@ class InvalidPasswordError(WalletError):
     pass
 
 
+class ProtectionError(WalletError):
+    pass
+
+
+class ProtectionUnavailableError(ProtectionError):
+    pass
+
+
 class SignerError(FresnicaError):
     pass
 
@@ -94,8 +102,6 @@ class TrustlineConfirmationRequired(TransactionError):
 class InsufficientBalanceError(TransactionError):
     def __init__(self, asset: str, requested, available):
         self.asset = asset
-        self.requested = requested
-        self.available = available
         super().__init__(
             f"Insufficient {asset} balance: requested {requested}, available {available}"
         )
