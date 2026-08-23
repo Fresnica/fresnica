@@ -294,8 +294,8 @@ def test_dex_screen_projects_reverse_offer_and_fill_into_selected_pair():
             bids = app.screen.query_one("#dex-bids", DataTable)
             assert asks.row_count == 1
             assert bids.row_count == 1
-            assert _plain_row(asks, 0) == ["100", "0.3300000"]
-            assert _plain_row(bids, 0) == ["0.3200000", "625"]
+            assert _plain_row(bids, 0) == ["625.0000000", "0.3200000"]
+            assert _plain_row(asks, 0) == ["0.3300000", "100.0000000"]
             assert offers.row_count == 1
             assert fills.row_count == 1
             assert _plain_row(offers, 0) == ["BUY", "100", "0.3250000", "32.5", "42"]
