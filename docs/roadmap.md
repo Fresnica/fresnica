@@ -34,12 +34,12 @@ Tasks:
 
 ## Phase 2 - Stellar Features
 
-- Assets
-- Trustlines
-- Offers
-- SDEX terminal
-- Trades aggregation
-- Portfolio view
+Implemented in the Python reference:
+
+- Assets and portfolio view
+- Standalone trustline add / limit / remove lifecycle
+- Offers and pair-scoped SDEX terminal
+- Fex-compatible trade aggregation
 
 ## Phase 3 - Production Core
 
