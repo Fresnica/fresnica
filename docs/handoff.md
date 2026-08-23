@@ -8,10 +8,13 @@ This document is the compact handoff for continuing Fresnica development. It sum
 
 - Repository: `manran/fresnica`
 - Default branch: `main`
-- Current main at this handoff: `28195df6e276ddbb3160f56a661a2ab75099006c`
-- Latest merged PR: #40, **Adopt retained history cache model**
-- Open PRs at handoff: none
+- Runtime baseline summarized here: `28195df6e276ddbb3160f56a661a2ab75099006c` (PR #40)
+- Latest runtime PR: #40, **Adopt retained history cache model**
+- Handoff document introduced by docs-only PR #41
+- Open PRs at the time of this handoff: none
 - Latest full Python reference CI: **235 passed, 3 skipped**
+
+Do not treat a SHA written in a handoff document as the current branch head: verify `main` before starting new work.
 
 The Python implementation is still the behavior/reference implementation. Future Rust Core work should port stable wallet/runtime semantics rather than inventing a second product model.
 
@@ -206,6 +209,7 @@ The recent coherent UX/architecture run is:
 - **#38** Complete SDEX account synchronization
 - **#39** Separate anchor workflow and bound history catch-up
 - **#40** Adopt retained history cache model
+- **#41** Add current project handoff (documentation only)
 
 Only the History catch-up portion of #39 was superseded by #40. The AnchorTransferService boundary and network-scoped anchor capability cache introduced in #39 remain current.
 
@@ -213,7 +217,7 @@ Only the History catch-up portion of #39 was superseded by #40. The AnchorTransf
 
 Before writing:
 
-1. Re-read current `main`; do not assume this handoff SHA is still current.
+1. Re-read current `main`; do not assume this handoff's runtime baseline SHA is still current.
 2. Prefer a coherent batch over isolated cosmetic commits when changes share one product decision.
 3. Keep protocol behavior in services/adapters and presentation behavior in CLI/TUI modules.
 4. Reuse existing models/helpers rather than creating parallel concepts.
