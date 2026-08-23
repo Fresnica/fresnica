@@ -67,5 +67,5 @@
 
 - [x] Unit tests for storage, encryption, cache, CLI parsing, availability, runtime, and transfer orchestration
 - [x] GitHub Actions test workflow
-- [x] Real Horizon integration tests on Testnet
+- [ ] Real Horizon integration tests on Testnet
 - [ ] Cross-language test vectors for future Rust Core
