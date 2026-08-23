@@ -7,6 +7,9 @@ from .errors import FresnicaError
 from .models import Asset, BalanceView, LiquidityPositionView, LiquidityReserveView
 
 
+ISSUER_DOMAIN_CACHE_KEY = "_fresnica_issuer_domain"
+
+
 class BalanceService:
     def __init__(self, adapter, datastore, network_name: str):
         self.adapter = adapter
@@ -18,10 +21,13 @@ class BalanceService:
         address = wallet.address()
         if refresh:
             account = self.adapter.get_account(address)
+            balances = account.get("balances", [])
+            self._restore_cached_issuer_domains(address, balances)
+            self._enrich_issuer_domains(balances)
             self.datastore.save_balances(
                 self.network_name,
                 address,
-                account.get("balances", []),
+                balances,
             )
             return account
 
@@ -80,6 +86,41 @@ class BalanceService:
         base_reserve = self.adapter.get_base_reserve_stroops()
         views = self.availability.balance_views(account, base_reserve)
         return sorted(views, key=_balance_sort_key)
+
+    def _restore_cached_issuer_domains(self, address: str, balances: list[dict]) -> None:
+        cached = {
+            _raw_balance_key(item): item
+            for item in self.datastore.get_balances(self.network_name, address)
+        }
+        for raw in balances:
+            previous = cached.get(_raw_balance_key(raw))
+            if previous is not None and ISSUER_DOMAIN_CACHE_KEY in previous:
+                raw[ISSUER_DOMAIN_CACHE_KEY] = previous[ISSUER_DOMAIN_CACHE_KEY]
+
+    def _enrich_issuer_domains(self, balances: list[dict]) -> None:
+        domains = {
+            str(raw.get("asset_issuer")): str(raw.get(ISSUER_DOMAIN_CACHE_KEY) or "")
+            for raw in balances
+            if raw.get("asset_issuer") and ISSUER_DOMAIN_CACHE_KEY in raw
+        }
+        for raw in balances:
+            issuer = raw.get("asset_issuer")
+            if not issuer or raw.get("asset_type") in {"native", "liquidity_pool_shares"}:
+                continue
+            issuer = str(issuer)
+            if ISSUER_DOMAIN_CACHE_KEY in raw:
+                continue
+            if issuer in domains:
+                raw[ISSUER_DOMAIN_CACHE_KEY] = domains[issuer]
+                continue
+            try:
+                issuer_account = self.adapter.get_account(issuer)
+            except FresnicaError:
+                # A transient issuer lookup must not become a permanent negative cache.
+                continue
+            domain = str(issuer_account.get("home_domain") or "").strip()
+            domains[issuer] = domain
+            raw[ISSUER_DOMAIN_CACHE_KEY] = domain
 
     def _cache_views(self, address: str, account: dict, views: list[BalanceView]) -> None:
         """Persist presentation-safe availability alongside raw balance rows.
