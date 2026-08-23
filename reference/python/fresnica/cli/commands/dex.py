@@ -37,7 +37,11 @@ def execute_dex(
 
     if args.dex_command == "fills":
         record, session = _view_wallet(runtime, args.wallet)
-        segments = service.get_account_trade_segments(session.wallet, limit=args.limit)
+        segments = service.get_account_trade_segments(
+            session.wallet,
+            limit=args.limit,
+            refresh=not args.cached,
+        )
         renderer.render_account_trade_segments(record, segments)
         return segments
 
