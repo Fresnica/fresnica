@@ -14,6 +14,7 @@ def test_runtime_composes_and_caches_network_services(tmp_path):
     assert mainnet is runtime.services_for("mainnet")
     assert mainnet is not runtime.services_for("testnet")
     assert runtime.wallet_manager.storage is runtime.wallet_storage
+    assert mainnet.pending_transaction_service.store is runtime.pending_transaction_store
 
 
 def test_testnet_runtime_uses_one_shared_service_graph(tmp_path):
@@ -34,3 +35,4 @@ def test_testnet_runtime_uses_one_shared_service_graph(tmp_path):
     assert services.offer_service.transaction_builder is services.transaction_builder
     assert services.offer_service.transaction_service is services.transaction_service
     assert services.transaction_service.submit_service is services.submit_service
+    assert services.transaction_service.pending_service is services.pending_transaction_service
