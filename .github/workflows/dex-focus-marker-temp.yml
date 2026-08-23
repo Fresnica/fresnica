@@ -1,9 +1,9 @@
 name: DEX focus marker temporary
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/dex-focus-orderbook-trustline-marker
+      - main
 
 permissions:
   contents: write
@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: codex/dex-focus-orderbook-trustline-marker
       - name: Apply patch
         run: python tools/dex_focus_marker_patch.py
       - name: Diff check
