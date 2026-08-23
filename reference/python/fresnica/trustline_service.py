@@ -10,6 +10,7 @@ from .errors import (
     WatchOnlyError,
 )
 from .models import Asset
+from .trustline_policy import FRESNICA_TRUSTLINE_LIMIT
 
 
 class TrustlineService:
@@ -22,7 +23,9 @@ class TrustlineService:
     def prepare_add(self, wallet_name: str, wallet, asset, limit=None):
         self._ensure_signing_wallet(wallet)
         asset = self._asset(asset, wallet)
-        limit_value = _limit(limit) if limit is not None else None
+        limit_value = (
+            _limit(limit) if limit is not None else FRESNICA_TRUSTLINE_LIMIT
+        )
         account, base_fee, base_reserve = self._account_context(wallet)
         if _find_trustline(account, asset) is not None:
             raise TransactionError(

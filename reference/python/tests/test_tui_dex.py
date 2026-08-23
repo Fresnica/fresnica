@@ -21,7 +21,7 @@ from fresnica.review import OfferReview
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.app import FresnicaApp
 from fresnica.tui.asset_picker import AssetPickerDialog
-from fresnica.tui.dex import DexScreen, MarketPairDialog, OfferFormDialog
+from fresnica.tui.dex import DexScreen, MarketPairDialog, OfferFormDialog, _orderbook_grid
 from fresnica.tui.review_dialog import ReviewPresentationDialog
 from fresnica.tui.screens import ConfirmDialog, NoticeDialog, UnlockDialog
 
@@ -290,12 +290,15 @@ def test_dex_screen_projects_reverse_offer_and_fill_into_selected_pair():
 
             offers = app.screen.query_one("#dex-offers", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
-            asks = app.screen.query_one("#dex-asks", DataTable)
-            bids = app.screen.query_one("#dex-bids", DataTable)
-            assert asks.row_count == 1
-            assert bids.row_count == 1
-            assert _plain_row(bids, 0) == ["625.0000000", "0.3200000"]
-            assert _plain_row(asks, 0) == ["0.3300000", "100.0000000"]
+            asks = app.screen.query_one("#dex-asks", Static)
+            bids = app.screen.query_one("#dex-bids", Static)
+            assert asks is not None and bids is not None
+            bid_grid = _orderbook_grid(app.screen._orderbook["bids"], "bid")
+            ask_grid = _orderbook_grid(app.screen._orderbook["asks"], "ask")
+            assert bid_grid.columns[0]._cells[1].plain == "625.0000000"
+            assert bid_grid.columns[1]._cells[1].plain == "0.3200000"
+            assert ask_grid.columns[0]._cells[1].plain == "0.3300000"
+            assert ask_grid.columns[1]._cells[1].plain == "100.0000000"
             assert offers.row_count == 1
             assert fills.row_count == 1
             assert _plain_row(offers, 0) == ["BUY", "100", "0.3250000", "32.5", "42"]

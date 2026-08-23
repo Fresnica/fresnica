@@ -24,6 +24,7 @@ from ..history_service import is_suspicious_claimable_activity
 from ..manager import WalletState
 from ..models import OfferIntent
 from ..presentation import format_timestamp, offer_outcome_summary
+from ..trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from .activity_presentation import activity_display_summary, activity_metadata, activity_text
 from .app_base import FresnicaApp as BaseFresnicaApp
 from .asset_details import AssetDetailAction, AssetDetailsScreen, PrefilledSendDialog
@@ -522,7 +523,8 @@ class FresnicaApp(BaseFresnicaApp):
             ConfirmDialog(
                 "Create receiving trustline",
                 f"This offer requires a new trustline for {identity}. "
-                "Fresnica will submit ChangeTrust and the offer in one transaction.",
+                f"Fresnica will use trustline limit {FRESNICA_TRUSTLINE_LIMIT_TEXT} "
+                "and submit ChangeTrust with the offer in one transaction.",
                 "Create & continue",
             ),
             lambda confirmed: self._on_dex_trustline_confirmation(

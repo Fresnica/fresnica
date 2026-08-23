@@ -7,6 +7,7 @@ from stellar_sdk.sep.exceptions import AccountRequiresMemoError
 
 from .errors import MemoRequiredError, NetworkError, TransactionError
 from .models import Asset, PriceRatio
+from .trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from .network import Network
 
 
@@ -382,7 +383,8 @@ class StellarAdapter:
             )
             if trustline_asset is not None:
                 builder = builder.append_change_trust_op(
-                    asset=self.to_sdk_asset(trustline_asset)
+                    asset=self.to_sdk_asset(trustline_asset),
+                    limit=FRESNICA_TRUSTLINE_LIMIT_TEXT,
                 )
             kwargs = {
                 "selling": self.to_sdk_asset(selling),
