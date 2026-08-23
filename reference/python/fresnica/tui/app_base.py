@@ -9,6 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
+from ..contacts import resolve_destination
 from ..errors import FresnicaError, NetworkError, WalletLockedError, WalletNotFoundError
 from ..manager import WalletState
 from ..presentation import (
@@ -440,13 +441,19 @@ class FresnicaApp(App[None]):
             if session is None or session.record.name != record.name:
                 raise WalletLockedError(f'Wallet "{record.name}" is locked')
             services = self.runtime.services_for(record.network)
+            destination = resolve_destination(
+                getattr(self.runtime, "contact_store", None),
+                request.destination,
+                request.memo,
+            )
             prepared = services.transfer_service.prepare(
                 wallet_name=record.name,
                 wallet=session.wallet,
-                destination=request.destination,
+                destination=destination.address,
                 asset=request.asset,
                 amount=request.amount,
-                memo=request.memo,
+                memo=destination.memo,
+                contact_name=destination.contact_name,
             )
             self.call_from_thread(
                 self._show_review,
