@@ -8,7 +8,11 @@ from stellar_sdk.exceptions import (
     ConnectionError as StellarConnectionError,
 )
 
-from fresnica.errors import TransactionError, TransactionSubmissionUncertain
+from fresnica.errors import (
+    MemoRequiredError,
+    TransactionError,
+    TransactionSubmissionUncertain,
+)
 from fresnica.submit_service import SubmitService
 from fresnica.transaction_service import TransactionService
 
@@ -29,6 +33,11 @@ class UncertainAdapter:
 class DefinitiveAdapter:
     def submit_transaction(self, signed_transaction):
         raise TransactionError("tx_bad_seq", details="result_codes=tx_bad_seq")
+
+
+class MemoRequiredAdapter:
+    def submit_transaction(self, signed_transaction):
+        raise MemoRequiredError("GDESTINATION")
 
 
 class CausedAdapter:
@@ -94,6 +103,15 @@ def test_horizon_4xx_remains_definitive():
 
     assert type(exc.value) is TransactionError
     assert exc.value.details == "BadRequestError"
+
+
+def test_memo_required_is_definitive_and_never_becomes_uncertain():
+    service = SubmitService(MemoRequiredAdapter())
+
+    with pytest.raises(MemoRequiredError) as exc:
+        service.submit(FakeEnvelope())
+
+    assert exc.value.account_id == "GDESTINATION"
 
 
 def test_definitive_transaction_error_is_not_reclassified_as_pending():
