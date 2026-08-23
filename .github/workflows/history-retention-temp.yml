@@ -1,0 +1,43 @@
+name: History retention temporary
+
+on:
+  push:
+    branches:
+      - codex/history-retention-model
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/history-retention-model
+      - name: Apply history retention model
+        run: python tools/history_retention_patch.py
+      - name: Diff check
+        run: git diff --check
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.5"
+          enable-cache: true
+      - name: Install Python
+        working-directory: reference/python
+        run: uv python install 3.11
+      - name: Sync
+        working-directory: reference/python
+        run: uv sync --locked
+      - name: Test
+        working-directory: reference/python
+        run: uv run pytest -q
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Adopt retained history cache model"
+          git push origin HEAD:codex/history-retention-model
