@@ -22,6 +22,8 @@ class Account:
 
 class Wallet:
     def __init__(self, account: Account, signer: Signer | None = None):
+        if signer is not None and signer.public_key != account.public_key:
+            raise ValueError("Signer public key does not match wallet account")
         self._account = account
         self.signer = signer
 
@@ -54,6 +56,13 @@ class Wallet:
         keypair = Keypair.from_public_key(address.strip())
         account = Account(0, keypair.public_key, keypair.public_key)
         return cls(account)
+
+    @classmethod
+    def from_signer(cls, signer: Signer, index: int = 0) -> "Wallet":
+        """Create a signing wallet whose key material lives behind a Signer."""
+        keypair = Keypair.from_public_key(signer.public_key)
+        account = Account(index, keypair.public_key, keypair.public_key)
+        return cls(account, signer)
 
     from_public_key = from_address
 
