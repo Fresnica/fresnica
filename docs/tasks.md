@@ -53,6 +53,7 @@
 - [x] History screen
 - [x] Send/unlock/review modal flow
 - [x] Pair-scoped SDEX screen
+- [x] Trustline management screen
 
 ## Transaction
 
