@@ -11,6 +11,7 @@ from .history_service import HistoryService
 from .manager import WalletManager
 from .network import get_network
 from .offer_service import OfferService
+from .pending_transactions import PendingTransactionService, PendingTransactionStore
 from .settings import SettingsStore
 from .stellar_adapter import StellarAdapter
 from .storage import FileWalletStorage
@@ -31,6 +32,7 @@ class NetworkServices:
     transaction_builder: TransactionBuilderService
     submit_service: SubmitService
     transaction_service: TransactionService
+    pending_transaction_service: PendingTransactionService
     transfer_service: TransferService
     testnet_service: TestnetService | None = None
 
@@ -44,6 +46,9 @@ class Runtime:
         self.home.mkdir(parents=True, exist_ok=True)
         self.wallet_storage = wallet_storage or FileWalletStorage(self.home / "wallets")
         self.datastore = datastore or SQLiteDataStore(self.home / "chain-data.sqlite3")
+        self.pending_transaction_store = PendingTransactionStore(
+            self.home / "pending-transactions.json"
+        )
         self.settings_store = SettingsStore(self.home / "settings.json")
         self.settings = self.settings_store.load()
         self.wallet_manager = WalletManager(self.wallet_storage)
@@ -57,7 +62,12 @@ class Runtime:
             balance = BalanceService(adapter, self.datastore, network.name)
             builder = TransactionBuilderService(adapter)
             submit = SubmitService(adapter)
-            transaction = TransactionService(submit)
+            pending = PendingTransactionService(
+                submit.lookup_transaction,
+                self.pending_transaction_store,
+                network.name,
+            )
+            transaction = TransactionService(submit, pending)
             services = NetworkServices(
                 adapter=adapter,
                 balance_service=balance,
@@ -67,6 +77,7 @@ class Runtime:
                 transaction_builder=builder,
                 submit_service=submit,
                 transaction_service=transaction,
+                pending_transaction_service=pending,
                 transfer_service=TransferService(balance, builder, transaction),
             )
             if network.name == "testnet":
