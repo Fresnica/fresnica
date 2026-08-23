@@ -25,4 +25,4 @@ jobs:
           enable-cache: true
       - run: uv python install 3.11
       - run: uv sync --locked
-      - run: uv run pytest -q
+      - run: FRESNICA_LIVE_TESTNET=1 uv run pytest -q
