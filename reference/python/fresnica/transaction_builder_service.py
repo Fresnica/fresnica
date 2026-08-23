@@ -5,13 +5,13 @@ from decimal import Decimal
 
 from .availability import STROOPS_PER_XLM
 from .models import Asset, OfferIntent, OfferView, OpenOffer
-from .review import OfferReview, TransactionReview
+from .review import OfferReview, TransactionReview, TrustlineReview
 
 
 @dataclass
 class PreparedTransaction:
     envelope: object
-    review: TransactionReview | OfferReview
+    review: TransactionReview | OfferReview | TrustlineReview
 
 
 class TransactionBuilderService:
@@ -51,6 +51,40 @@ class TransactionBuilderService:
             operation="create_account" if create_destination else "payment",
             memo=memo,
             contact_name=contact_name,
+        )
+        return PreparedTransaction(envelope=envelope, review=review)
+
+    def build_trustline(
+        self,
+        wallet_name: str,
+        wallet,
+        asset: Asset,
+        base_fee_stroops: int,
+        action: str,
+        limit: Decimal | None = None,
+    ) -> PreparedTransaction:
+        operation_limit = _amount_text(limit) if limit is not None else None
+        envelope = self.adapter.build_change_trust(
+            source=wallet.address(),
+            asset=asset,
+            limit=operation_limit,
+            base_fee=base_fee_stroops,
+        )
+        if action == "add" and operation_limit is None:
+            review_limit = "Stellar maximum"
+        elif action == "remove":
+            review_limit = None
+        else:
+            review_limit = operation_limit
+        fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
+        review = TrustlineReview(
+            wallet_name=wallet_name,
+            source=wallet.address(),
+            action=action,
+            asset=_review_asset(asset),
+            limit=review_limit,
+            fee=_amount_text(fee_xlm),
+            network=self.adapter.network.name,
         )
         return PreparedTransaction(envelope=envelope, review=review)
 

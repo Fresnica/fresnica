@@ -166,6 +166,26 @@ def build_parser() -> argparse.ArgumentParser:
     contact_remove = contact_sub.add_parser("remove", help="Remove a local contact")
     contact_remove.add_argument("name")
 
+    trust = sub.add_parser("trust", help="Manage Stellar asset trustlines")
+    trust_sub = trust.add_subparsers(dest="trust_command", required=True)
+
+    trust_add = trust_sub.add_parser("add", help="Create a trustline")
+    trust_add.add_argument("asset", help="Issued asset as CODE:GISSUER")
+    trust_add.add_argument("--limit", help="Optional trustline limit; defaults to Stellar maximum")
+    trust_add.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    trust_add.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    trust_limit = trust_sub.add_parser("limit", help="Change an existing trustline limit")
+    trust_limit.add_argument("asset", help="Issued asset as CODE:GISSUER")
+    trust_limit.add_argument("limit")
+    trust_limit.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    trust_limit.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    trust_remove = trust_sub.add_parser("remove", help="Remove an empty trustline")
+    trust_remove.add_argument("asset", help="Issued asset as CODE:GISSUER")
+    trust_remove.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    trust_remove.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
     dex = sub.add_parser("dex", help="Read and trade on the Stellar DEX")
     dex_sub = dex.add_subparsers(dest="dex_command", required=True)
 

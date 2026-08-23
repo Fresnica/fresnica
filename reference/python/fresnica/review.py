@@ -32,3 +32,14 @@ class OfferReview:
     network: str
     offer_id: str | None = None
     trustline_asset: str | None = None
+
+
+@dataclass(frozen=True)
+class TrustlineReview:
+    wallet_name: str
+    source: str
+    action: str
+    asset: str
+    limit: str | None
+    fee: str
+    network: str

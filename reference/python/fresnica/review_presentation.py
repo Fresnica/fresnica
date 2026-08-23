@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from .review import OfferReview, TransactionReview
+from .review import OfferReview, TransactionReview, TrustlineReview
 
 
-ReviewKind = Literal["transfer", "offer"]
+ReviewKind = Literal["transfer", "offer", "trustline"]
 
 
 @dataclass(frozen=True)
@@ -26,15 +26,19 @@ class ReviewPresentation:
     warnings: tuple[str, ...] = ()
 
 
-def project_review(review: TransactionReview | OfferReview) -> ReviewPresentation:
+def project_review(
+    review: TransactionReview | OfferReview | TrustlineReview,
+) -> ReviewPresentation:
     if isinstance(review, TransactionReview):
         return _project_transfer(review)
     if isinstance(review, OfferReview):
         return _project_offer(review)
+    if isinstance(review, TrustlineReview):
+        return _project_trustline(review)
     raise TypeError(f"Unsupported review model: {type(review).__name__}")
 
 
-def review_text(review: TransactionReview | OfferReview) -> str:
+def review_text(review: TransactionReview | OfferReview | TrustlineReview) -> str:
     """Plain text rendering with semantics shared by every interactive surface."""
     presentation = project_review(review)
     lines = [presentation.summary, ""]
@@ -109,9 +113,6 @@ def _project_offer(review: OfferReview) -> ReviewPresentation:
                     )
                 )
         else:
-            # Pair context is unavailable (for example, `dex cancel OFFER_ID`).
-            # Be explicit that these are canonical chain directions rather than
-            # inventing a user-facing BUY/SELL orientation.
             fields.extend(
                 [
                     ReviewField("Selling", review.base_asset),
@@ -158,6 +159,45 @@ def _project_offer(review: OfferReview) -> ReviewPresentation:
         kind="offer",
         title="Confirm offer",
         summary=f"{verb} {side} limit offer",
+        fields=tuple(fields),
+        warnings=warnings,
+    )
+
+
+def _project_trustline(review: TrustlineReview) -> ReviewPresentation:
+    if review.action == "add":
+        summary = f"Add trustline for {review.asset}"
+        title = "Confirm trustline creation"
+    elif review.action == "limit":
+        summary = f"Change trustline limit for {review.asset}"
+        title = "Confirm trustline limit"
+    elif review.action == "remove":
+        summary = f"Remove trustline for {review.asset}"
+        title = "Confirm trustline removal"
+    else:
+        raise ValueError(f"Unsupported trustline action: {review.action}")
+
+    fields = [
+        ReviewField("Wallet", f"{review.wallet_name} ({review.source})"),
+        ReviewField("Asset", review.asset),
+    ]
+    if review.limit is not None:
+        fields.append(ReviewField("Limit", review.limit))
+    fields.extend(
+        [
+            ReviewField("Fee", f"{review.fee} XLM"),
+            ReviewField("Network", review.network),
+        ]
+    )
+    warnings = (
+        ("Removing a trustline is irreversible unless you create it again.",)
+        if review.action == "remove"
+        else ()
+    )
+    return ReviewPresentation(
+        kind="trustline",
+        title=title,
+        summary=summary,
         fields=tuple(fields),
         warnings=warnings,
     )

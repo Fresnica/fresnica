@@ -250,6 +250,32 @@ class StellarAdapter:
                 details=_sdk_error_details(exc),
             ) from exc
 
+    def build_change_trust(
+        self,
+        source: str,
+        asset: Asset,
+        base_fee: int,
+        limit: str | None = None,
+        timeout: int = 30,
+    ):
+        try:
+            source_account = self.server.load_account(source)
+            builder = TransactionBuilder(
+                source_account=source_account,
+                network_passphrase=self.network.passphrase,
+                base_fee=base_fee,
+            )
+            kwargs = {"asset": self.to_sdk_asset(asset)}
+            if limit is not None:
+                kwargs["limit"] = limit
+            builder = builder.append_change_trust_op(**kwargs)
+            return builder.set_timeout(timeout).build()
+        except SdkError as exc:
+            raise TransactionError(
+                "Unable to build Stellar trustline transaction",
+                details=_sdk_error_details(exc),
+            ) from exc
+
     def build_manage_sell_offer(
         self,
         source: str,

@@ -21,6 +21,7 @@ from .testnet import TestnetService
 from .transaction_builder_service import TransactionBuilderService
 from .transaction_service import TransactionService
 from .transfer_service import TransferService
+from .trustline_service import TrustlineService
 
 
 @dataclass
@@ -35,6 +36,7 @@ class NetworkServices:
     transaction_service: TransactionService
     pending_transaction_service: PendingTransactionService
     transfer_service: TransferService
+    trustline_service: TrustlineService
     testnet_service: TestnetService | None = None
 
 
@@ -81,6 +83,7 @@ class Runtime:
                 transaction_service=transaction,
                 pending_transaction_service=pending,
                 transfer_service=TransferService(balance, builder, transaction),
+                trustline_service=TrustlineService(balance, builder, transaction),
             )
             if network.name == "testnet":
                 services.testnet_service = TestnetService(adapter)
