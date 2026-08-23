@@ -62,6 +62,7 @@ class TransactionBuilderService:
         base_fee_stroops: int,
         offer_id: int = 0,
         action: str = "create",
+        trustline_asset: Asset | None = None,
     ) -> PreparedTransaction:
         amount = _amount_text(intent.amount)
         price = _amount_text(intent.price)
@@ -76,6 +77,7 @@ class TransactionBuilderService:
                 price=price,
                 base_fee=base_fee_stroops,
                 offer_id=offer_id,
+                trustline_asset=trustline_asset,
             )
         else:
             selling = intent.pair.base
@@ -88,8 +90,10 @@ class TransactionBuilderService:
                 price=price,
                 base_fee=base_fee_stroops,
                 offer_id=offer_id,
+                trustline_asset=trustline_asset,
             )
-        fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
+        operation_count = 2 if trustline_asset is not None else 1
+        fee_xlm = Decimal(base_fee_stroops * operation_count) / STROOPS_PER_XLM
         review = OfferReview(
             wallet_name=wallet_name,
             source=wallet.address(),
@@ -103,6 +107,7 @@ class TransactionBuilderService:
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
             offer_id=str(offer_id) if offer_id else None,
+            trustline_asset=trustline_asset.display if trustline_asset else None,
         )
         return PreparedTransaction(envelope=envelope, review=review)
 
