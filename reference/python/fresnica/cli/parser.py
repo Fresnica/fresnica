@@ -28,6 +28,10 @@ WALLET_HELP = """Wallet commands:
     import-mnemonic NAME         Import a BIP39 mnemonic
     import-watch NAME G...       Add a watch-only account
 
+  Backup / restore
+    backup NAME PATH             Export an encrypted portable wallet backup
+    restore PATH                 Restore an encrypted wallet backup
+
   Testnet
     testnet-fund [--wallet NAME] Fund a testnet wallet with Friendbot
 
@@ -129,6 +133,28 @@ def build_parser() -> argparse.ArgumentParser:
         description="Fund a testnet wallet with Friendbot",
     )
     fund.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+
+    backup = wallet_sub.add_parser(
+        "backup",
+        description="Write a portable backup containing only encrypted signing material",
+    )
+    backup.add_argument("name")
+    backup.add_argument("path")
+    backup.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing backup file",
+    )
+
+    restore = wallet_sub.add_parser(
+        "restore",
+        description="Restore a wallet from a Fresnica encrypted backup",
+    )
+    restore.add_argument("path")
+    restore.add_argument(
+        "--name",
+        help="Restore under a different local wallet name",
+    )
 
     dex = sub.add_parser("dex", help="Read and trade on the Stellar DEX")
     dex_sub = dex.add_subparsers(dest="dex_command", required=True)
