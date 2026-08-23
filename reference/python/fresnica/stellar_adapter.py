@@ -81,7 +81,7 @@ class StellarAdapter:
             return self.server.orderbook(
                 self.to_sdk_asset(selling),
                 self.to_sdk_asset(buying),
-            ).limit(20).call()
+            ).call()
         except SdkError as exc:
             raise NetworkError(
                 "Unable to load Stellar order book",
@@ -317,22 +317,22 @@ class StellarAdapter:
         buying: Asset,
         amount: str,
         price,
+        base_fee: int,
         offer_id: int = 0,
-        base_fee: int = 100,
-        timeout: int = 30,
         trustline_asset: Asset | None = None,
+        timeout: int = 30,
     ):
-        return self._build_manage_offer(
+        return self._build_offer_transaction(
             source=source,
             selling=selling,
             buying=buying,
             amount=amount,
             price=price,
-            offer_id=offer_id,
             base_fee=base_fee,
-            timeout=timeout,
-            trustline_asset=trustline_asset,
+            offer_id=offer_id,
             buy=False,
+            trustline_asset=trustline_asset,
+            timeout=timeout,
         )
 
     def build_manage_buy_offer(
@@ -340,38 +340,38 @@ class StellarAdapter:
         source: str,
         selling: Asset,
         buying: Asset,
-        amount: str,
+        buy_amount: str,
         price,
+        base_fee: int,
         offer_id: int = 0,
-        base_fee: int = 100,
-        timeout: int = 30,
         trustline_asset: Asset | None = None,
+        timeout: int = 30,
     ):
-        return self._build_manage_offer(
+        return self._build_offer_transaction(
             source=source,
             selling=selling,
             buying=buying,
-            amount=amount,
+            amount=buy_amount,
             price=price,
-            offer_id=offer_id,
             base_fee=base_fee,
-            timeout=timeout,
-            trustline_asset=trustline_asset,
+            offer_id=offer_id,
             buy=True,
+            trustline_asset=trustline_asset,
+            timeout=timeout,
         )
 
-    def _build_manage_offer(
+    def _build_offer_transaction(
         self,
         source: str,
         selling: Asset,
         buying: Asset,
         amount: str,
         price,
-        offer_id: int,
         base_fee: int,
-        timeout: int,
-        trustline_asset: Asset | None,
+        offer_id: int,
         buy: bool,
+        trustline_asset: Asset | None,
+        timeout: int,
     ):
         try:
             source_account = self.server.load_account(source)
@@ -381,23 +381,20 @@ class StellarAdapter:
                 base_fee=base_fee,
             )
             if trustline_asset is not None:
-                builder = builder.append_change_trust_op(asset=self.to_sdk_asset(trustline_asset))
+                builder = builder.append_change_trust_op(
+                    asset=self.to_sdk_asset(trustline_asset)
+                )
+            kwargs = {
+                "selling": self.to_sdk_asset(selling),
+                "buying": self.to_sdk_asset(buying),
+                "amount": amount,
+                "price": self.to_sdk_price(price),
+                "offer_id": offer_id,
+            }
             if buy:
-                builder = builder.append_manage_buy_offer_op(
-                    selling=self.to_sdk_asset(selling),
-                    buying=self.to_sdk_asset(buying),
-                    amount=amount,
-                    price=self.to_sdk_price(price),
-                    offer_id=offer_id,
-                )
+                builder = builder.append_manage_buy_offer_op(**kwargs)
             else:
-                builder = builder.append_manage_sell_offer_op(
-                    selling=self.to_sdk_asset(selling),
-                    buying=self.to_sdk_asset(buying),
-                    amount=amount,
-                    price=self.to_sdk_price(price),
-                    offer_id=offer_id,
-                )
+                builder = builder.append_manage_sell_offer_op(**kwargs)
             return builder.set_timeout(timeout).build()
         except SdkError as exc:
             raise TransactionError(
@@ -405,55 +402,45 @@ class StellarAdapter:
                 details=_sdk_error_details(exc),
             ) from exc
 
-    @staticmethod
-    def to_sdk_price(value):
-        if isinstance(value, PriceRatio):
-            return Price(value.n, value.d)
-        return value
-
-    @staticmethod
-    def to_sdk_asset(asset: Asset):
-        if asset.is_native:
-            return StellarAsset.native()
-        if asset.is_liquidity_pool:
-            raise ValueError("Liquidity pool shares cannot be used as a direct Stellar asset")
-        return StellarAsset(asset.code, asset.issuer)
-
-    def submit_transaction(self, envelope) -> dict:
+    def submit_transaction(self, transaction) -> dict:
         try:
-            return self.server.submit_transaction(envelope)
+            return self.server.submit_transaction(transaction)
         except AccountRequiresMemoError as exc:
-            raise MemoRequiredError(str(exc.account_id)) from exc
+            raise MemoRequiredError(exc.account_id) from exc
         except SdkError as exc:
             raise TransactionError(
                 "Stellar transaction submission failed",
                 details=_sdk_error_details(exc),
             ) from exc
 
-    def get_transaction(self, tx_hash: str) -> dict:
-        try:
-            return self.server.transactions().transaction(tx_hash).call()
-        except NotFoundError:
-            raise
-        except SdkError as exc:
-            raise NetworkError(
-                f"Unable to load Stellar transaction {tx_hash}",
-                details=_sdk_error_details(exc),
-            ) from exc
+    @staticmethod
+    def to_sdk_asset(asset: Asset):
+        if asset.is_native:
+            return StellarAsset.native()
+        if asset.is_liquidity_pool:
+            raise ValueError("Liquidity pool shares are not payment assets")
+        return StellarAsset(asset.code, asset.issuer)
+
+    @staticmethod
+    def to_sdk_price(price):
+        if isinstance(price, PriceRatio):
+            return Price(price.n, price.d)
+        return price
 
 
-def _sdk_error_details(exc: Exception) -> str:
-    response = getattr(exc, "response", None)
-    if response is not None:
-        payload = getattr(response, "json", None)
-        if callable(payload):
-            try:
-                body = payload()
-            except Exception:
-                body = None
-            if body:
-                return str(body)
-        text = getattr(response, "text", None)
-        if text:
-            return str(text)
-    return str(exc)
+def _sdk_error_details(exc: SdkError) -> str:
+    parts = [type(exc).__name__]
+    status = getattr(exc, "status", None)
+    title = getattr(exc, "title", None)
+    detail = getattr(exc, "detail", None)
+    extras = getattr(exc, "extras", None)
+
+    if status is not None:
+        parts.append(f"status={status}")
+    if title:
+        parts.append(str(title))
+    if detail:
+        parts.append(str(detail))
+    if isinstance(extras, dict) and extras.get("result_codes") is not None:
+        parts.append(f"result_codes={extras['result_codes']}")
+    return "; ".join(parts)
