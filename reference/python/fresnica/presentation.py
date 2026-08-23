@@ -57,6 +57,20 @@ def asset_label(asset: Asset, include_source: bool = False) -> str:
     return asset.code
 
 
+def offer_outcome_summary(outcome) -> str | None:
+    if outcome is None:
+        return None
+    parts = []
+    if outcome.claimed_offer_count:
+        noun = "offer" if outcome.claimed_offer_count == 1 else "offers"
+        parts.append(f"matched {outcome.claimed_offer_count} counterparty {noun}")
+    if outcome.offer_id:
+        parts.append(f"open offer #{outcome.offer_id}")
+    elif outcome.effect == "deleted":
+        parts.append("no resting offer" if outcome.claimed_offer_count else "offer removed")
+    return " · ".join(parts) or None
+
+
 def format_timestamp(value: str | None, compact: bool = True) -> str:
     if not value:
         return ""

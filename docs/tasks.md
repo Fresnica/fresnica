@@ -47,9 +47,9 @@
 - [x] Textual application entry
 - [x] Wallet/balance dashboard
 - [x] Background balance refresh
-- [ ] Wallet switcher
-- [ ] History screen
-- [ ] Send/unlock/review modal flow
+- [x] Wallet switcher
+- [x] History screen
+- [x] Send/unlock/review modal flow
 - [x] Pair-scoped SDEX screen
 
 ## Transaction
@@ -60,7 +60,7 @@
 - [x] Sign flow
 - [x] Submit flow
 - [x] User-facing transaction result
-- [ ] Result/history refresh after submit
+- [x] Result/history refresh after submit
 - [ ] Memo-required account handling
 
 ## Quality

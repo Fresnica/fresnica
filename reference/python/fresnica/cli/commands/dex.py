@@ -7,7 +7,9 @@ from ...errors import UserCancelled, WatchOnlyError
 from ...models import Asset, MarketPair, OfferIntent
 from ...network import get_network
 from ...offer_service import offer_view_for_pair
+from ...presentation import offer_outcome_summary
 from ..context import require_wallet_network
+from ._post_submit import refresh_after_submit
 
 
 def execute_dex(
@@ -100,6 +102,11 @@ def _execute_offer_write(
     if record.watch_only:
         raise WatchOnlyError(f'Wallet "{record.name}" is watch-only')
 
+    services = runtime.services_for()
+    pending = getattr(services, "pending_transaction_service", None)
+    if pending is not None:
+        pending.reconcile_and_ensure_clear(record.address)
+
     current = manager.current()
     if current is not None and current.record.name == record.name:
         session = current
@@ -108,7 +115,6 @@ def _execute_offer_write(
         session = manager.unlock(record.name, password)
 
     try:
-        services = runtime.services_for()
         offer_service = services.offer_service
 
         if args.dex_command in ("buy", "sell"):
@@ -161,6 +167,10 @@ def _execute_offer_write(
         offer_service.sign(session.wallet, prepared)
         result = offer_service.submit(prepared)
         renderer.render_result(result, get_network(runtime.network))
+        outcome = offer_outcome_summary(getattr(result, "offer_outcome", None))
+        if outcome:
+            renderer.success(f"Offer result: {outcome}")
+        refresh_after_submit(services, session.wallet, include_dex=True)
         return result
     finally:
         manager.lock()

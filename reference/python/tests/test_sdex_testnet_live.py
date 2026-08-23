@@ -125,13 +125,21 @@ def _ensure_trustline_with_offer(
         allow_trustline=True,
     )
     assert prepared.review.trustline_asset is not None
-    _submit_offer(offer_service, wallet, prepared)
+    created = _submit_offer(offer_service, wallet, prepared)
+    assert created.offer_outcome is not None
+    assert created.offer_outcome.effect == "created"
+    assert created.offer_outcome.claimed_offer_count == 0
+    assert created.offer_outcome.offer_id
     offer, _ = _wait_for_offer_view(dex, wallet, pair, "sell")
-    _submit_offer(
+    assert created.offer_outcome.offer_id == offer.offer_id
+    cancelled = _submit_offer(
         offer_service,
         wallet,
         offer_service.prepare_cancel("probe", wallet, offer),
     )
+    assert cancelled.offer_outcome is not None
+    assert cancelled.offer_outcome.effect == "deleted"
+    assert cancelled.offer_outcome.claimed_offer_count == 0
 
 
 def _wait_for_fill_segment(dex, wallet, pair, attempts=12):
@@ -161,7 +169,7 @@ def _wait_for_fill_segment(dex, wallet, pair, attempts=12):
 
 def test_sdex_write_and_account_fill_probe_on_testnet():
     adapter, offer_service, dex = _services()
-    friendbot = FriendbotService(TESTNET.friendbot_url)
+    friendbot = FriendbotService()
 
     issuer = Wallet.from_secret(Keypair.random().secret)
     maker = Wallet.from_secret(Keypair.random().secret)
@@ -191,8 +199,13 @@ def test_sdex_write_and_account_fill_probe_on_testnet():
         ),
     )
     assert maker_sell.review.side == "sell"
-    _submit_offer(offer_service, maker, maker_sell)
+    maker_created = _submit_offer(offer_service, maker, maker_sell)
+    assert maker_created.offer_outcome is not None
+    assert maker_created.offer_outcome.effect == "created"
+    assert maker_created.offer_outcome.claimed_offer_count == 0
+    assert maker_created.offer_outcome.offer_id
     maker_offer, maker_view = _wait_for_offer_view(dex, maker, pair, "sell", amount="10")
+    assert maker_created.offer_outcome.offer_id == maker_offer.offer_id
     assert maker_view.price == Decimal("0.5000000")
 
     # Two separate ManageBuyOffer transactions cross the same maker offer. This
@@ -209,7 +222,11 @@ def test_sdex_write_and_account_fill_probe_on_testnet():
             ),
         )
         assert prepared.review.side == "buy"
-        _submit_offer(offer_service, taker, prepared)
+        crossed = _submit_offer(offer_service, taker, prepared)
+        assert crossed.offer_outcome is not None
+        assert crossed.offer_outcome.effect == "deleted"
+        assert crossed.offer_outcome.claimed_offer_count == 1
+        assert crossed.offer_outcome.offer_id is None
 
     maker_offer, maker_view = _wait_for_offer_view(dex, maker, pair, "sell", amount="3")
     assert maker_view.price == Decimal("0.5000000")
@@ -217,11 +234,13 @@ def test_sdex_write_and_account_fill_probe_on_testnet():
     assert segment.user_offer_id == maker_offer.offer_id
 
     # Remove the partially-filled ManageSell offer before probing a resting BUY.
-    _submit_offer(
+    maker_cancelled = _submit_offer(
         offer_service,
         maker,
         offer_service.prepare_cancel("maker", maker, maker_offer),
     )
+    assert maker_cancelled.offer_outcome is not None
+    assert maker_cancelled.offer_outcome.effect == "deleted"
 
     # ManageBuyOffer: use a non-crossing price so the BUY remains on the ledger,
     # then update it through the same pair-relative BUY intent and cancel it.
@@ -235,8 +254,13 @@ def test_sdex_write_and_account_fill_probe_on_testnet():
             price=Decimal("0.1"),
         ),
     )
-    _submit_offer(offer_service, taker, buy_prepared)
+    buy_created = _submit_offer(offer_service, taker, buy_prepared)
+    assert buy_created.offer_outcome is not None
+    assert buy_created.offer_outcome.effect == "created"
+    assert buy_created.offer_outcome.claimed_offer_count == 0
+    assert buy_created.offer_outcome.offer_id
     buy_offer, buy_view = _wait_for_offer_view(dex, taker, pair, "buy", amount="2")
+    assert buy_created.offer_outcome.offer_id == buy_offer.offer_id
     assert buy_view.price == Decimal("0.1000000")
 
     updated = offer_service.prepare_update(
@@ -251,13 +275,18 @@ def test_sdex_write_and_account_fill_probe_on_testnet():
         ),
     )
     assert updated.review.side == "buy"
-    _submit_offer(offer_service, taker, updated)
+    buy_updated = _submit_offer(offer_service, taker, updated)
+    assert buy_updated.offer_outcome is not None
+    assert buy_updated.offer_outcome.effect == "updated"
+    assert buy_updated.offer_outcome.offer_id == buy_offer.offer_id
     buy_offer, buy_view = _wait_for_offer_view(dex, taker, pair, "buy", amount="3")
     assert buy_view.price == Decimal("0.1100000")
 
-    _submit_offer(
+    buy_cancelled = _submit_offer(
         offer_service,
         taker,
         offer_service.prepare_cancel("taker", taker, buy_offer),
     )
+    assert buy_cancelled.offer_outcome is not None
+    assert buy_cancelled.offer_outcome.effect == "deleted"
     assert dex.get_open_offers(taker, limit=50, refresh=True) == []

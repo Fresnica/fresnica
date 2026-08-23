@@ -62,6 +62,7 @@ class Asset:
 
 
 OrderSide = Literal["buy", "sell"]
+OfferEffect = Literal["created", "updated", "deleted"]
 
 
 @dataclass(frozen=True)
@@ -184,12 +185,22 @@ class LiquidityPositionView:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class OfferSubmissionOutcome:
+    """Immediate ManageOffer result decoded from transaction result XDR."""
+
+    effect: OfferEffect
+    claimed_offer_count: int
+    offer_id: str | None = None
+
+
 @dataclass
 class TransactionResult:
     hash: str
     ledger: int | None
     successful: bool
     raw: dict = field(default_factory=dict)
+    offer_outcome: OfferSubmissionOutcome | None = None
 
 
 @dataclass

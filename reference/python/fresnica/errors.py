@@ -45,6 +45,27 @@ class TransactionError(FresnicaError):
     pass
 
 
+class TransactionSubmissionUncertain(TransactionError):
+    """Submission may have reached Stellar but the client did not get a result."""
+
+    def __init__(self, tx_hash: str, details: str | None = None):
+        self.tx_hash = tx_hash
+        super().__init__(
+            f"Transaction submission status is unknown: {tx_hash}",
+            details=details,
+        )
+
+
+class TransactionPendingError(TransactionError):
+    """A prior uncertain transaction still blocks safe same-account writes."""
+
+    def __init__(self, tx_hash: str):
+        self.tx_hash = tx_hash
+        super().__init__(
+            f"A previous transaction is still pending confirmation: {tx_hash}"
+        )
+
+
 class InvalidAmountError(TransactionError):
     pass
 

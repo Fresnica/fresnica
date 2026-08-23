@@ -5,6 +5,7 @@ from getpass import getpass
 from ...errors import UserCancelled, WatchOnlyError
 from ...network import get_network
 from ..context import require_wallet_network
+from ._post_submit import refresh_after_submit
 
 
 def execute_send(
@@ -23,6 +24,11 @@ def execute_send(
     if record.watch_only:
         raise WatchOnlyError(f'Wallet "{record.name}" is watch-only')
 
+    services = runtime.services_for()
+    pending = getattr(services, "pending_transaction_service", None)
+    if pending is not None:
+        pending.reconcile_and_ensure_clear(record.address)
+
     current = manager.current()
     if current is not None and current.record.name == record.name:
         session = current
@@ -31,7 +37,6 @@ def execute_send(
         session = manager.unlock(record.name, password)
 
     try:
-        services = runtime.services_for()
         prepared = services.transfer_service.prepare(
             wallet_name=record.name,
             wallet=session.wallet,
@@ -51,6 +56,7 @@ def execute_send(
         services.transfer_service.sign(session.wallet, prepared)
         result = services.transfer_service.submit(prepared)
         renderer.render_result(result, get_network(runtime.network))
+        refresh_after_submit(services, session.wallet)
         return result
     finally:
         manager.lock()
