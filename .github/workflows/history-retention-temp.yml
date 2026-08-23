@@ -17,6 +17,8 @@ jobs:
           ref: codex/history-retention-model
       - name: Apply history retention model
         run: python tools/history_retention_patch.py
+      - name: Adjust History TUI test
+        run: python tools/history_retention_test_fix.py
       - name: Diff check
         run: git diff --check
       - name: Install uv
