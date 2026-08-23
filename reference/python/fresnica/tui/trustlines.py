@@ -14,6 +14,7 @@ from textual.widgets import Button, DataTable, Footer, Input, Label, Static
 from ..errors import FresnicaError
 from ..models import Asset
 from ..presentation import format_amount
+from .asset_picker import AssetPickerDialog
 
 
 TrustlineActionKind = Literal["add", "limit", "remove"]
@@ -54,19 +55,23 @@ class TrustlineFormDialog(ModalScreen[TrustlineAction | None]):
         title = "Add Stellar trustline" if self.kind == "add" else "Change trustline limit"
         with Vertical(id="dialog"):
             yield Label(title)
-            if self.kind == "add":
+            if self.asset:
+                yield Static(self.asset, id="asset-label")
+            elif self.kind == "add":
+                # Kept only as a compatibility/manual fallback for direct callers.
                 yield Input(placeholder="Asset: CODE:GISSUER", id="asset")
-                yield Input(
-                    value=self.limit,
-                    placeholder="Limit (blank = Stellar maximum)",
-                    id="limit",
-                )
-            else:
-                yield Static(self.asset or "", id="asset-label")
-                yield Input(value=self.limit, placeholder="New limit", id="limit")
+            yield Input(
+                value=self.limit,
+                placeholder=(
+                    "Limit (blank = Stellar maximum)"
+                    if self.kind == "add"
+                    else "New limit"
+                ),
+                id="limit",
+            )
             yield Static("", id="form-error")
             with Horizontal(id="actions"):
-                yield Button("Cancel", id="cancel")
+                yield Button("Cancel [Esc]", id="cancel")
                 yield Button("Review", id="review", variant="primary")
 
     def action_cancel(self) -> None:
@@ -80,11 +85,7 @@ class TrustlineFormDialog(ModalScreen[TrustlineAction | None]):
             return
 
         error = self.query_one("#form-error", Static)
-        asset_text = (
-            self.query_one("#asset", Input).value.strip()
-            if self.kind == "add"
-            else (self.asset or "")
-        )
+        asset_text = self.asset or self.query_one("#asset", Input).value.strip()
         try:
             asset = Asset.parse(asset_text)
         except (FresnicaError, ValueError) as exc:
@@ -147,8 +148,10 @@ class TrustlineScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         table = self.query_one("#trustlines", DataTable)
-        table.add_columns("Asset", "Balance", "Limit", "Buying liabilities", "Selling liabilities")
+        if not table.columns:
+            table.add_columns("Asset", "Balance", "Limit", "Buying liabilities", "Selling liabilities")
         table.cursor_type = "row"
+        self._apply_cached_trustlines()
         self.refresh_trustlines()
 
     def action_close(self) -> None:
@@ -159,7 +162,19 @@ class TrustlineScreen(ModalScreen[None]):
 
     def action_add(self) -> None:
         self.app.push_screen(
-            TrustlineFormDialog("add"),
+            AssetPickerDialog(
+                self.runtime,
+                allow_native=False,
+                title="Choose asset for trustline",
+            ),
+            self._on_add_asset,
+        )
+
+    def _on_add_asset(self, asset: Asset | None) -> None:
+        if asset is None:
+            return
+        self.app.push_screen(
+            TrustlineFormDialog("add", asset=_asset_identity(asset)),
             self._on_form_action,
         )
 
@@ -195,6 +210,24 @@ class TrustlineScreen(ModalScreen[None]):
         index = max(0, min(table.cursor_row, len(self._visible_lines) - 1))
         return self._visible_lines[index]
 
+    def _apply_cached_trustlines(self) -> None:
+        try:
+            session = self.runtime.wallet_manager.view()
+            service = self.runtime.services_for(session.record.network).balance_service
+            getter = getattr(service, "get_cached_portfolio_views", None)
+            if getter is None:
+                return
+            balances, _ = getter(session.wallet)
+            lines = [
+                item.raw
+                for item in balances
+                if not item.asset.is_native and not item.asset.is_liquidity_pool
+            ]
+        except (FresnicaError, ValueError):
+            return
+        if lines:
+            self._apply_trustlines(lines, None, cached=True)
+
     def refresh_trustlines(self) -> None:
         self.set_status("Refreshing trustlines...")
         self._refresh_trustlines()
@@ -211,11 +244,11 @@ class TrustlineScreen(ModalScreen[None]):
                 if raw.get("asset_type") not in {"native", "liquidity_pool_shares"}
             ]
             lines.sort(key=lambda raw: (str(raw.get("asset_code", "")), str(raw.get("asset_issuer", ""))))
-            self.app.call_from_thread(self._apply_trustlines, lines, None)
+            self.app.call_from_thread(self._apply_trustlines, lines, None, False)
         except (FresnicaError, ValueError) as exc:
-            self.app.call_from_thread(self._apply_trustlines, [], exc)
+            self.app.call_from_thread(self._apply_trustlines, [], exc, False)
 
-    def _apply_trustlines(self, lines, error) -> None:
+    def _apply_trustlines(self, lines, error, cached: bool = False) -> None:
         table = self.query_one("#trustlines", DataTable)
         table.clear()
         self._visible_lines = list(lines)
@@ -234,7 +267,10 @@ class TrustlineScreen(ModalScreen[None]):
                 text += f" · DEV {details}"
             self.set_status(text)
             return
-        self.set_status(f"{len(lines)} trustlines · A add · E set limit · X remove")
+        suffix = " · cached; refreshing..." if cached else ""
+        self.set_status(
+            f"{len(lines)} trustlines · A add · E set limit · X remove{suffix}"
+        )
 
     def set_status(self, message: str) -> None:
         if self.is_mounted:
