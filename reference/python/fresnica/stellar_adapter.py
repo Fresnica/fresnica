@@ -88,6 +88,19 @@ class StellarAdapter:
                 details=_sdk_error_details(exc),
             ) from exc
 
+    def stream_orderbook(self, selling: Asset, buying: Asset):
+        """Yield Horizon order-book snapshots through the Stellar SDK SSE client."""
+        try:
+            yield from self.server.orderbook(
+                self.to_sdk_asset(selling),
+                self.to_sdk_asset(buying),
+            ).limit(20).stream()
+        except SdkError as exc:
+            raise NetworkError(
+                "Stellar order-book realtime stream disconnected",
+                details=_sdk_error_details(exc),
+            ) from exc
+
     def get_offers(self, address: str, limit: int = 20) -> dict:
         try:
             return (
@@ -127,6 +140,27 @@ class StellarAdapter:
         except SdkError as exc:
             raise NetworkError(
                 "Unable to load Stellar trades",
+                details=_sdk_error_details(exc),
+            ) from exc
+
+    def stream_trades(
+        self,
+        base: Asset,
+        counter: Asset,
+        cursor: str | None = None,
+    ):
+        """Yield pair trades through the Stellar SDK SSE client."""
+        try:
+            builder = self.server.trades().for_asset_pair(
+                self.to_sdk_asset(base),
+                self.to_sdk_asset(counter),
+            )
+            if cursor is not None:
+                builder = builder.cursor(cursor)
+            yield from builder.stream()
+        except SdkError as exc:
+            raise NetworkError(
+                "Stellar trade realtime stream disconnected",
                 details=_sdk_error_details(exc),
             ) from exc
 

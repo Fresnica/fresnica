@@ -1,9 +1,10 @@
 """Pair-scoped SDEX presentation for the state-driven Fresnica TUI."""
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Literal
 
+import requests
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -12,9 +13,11 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Label, Static
 
 from ..errors import FresnicaError
+from ..market_discovery import MarketDiscoveryService
 from ..models import Asset, MarketPair, OpenOffer
 from ..offer_service import offer_view_for_pair
-from ..presentation import format_amount, format_timestamp
+from ..presentation import asset_label, format_amount, format_timestamp
+from ..sdex_presentation import format_market_price, format_price_ratio, offer_id_label
 from ..trade_segments import account_trade_segment_for_pair
 
 
@@ -31,12 +34,24 @@ class DexOfferAction:
     offer: OpenOffer | None = None
 
 
+@dataclass(frozen=True)
+class _MarketChoice:
+    pair: MarketPair
+    source: str
+
+
 class MarketPairDialog(ModalScreen[MarketPair | None]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("f", "favorite", "Star / Unstar"),
+    ]
 
     CSS = """
     MarketPairDialog { align: center middle; }
-    MarketPairDialog > #dialog { width: 88; height: auto; padding: 1 2; border: round $accent; background: $surface; }
+    MarketPairDialog > #dialog { width: 110; height: auto; max-height: 92%; padding: 1 2; border: round $accent; background: $surface; }
+    MarketPairDialog #market-status { height: 2; color: $text-muted; margin: 1 0; }
+    MarketPairDialog #market-list { height: 12; min-height: 5; }
+    MarketPairDialog #custom-title { margin-top: 1; text-style: bold; }
     MarketPairDialog Input { margin-top: 1; }
     MarketPairDialog #market-help { color: $text-muted; margin-top: 1; }
     MarketPairDialog #form-error { color: $error; margin-top: 1; }
@@ -44,9 +59,21 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
     MarketPairDialog Button { margin-left: 1; }
     """
 
+    def __init__(self):
+        super().__init__()
+        self._scope: tuple[str, str] | None = None
+        self._choices: list[_MarketChoice] = []
+        self._popular: list[MarketPair] = []
+
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label("Open Stellar DEX market")
+            yield Static(
+                "Starred and recent markets are local to this wallet. Held assets and public volume rankings provide suggestions.",
+                id="market-status",
+            )
+            yield DataTable(id="market-list")
+            yield Label("Custom pair", id="custom-title")
             yield Input(value="XLM", placeholder="Base asset: XLM or CODE:GISSUER...", id="base")
             yield Input(placeholder="Counter asset: XLM or CODE:GISSUER...", id="counter")
             yield Static(
@@ -56,10 +83,41 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
             yield Static("", id="form-error")
             with Horizontal(id="actions"):
                 yield Button("Cancel", id="cancel")
-                yield Button("Open market", id="open", variant="primary")
+                yield Button("Open custom pair", id="open", variant="primary")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#market-list", DataTable)
+        table.add_columns("★", "Pair", "Base", "Counter", "Source")
+        table.cursor_type = "row"
+        try:
+            session = self.app.runtime.wallet_manager.view()
+            self._scope = (session.record.network, session.wallet.address())
+        except (FresnicaError, ValueError):
+            self._scope = None
+        self._render_choices()
+        self._load_popular()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_favorite(self) -> None:
+        choice = self._selected_choice()
+        store = getattr(self.app.runtime, "market_preferences", None)
+        if choice is None or self._scope is None or store is None:
+            return
+        network, address = self._scope
+        preferences = store.toggle_favorite(network, address, choice.pair)
+        starred = choice.pair in preferences.favorites
+        self._render_choices(
+            f"{'Starred' if starred else 'Unstarred'} {_pair_label(choice.pair)}"
+        )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id != "market-list":
+            return
+        choice = self._selected_choice()
+        if choice is not None:
+            self._open_pair(choice.pair)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
@@ -77,7 +135,111 @@ class MarketPairDialog(ModalScreen[MarketPair | None]):
         if base == counter:
             error.update("Base and counter assets must be different.")
             return
-        self.dismiss(MarketPair(base=base, counter=counter))
+        self._open_pair(MarketPair(base=base, counter=counter))
+
+    def _open_pair(self, pair: MarketPair) -> None:
+        store = getattr(self.app.runtime, "market_preferences", None)
+        if self._scope is not None and store is not None:
+            network, address = self._scope
+            store.touch(network, address, pair)
+        self.dismiss(pair)
+
+    @work(exclusive=True, thread=True, exit_on_error=False)
+    def _load_popular(self) -> None:
+        if self._scope is None:
+            return
+        network, _ = self._scope
+        try:
+            pairs = MarketDiscoveryService().popular_pairs(network, limit=10)
+            self.app.call_from_thread(self._apply_popular, pairs, None)
+        except (requests.RequestException, ValueError) as exc:
+            self.app.call_from_thread(self._apply_popular, [], exc)
+
+    def _apply_popular(self, pairs: list[MarketPair], error) -> None:
+        if not self.is_mounted:
+            return
+        if error is None:
+            self._popular = pairs
+            self._render_choices(
+                f"{len(self._choices)} markets · Enter open · F star · custom pair remains available below"
+            )
+        else:
+            self._render_choices(
+                "Popular ranking unavailable · starred, recent, held-asset and custom markets remain available"
+            )
+
+    def _render_choices(self, status: str | None = None) -> None:
+        choices: list[_MarketChoice] = []
+        favorites: tuple[MarketPair, ...] = ()
+        recents: tuple[MarketPair, ...] = ()
+        store = getattr(self.app.runtime, "market_preferences", None)
+        if self._scope is not None and store is not None:
+            network, address = self._scope
+            preferences = store.get(network, address)
+            favorites = preferences.favorites
+            recents = preferences.recents
+
+        def add(pair: MarketPair, source: str) -> None:
+            if pair.base == pair.counter or any(item.pair == pair for item in choices):
+                return
+            choices.append(_MarketChoice(pair, source))
+
+        for pair in favorites:
+            add(pair, "Starred")
+        for pair in recents:
+            add(pair, "Recent")
+        for pair in self._held_asset_suggestions():
+            add(pair, "Held asset")
+        for pair in self._popular:
+            add(pair, "Popular")
+
+        self._choices = choices
+        table = self.query_one("#market-list", DataTable)
+        table.clear()
+        favorite_set = set(favorites)
+        for choice in choices:
+            pair = choice.pair
+            table.add_row(
+                "★" if pair in favorite_set else "",
+                _pair_label(pair),
+                asset_label(pair.base, include_source=True),
+                asset_label(pair.counter, include_source=True),
+                choice.source,
+            )
+        if status is not None:
+            self.query_one("#market-status", Static).update(status)
+        elif choices:
+            self.query_one("#market-status", Static).update(
+                f"{len(choices)} markets · Enter open · F star · public popular markets loading"
+            )
+        else:
+            self.query_one("#market-status", Static).update(
+                "No saved market yet · use the custom pair below; public popular markets are loading"
+            )
+
+    def _held_asset_suggestions(self) -> list[MarketPair]:
+        try:
+            session = self.app.runtime.wallet_manager.view()
+            service = self.app.runtime.services_for(session.record.network).balance_service
+            getter = getattr(service, "get_cached_portfolio_views", None)
+            if getter is None:
+                return []
+            balances, _ = getter(session.wallet)
+        except (FresnicaError, ValueError):
+            return []
+        result = []
+        for balance in balances:
+            asset = balance.asset
+            if asset.is_native or asset.is_liquidity_pool or balance.balance <= 0:
+                continue
+            result.append(MarketPair(asset, Asset("XLM")))
+        return result
+
+    def _selected_choice(self) -> _MarketChoice | None:
+        if not self._choices:
+            return None
+        row = self.query_one("#market-list", DataTable).cursor_row
+        return self._choices[max(0, min(row, len(self._choices) - 1))]
 
 
 class OfferFormDialog(ModalScreen[DexOfferAction | None]):
@@ -105,7 +267,7 @@ class OfferFormDialog(ModalScreen[DexOfferAction | None]):
         self.offer = offer
         view = offer_view_for_pair(offer, pair) if offer is not None else None
         self.initial_amount = format_amount(view.amount) if view is not None else ""
-        self.initial_price = format_amount(view.price) if view is not None else ""
+        self.initial_price = format_market_price(view.price) if view is not None else ""
 
     def compose(self) -> ComposeResult:
         action = "Update" if self.offer is not None else "Create"
@@ -216,6 +378,7 @@ class DexScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close", "Back"),
         Binding("r", "refresh", "Refresh"),
+        Binding("f", "favorite_market", "Star / Unstar"),
         Binding("b", "buy", "Buy"),
         Binding("s", "sell", "Sell"),
         Binding("e", "edit", "Edit offer"),
@@ -228,9 +391,13 @@ class DexScreen(ModalScreen[None]):
     #dex-assets { height: auto; color: $text-muted; }
     #dex-status { height: 1; color: $text-muted; margin-bottom: 1; }
     .dex-section { height: 1; text-style: bold; }
-    #dex-book { height: 2fr; min-height: 7; }
-    #dex-offers { height: 2fr; min-height: 7; }
-    #dex-fills { height: 2fr; min-height: 7; }
+    #book-row { height: 2fr; min-height: 8; }
+    .book-pane { width: 1fr; height: 1fr; padding: 0 1; }
+    #dex-asks, #dex-bids { height: 1fr; }
+    #dex-trades { height: 1fr; min-height: 6; }
+    #account-row { height: 2fr; min-height: 8; }
+    #offers-pane, #fills-pane { width: 1fr; height: 1fr; padding: 0 1; }
+    #dex-offers, #dex-fills { height: 1fr; }
     """
 
     def __init__(self, runtime, pair: MarketPair, on_offer_action):
@@ -239,42 +406,83 @@ class DexScreen(ModalScreen[None]):
         self.pair = pair
         self.on_offer_action = on_offer_action
         self._visible_offers: list[OpenOffer] = []
+        self._recent_trades: list[dict] = []
+        self._orderbook: dict = {}
+        self._stream_revision = 0
+        self._stream_active = False
+        self._streams_started = False
+        self._orderbook_live = False
+        self._trades_live = False
+        self._counts = (0, 0, 0, 0, 0)
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            f"Stellar DEX · {_asset_code(self.pair.base)}/{_asset_code(self.pair.counter)}",
-            id="dex-title",
-        )
+        yield Static("", id="dex-title")
         yield Static(
             f"BASE  {_asset_identity(self.pair.base)}\nCOUNTER  {_asset_identity(self.pair.counter)}",
             id="dex-assets",
         )
-        yield Static("Loading market...", id="dex-status")
-        yield Label("Order book", classes="dex-section")
-        yield DataTable(id="dex-book")
-        yield Label("Your open offers", classes="dex-section")
-        yield DataTable(id="dex-offers")
-        yield Label("Your fills", classes="dex-section")
-        yield DataTable(id="dex-fills")
+        yield Static("Loading market snapshot...", id="dex-status")
+        with Horizontal(id="book-row"):
+            with Vertical(classes="book-pane"):
+                yield Label("ASK · SELL", classes="dex-section")
+                yield DataTable(id="dex-asks")
+            with Vertical(classes="book-pane"):
+                yield Label("BID · BUY", classes="dex-section")
+                yield DataTable(id="dex-bids")
+        yield Label("Recent market trades · realtime", classes="dex-section")
+        yield DataTable(id="dex-trades")
+        with Horizontal(id="account-row"):
+            with Vertical(id="offers-pane"):
+                yield Label("Your open offers", classes="dex-section")
+                yield DataTable(id="dex-offers")
+            with Vertical(id="fills-pane"):
+                yield Label("Your fills", classes="dex-section")
+                yield DataTable(id="dex-fills")
         yield Footer()
 
     def on_mount(self) -> None:
-        book = self.query_one("#dex-book", DataTable)
-        book.add_columns("Side", "Price", "Amount")
-        book.cursor_type = "row"
+        for table_id in ("#dex-asks", "#dex-bids"):
+            table = self.query_one(table_id, DataTable)
+            table.add_columns("Price", "Amount", "Total")
+            table.cursor_type = "row"
+        trades = self.query_one("#dex-trades", DataTable)
+        trades.add_columns("Time", "Side", "Amount", "Price", "Total")
+        trades.cursor_type = "row"
         offers = self.query_one("#dex-offers", DataTable)
         offers.add_columns("Side", "Amount", "Price", "Total", "Offer ID")
         offers.cursor_type = "row"
         fills = self.query_one("#dex-fills", DataTable)
-        fills.add_columns("Time", "Side", "Amount", "Price", "Total", "Fills", "Offer ID")
+        fills.add_columns("Time", "Side", "Amount", "Price", "Total", "Fills", "Offer")
         fills.cursor_type = "row"
+        self._update_title()
         self.refresh_market()
+
+    def on_unmount(self) -> None:
+        self._stream_active = False
+        self._stream_revision += 1
 
     def action_close(self) -> None:
         self.dismiss(None)
 
     def action_refresh(self) -> None:
         self.refresh_market()
+
+    def action_favorite_market(self) -> None:
+        store = getattr(self.runtime, "market_preferences", None)
+        if store is None:
+            self.set_status("Market favorites are unavailable in this runtime.")
+            return
+        try:
+            session = self.runtime.wallet_manager.view()
+            preferences = store.toggle_favorite(
+                session.record.network,
+                session.wallet.address(),
+                self.pair,
+            )
+        except (FresnicaError, ValueError) as exc:
+            self.set_status(str(exc))
+            return
+        self._update_title(self.pair in preferences.favorites)
 
     def action_buy(self) -> None:
         self._open_offer_form("buy")
@@ -325,7 +533,7 @@ class DexScreen(ModalScreen[None]):
         return self._visible_offers[index]
 
     def refresh_market(self) -> None:
-        self.set_status("Refreshing order book, offers, and fills...")
+        self.set_status("Refreshing order book, recent trades, offers, and fills...")
         self._refresh_market()
 
     @work(exclusive=True, thread=True, exit_on_error=False)
@@ -334,6 +542,12 @@ class DexScreen(ModalScreen[None]):
             session = self.runtime.wallet_manager.view()
             services = self.runtime.services_for(session.record.network)
             orderbook = services.dex_service.get_orderbook(self.pair.base, self.pair.counter)
+            get_trades = getattr(services.dex_service, "get_trades", None)
+            recent_trades = (
+                get_trades(self.pair.base, self.pair.counter, limit=30, refresh=True)
+                if get_trades is not None
+                else []
+            )
             offers = services.dex_service.get_open_offers(
                 session.wallet,
                 limit=200,
@@ -360,18 +574,19 @@ class DexScreen(ModalScreen[None]):
                 orderbook,
                 offer_rows,
                 fills,
+                recent_trades,
                 None,
             )
         except (FresnicaError, ValueError) as exc:
-            self.app.call_from_thread(self._apply_market, {}, [], [], exc)
+            self.app.call_from_thread(self._apply_market, {}, [], [], [], exc)
 
-    def _apply_market(self, orderbook, offer_rows, fills, error) -> None:
-        book = self.query_one("#dex-book", DataTable)
-        book.clear()
-        for row in orderbook.get("asks", []):
-            book.add_row("ASK", str(row.get("price", "?")), str(row.get("amount", "?")))
-        for row in orderbook.get("bids", []):
-            book.add_row("BID", str(row.get("price", "?")), str(row.get("amount", "?")))
+    def _apply_market(self, orderbook, offer_rows, fills, recent_trades, error) -> None:
+        if not self.is_mounted:
+            return
+        self._orderbook = orderbook
+        self._recent_trades = list(recent_trades)
+        self._render_orderbook(orderbook)
+        self._render_recent_trades()
 
         offers = self.query_one("#dex-offers", DataTable)
         offers.clear()
@@ -380,7 +595,7 @@ class DexScreen(ModalScreen[None]):
             offers.add_row(
                 view.side.upper(),
                 format_amount(view.amount),
-                format_amount(view.price),
+                format_market_price(view.price),
                 format_amount(view.total),
                 offer.offer_id,
             )
@@ -388,17 +603,23 @@ class DexScreen(ModalScreen[None]):
         fill_table = self.query_one("#dex-fills", DataTable)
         fill_table.clear()
         for item in fills:
-            price = Decimal(item.price_r.n) / Decimal(item.price_r.d)
             fill_table.add_row(
-                format_timestamp(item.last_time or item.first_time),
+                self._time(item.last_time or item.first_time),
                 item.side.upper(),
                 format_amount(item.base_amount),
-                format_amount(price),
+                format_price_ratio(item.price_r),
                 format_amount(item.counter_amount),
                 str(item.trade_count),
-                item.user_offer_id or "-",
+                offer_id_label(item.user_offer_id),
             )
 
+        self._counts = (
+            len(orderbook.get("asks", [])),
+            len(orderbook.get("bids", [])),
+            len(recent_trades),
+            len(offer_rows),
+            len(fills),
+        )
         if error is not None:
             details = getattr(error, "details", None)
             text = f"ERROR {error}"
@@ -406,10 +627,174 @@ class DexScreen(ModalScreen[None]):
                 text += f" · DEV {details}"
             self.set_status(text)
             return
-        self.set_status(
-            f"{len(orderbook.get('asks', []))} asks · {len(orderbook.get('bids', []))} bids · "
-            f"{len(offer_rows)} open offers · {len(fills)} fill segments"
+        self._set_market_status("snapshot loaded · realtime connecting")
+        if not self._streams_started:
+            self._start_realtime()
+
+    def _render_orderbook(self, orderbook: dict) -> None:
+        asks = self.query_one("#dex-asks", DataTable)
+        bids = self.query_one("#dex-bids", DataTable)
+        asks.clear()
+        bids.clear()
+        for row in orderbook.get("asks", []):
+            price = _decimal(row.get("price", "0"))
+            amount = _decimal(row.get("amount", "0"))
+            asks.add_row(
+                format_market_price(price),
+                format_amount(amount),
+                format_amount(amount * price),
+            )
+        for row in orderbook.get("bids", []):
+            price = _decimal(row.get("price", "0"))
+            amount = _bid_base_amount(row)
+            bids.add_row(
+                format_market_price(price),
+                format_amount(amount),
+                format_amount(amount * price),
+            )
+
+    def _render_recent_trades(self) -> None:
+        table = self.query_one("#dex-trades", DataTable)
+        table.clear()
+        for raw in self._recent_trades[:30]:
+            price = _trade_price(raw)
+            table.add_row(
+                self._time(raw.get("ledger_close_time")),
+                "SELL" if raw.get("base_is_seller") else "BUY",
+                format_amount(_decimal(raw.get("base_amount", "0"))),
+                format_market_price(price),
+                format_amount(_decimal(raw.get("counter_amount", "0"))),
+            )
+
+    def _start_realtime(self) -> None:
+        try:
+            session = self.runtime.wallet_manager.view()
+            services = self.runtime.services_for(session.record.network)
+        except (FresnicaError, ValueError):
+            return
+        adapter = getattr(services, "adapter", None)
+        if adapter is None:
+            self._set_market_status("snapshot only · realtime unavailable")
+            return
+        orderbook_stream = getattr(adapter, "stream_orderbook", None)
+        trade_stream = getattr(adapter, "stream_trades", None)
+        if orderbook_stream is None and trade_stream is None:
+            self._set_market_status("snapshot only · realtime unavailable")
+            return
+        self._streams_started = True
+        self._stream_active = True
+        self._stream_revision += 1
+        revision = self._stream_revision
+        if orderbook_stream is not None:
+            self._stream_orderbook(revision)
+        if trade_stream is not None:
+            cursor = _paging_token(self._recent_trades[0]) if self._recent_trades else "now"
+            self._stream_trades(revision, cursor)
+
+    @work(thread=True, exit_on_error=False)
+    def _stream_orderbook(self, revision: int) -> None:
+        try:
+            session = self.runtime.wallet_manager.view()
+            adapter = self.runtime.services_for(session.record.network).adapter
+            for snapshot in adapter.stream_orderbook(self.pair.base, self.pair.counter):
+                if not self._stream_current(revision):
+                    return
+                self.app.call_from_thread(self._apply_orderbook_stream, revision, snapshot)
+        except (FresnicaError, ValueError) as exc:
+            if self._stream_current(revision):
+                self.app.call_from_thread(self._stream_failed, revision, "order book", exc)
+
+    @work(thread=True, exit_on_error=False)
+    def _stream_trades(self, revision: int, cursor: str | None) -> None:
+        try:
+            session = self.runtime.wallet_manager.view()
+            adapter = self.runtime.services_for(session.record.network).adapter
+            for trade in adapter.stream_trades(self.pair.base, self.pair.counter, cursor=cursor):
+                if not self._stream_current(revision):
+                    return
+                self.app.call_from_thread(self._apply_trade_stream, revision, trade)
+        except (FresnicaError, ValueError) as exc:
+            if self._stream_current(revision):
+                self.app.call_from_thread(self._stream_failed, revision, "trades", exc)
+
+    def _apply_orderbook_stream(self, revision: int, snapshot: dict) -> None:
+        if not self._stream_current(revision) or not self.is_mounted:
+            return
+        self._orderbook = snapshot
+        self._render_orderbook(snapshot)
+        self._orderbook_live = True
+        self._counts = (
+            len(snapshot.get("asks", [])),
+            len(snapshot.get("bids", [])),
+            self._counts[2],
+            self._counts[3],
+            self._counts[4],
         )
+        self._set_market_status(self._realtime_label())
+
+    def _apply_trade_stream(self, revision: int, trade: dict) -> None:
+        if not self._stream_current(revision) or not self.is_mounted:
+            return
+        key = _trade_key(trade)
+        self._recent_trades = [item for item in self._recent_trades if _trade_key(item) != key]
+        self._recent_trades.insert(0, trade)
+        del self._recent_trades[30:]
+        self._render_recent_trades()
+        self._trades_live = True
+        self._counts = (
+            self._counts[0],
+            self._counts[1],
+            len(self._recent_trades),
+            self._counts[3],
+            self._counts[4],
+        )
+        self._set_market_status(self._realtime_label())
+
+    def _stream_failed(self, revision: int, name: str, error) -> None:
+        if not self._stream_current(revision) or not self.is_mounted:
+            return
+        self._set_market_status(f"realtime {name} disconnected · R keeps REST snapshot available")
+
+    def _stream_current(self, revision: int) -> bool:
+        return self._stream_active and revision == self._stream_revision
+
+    def _realtime_label(self) -> str:
+        if self._orderbook_live and self._trades_live:
+            return "realtime order book + trades"
+        if self._orderbook_live:
+            return "realtime order book · trades connecting"
+        if self._trades_live:
+            return "realtime trades · order book connecting"
+        return "realtime connecting"
+
+    def _set_market_status(self, suffix: str) -> None:
+        asks, bids, trades, offers, fills = self._counts
+        self.set_status(
+            f"{asks} asks · {bids} bids · {trades} recent trades · "
+            f"{offers} open offers · {fills} fill segments · {suffix}"
+        )
+
+    def _update_title(self, favorite: bool | None = None) -> None:
+        if favorite is None:
+            favorite = False
+            store = getattr(self.runtime, "market_preferences", None)
+            if store is not None:
+                try:
+                    session = self.runtime.wallet_manager.view()
+                    favorite = self.pair in store.get(
+                        session.record.network,
+                        session.wallet.address(),
+                    ).favorites
+                except (FresnicaError, ValueError):
+                    favorite = False
+        star = "★ " if favorite else ""
+        self.query_one("#dex-title", Static).update(
+            f"{star}Stellar DEX · {_asset_code(self.pair.base)}/{_asset_code(self.pair.counter)}"
+        )
+
+    def _time(self, value: str | None) -> str:
+        settings = getattr(self.runtime, "settings", None)
+        return format_timestamp(value, local=bool(getattr(settings, "use_local_time", True)))
 
     def set_status(self, message: str) -> None:
         if self.is_mounted:
@@ -424,3 +809,50 @@ def _asset_identity(asset: Asset) -> str:
 
 def _asset_code(asset: Asset) -> str:
     return "XLM" if asset.is_native else asset.code
+
+
+def _pair_label(pair: MarketPair) -> str:
+    return f"{_asset_code(pair.base)}/{_asset_code(pair.counter)}"
+
+
+def _decimal(value) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+def _bid_base_amount(row: dict) -> Decimal:
+    amount = _decimal(row.get("amount", "0"))
+    ratio = row.get("price_r") or {}
+    n = _decimal(ratio.get("n", "0")) if isinstance(ratio, dict) else Decimal("0")
+    d = _decimal(ratio.get("d", "0")) if isinstance(ratio, dict) else Decimal("0")
+    if n > 0 and d > 0:
+        with localcontext() as context:
+            context.prec = 40
+            return amount * d / n
+    price = _decimal(row.get("price", "0"))
+    return amount / price if price > 0 else Decimal("0")
+
+
+def _trade_price(raw: dict) -> Decimal:
+    price = raw.get("price") or {}
+    if isinstance(price, dict):
+        n = _decimal(price.get("n", "0"))
+        d = _decimal(price.get("d", "0"))
+        if n > 0 and d > 0:
+            with localcontext() as context:
+                context.prec = 40
+                return n / d
+    base = _decimal(raw.get("base_amount", "0"))
+    counter = _decimal(raw.get("counter_amount", "0"))
+    return counter / base if base > 0 else Decimal("0")
+
+
+def _trade_key(raw: dict) -> str:
+    return str(raw.get("id") or raw.get("paging_token") or "")
+
+
+def _paging_token(raw: dict) -> str | None:
+    value = raw.get("paging_token") or raw.get("id")
+    return str(value) if value is not None else None

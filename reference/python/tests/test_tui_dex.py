@@ -91,8 +91,12 @@ class FakeDexService:
         assert counter == self.pair.counter
         self.refreshes += 1
         return {
-            "asks": [{"price": "0.33", "amount": "100"}],
-            "bids": [{"price": "0.32", "amount": "200"}],
+            "asks": [
+                {"price": "0.33", "price_r": {"n": 33, "d": 100}, "amount": "100"}
+            ],
+            "bids": [
+                {"price": "0.32", "price_r": {"n": 8, "d": 25}, "amount": "200"}
+            ],
         }
 
     def get_open_offers(self, wallet, limit=200, refresh=True):
@@ -260,8 +264,12 @@ def test_dex_screen_projects_reverse_offer_and_fill_into_selected_pair():
 
             offers = app.screen.query_one("#dex-offers", DataTable)
             fills = app.screen.query_one("#dex-fills", DataTable)
-            book = app.screen.query_one("#dex-book", DataTable)
-            assert book.row_count == 2
+            asks = app.screen.query_one("#dex-asks", DataTable)
+            bids = app.screen.query_one("#dex-bids", DataTable)
+            assert asks.row_count == 1
+            assert bids.row_count == 1
+            assert asks.get_row_at(0) == ["0.33", "100", "33"]
+            assert bids.get_row_at(0) == ["0.32", "625", "200"]
             assert offers.row_count == 1
             assert fills.row_count == 1
             assert offers.get_row_at(0) == ["BUY", "100", "0.325", "32.5", "42"]
