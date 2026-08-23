@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from .availability import STROOPS_PER_XLM
-from .models import Asset, OfferIntent, OpenOffer
+from .models import Asset, OfferIntent, OfferView, OpenOffer
 from .review import OfferReview, TransactionReview
 
 
@@ -44,7 +44,7 @@ class TransactionBuilderService:
             wallet_name=wallet_name,
             source=wallet.address(),
             destination=destination,
-            asset=asset.display,
+            asset=_review_asset(asset),
             amount=_amount_text(amount),
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
@@ -117,6 +117,7 @@ class TransactionBuilderService:
         wallet,
         offer: OpenOffer,
         base_fee_stroops: int,
+        view: OfferView | None = None,
     ) -> PreparedTransaction:
         envelope = self.adapter.build_manage_sell_offer(
             source=wallet.address(),
@@ -128,16 +129,28 @@ class TransactionBuilderService:
             offer_id=int(offer.offer_id),
         )
         fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
+        if view is None:
+            side = None
+            base_asset = _review_asset(offer.selling)
+            counter_asset = _review_asset(offer.buying)
+            amount = price = total = None
+        else:
+            side = view.side
+            base_asset = _review_asset(view.pair.base)
+            counter_asset = _review_asset(view.pair.counter)
+            amount = _amount_text(view.amount)
+            price = _amount_text(view.price)
+            total = _amount_text(view.total)
         review = OfferReview(
             wallet_name=wallet_name,
             source=wallet.address(),
             action="cancel",
-            side=None,
-            base_asset=_review_asset(offer.selling),
-            counter_asset=_review_asset(offer.buying),
-            amount=None,
-            price=None,
-            total=None,
+            side=side,
+            base_asset=base_asset,
+            counter_asset=counter_asset,
+            amount=amount,
+            price=price,
+            total=total,
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
             offer_id=offer.offer_id,

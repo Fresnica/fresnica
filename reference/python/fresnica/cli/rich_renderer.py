@@ -11,6 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..presentation import asset_source, format_amount, short_address
+from ..review_presentation import project_review
 
 
 class RichRenderer:
@@ -164,59 +165,27 @@ class RichRenderer:
         self.console.print(table)
 
     def render_review(self, review) -> None:
-        text = Text()
-        text.append("You (", style="dim")
-        text.append(review.wallet_name, style="bold cyan")
-        text.append(f", {short_address(review.source)})\n\n", style="dim")
-        if review.operation == "create_account":
-            text.append("will create and fund a Stellar account with\n", style="dim")
-            text.append(f"{review.amount} XLM", style="bold green")
-            text.append("\n\nnew account\n", style="dim")
-        else:
-            text.append("will transfer\n", style="dim")
-            text.append(f"{review.amount} {review.asset}", style="bold green")
-            text.append("\n\nto\n", style="dim")
-        if review.contact_name:
-            text.append(review.contact_name + " ", style="bold cyan")
-        text.append(review.destination, style="bold yellow")
-        text.append(f"\n\nFee: {review.fee} XLM", style="dim")
-        text.append(f"\nNetwork: {review.network}", style="dim")
-        if review.operation == "create_account":
-            text.append("\nOperation: CreateAccount", style="dim")
-        if review.memo:
-            text.append(f"\nMemo: {review.memo}", style="dim")
-        self.console.print(Panel(text, title="Confirm transaction", border_style="yellow"))
+        self._render_review_projection(review)
 
     def render_offer_review(self, review) -> None:
+        self._render_review_projection(review)
+
+    def _render_review_projection(self, review) -> None:
+        presentation = project_review(review)
         text = Text()
-        text.append("You (", style="dim")
-        text.append(review.wallet_name, style="bold cyan")
-        text.append(f", {short_address(review.source)})\n\n", style="dim")
-        if review.action == "cancel":
-            text.append("will cancel Stellar offer ", style="dim")
-            text.append(f"#{review.offer_id}", style="bold yellow")
-            text.append(
-                f"\n{review.base_asset} -> {review.counter_asset}",
-                style="dim",
-            )
-        else:
-            verb = "create" if review.action == "create" else "update"
-            text.append(f"will {verb} a ", style="dim")
-            text.append((review.side or "").upper(), style="bold cyan")
-            text.append(" limit offer\n\n", style="dim")
-            text.append(f"{review.amount} {review.base_asset}", style="bold green")
-            text.append(f" @ {review.price} {review.counter_asset}/{review.base_asset}")
-            text.append(f"\nTotal: {review.total} {review.counter_asset}", style="dim")
-            if review.offer_id:
-                text.append(f"\nOffer: #{review.offer_id}", style="dim")
-            if review.trustline_asset:
-                text.append(
-                    f"\nAlso creates trustline: {review.trustline_asset}",
-                    style="bold yellow",
-                )
-        text.append(f"\n\nFee: {review.fee} XLM", style="dim")
-        text.append(f"\nNetwork: {review.network}", style="dim")
-        self.console.print(Panel(text, title="Confirm offer", border_style="yellow"))
+        text.append(presentation.summary, style="bold")
+        text.append("\n\n")
+        for index, field in enumerate(presentation.fields):
+            if index:
+                text.append("\n")
+            text.append(f"{field.label}: ", style="dim")
+            text.append(field.value)
+        for warning in presentation.warnings:
+            text.append("\n")
+            text.append(f"Warning: {warning}", style="bold yellow")
+        self.console.print(
+            Panel(text, title=presentation.title, border_style="yellow")
+        )
 
     def confirm(self) -> bool:
         return Confirm.ask("Confirm", default=False, console=self.console)

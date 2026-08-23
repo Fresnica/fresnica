@@ -6,7 +6,7 @@ from stellar_sdk import Keypair
 
 from fresnica.cli.rich_renderer import RichRenderer
 from fresnica.models import Asset, BalanceView, OperationView
-from fresnica.review import OfferReview
+from fresnica.review import OfferReview, TransactionReview
 
 
 def test_cli_balance_and_history_use_human_portfolio_activity_semantics():
@@ -57,8 +57,8 @@ def test_cli_balance_and_history_use_human_portfolio_activity_semantics():
     assert "Received 1 XLM" in history_text
 
 
-def test_offer_review_surfaces_confirmed_trustline_operation():
-    console = Console(record=True, width=120)
+def test_offer_review_uses_shared_risk_semantics():
+    console = Console(record=True, width=160)
     renderer = RichRenderer(console)
     renderer.render_offer_review(
         OfferReview(
@@ -66,21 +66,46 @@ def test_offer_review_surfaces_confirmed_trustline_operation():
             source=Keypair.random().public_key,
             action="create",
             side="buy",
-            base_asset="XRP",
+            base_asset="XRP:GXRP",
             counter_asset="XLM",
             amount="2",
             price="1.5",
             total="3",
             fee="0.00002",
             network="testnet",
-            trustline_asset="XRP",
+            trustline_asset="XRP:GXRP",
         )
     )
 
     text = console.export_text()
-    assert "BUY limit offer" in text
-    assert "Also creates trustline: XRP" in text
+    assert "Create BUY limit offer" in text
+    assert "Max spend: 3 XLM" in text
+    assert "Warning: Creates trustline for XRP:GXRP" in text
     assert "Fee: 0.00002 XLM" in text
+    assert "Total:" not in text
+
+
+def test_transfer_review_does_not_show_core_operation_name():
+    console = Console(record=True, width=160)
+    renderer = RichRenderer(console)
+    renderer.render_review(
+        TransactionReview(
+            wallet_name="main",
+            source="GSOURCE",
+            destination="GDESTINATION",
+            asset="USDC:GISSUER",
+            amount="2",
+            fee="0.00001",
+            network="mainnet",
+            operation="payment",
+        )
+    )
+
+    text = console.export_text()
+    assert "Send 2 USDC:GISSUER" in text
+    assert "Amount: 2 USDC:GISSUER" in text
+    assert "Operation:" not in text
+    assert "Payment" not in text
 
 
 def test_trade_renderer_prefers_horizon_price_fraction_over_rounded_amount_ratio():
