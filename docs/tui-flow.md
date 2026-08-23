@@ -38,10 +38,15 @@ Command
 The TUI provides:
 
 - wallet overview
-- balances
-- transactions
+- balances and liquidity positions
+- transaction-level activity
 - send flow
-- account management
-- future SDEX terminal
+- local contact aliases
+- wallet management
+- pair-scoped SDEX trading
 
-The same services are used by CLI and TUI.
+CLI and TUI use the same wallet/runtime services and review semantics. Send
+destinations are resolved through the same local contact resolver before the
+transfer service is called. An explicit memo overrides a contact's default memo,
+and the final review shows both the contact name and the resolved Stellar
+address.
