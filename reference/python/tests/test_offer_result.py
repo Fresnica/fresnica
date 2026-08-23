@@ -1,3 +1,4 @@
+import fresnica.offer_result as offer_result
 from fresnica.offer_result import (
     _offer_outcome_from_result_json,
     parse_offer_submission_outcome,
@@ -86,3 +87,12 @@ def test_offer_outcome_handles_update():
 def test_offer_outcome_ignores_non_success_and_invalid_xdr():
     assert _offer_outcome_from_result_json({"result": {"txfailed": []}}) is None
     assert parse_offer_submission_outcome("not-xdr") is None
+
+
+def test_offer_outcome_decoder_is_fail_open_for_unexpected_sdk_errors(monkeypatch):
+    def fail(_):
+        raise RuntimeError("future decoder error")
+
+    monkeypatch.setattr(offer_result.stellar_xdr.TransactionResult, "from_xdr", fail)
+
+    assert parse_offer_submission_outcome("anything") is None
