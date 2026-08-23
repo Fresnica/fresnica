@@ -1,5 +1,7 @@
 """Local Stellar contact/address book persistence."""
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass
 import json
 import os
