@@ -15,7 +15,7 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe stellar.toml and SEP-6 info
+      - name: Probe stellar.toml and SEP-6 endpoints
         shell: bash
         run: |
           set -euo pipefail
@@ -37,4 +37,18 @@ jobs:
             echo '--- SEP-6 /info ---'
             curl -fsSL --max-time 10 "${SEP6%/}/info"
             echo
+            echo '--- SEP-6 /deposit XRP ---'
+            curl -sS --max-time 10 -G "${SEP6%/}/deposit" \
+              --data-urlencode 'asset_code=XRP' \
+              --data-urlencode 'account=GBXRPL45NPHCVMFFAYZVUVFFVKSIZ362ZXFP7I2ETNQ3QKZMFLPRDTD5' \
+              -w '\nHTTP %{http_code}\n'
+            echo
+            echo '--- SEP-6 /withdraw XRP ---'
+            curl -sS --max-time 10 -G "${SEP6%/}/withdraw" \
+              --data-urlencode 'type=crypto' \
+              --data-urlencode 'asset_code=XRP' \
+              --data-urlencode 'dest=rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn' \
+              --data-urlencode 'amount=5' \
+              --data-urlencode 'account=GBXRPL45NPHCVMFFAYZVUVFFVKSIZ362ZXFP7I2ETNQ3QKZMFLPRDTD5' \
+              -w '\nHTTP %{http_code}\n'
           fi
