@@ -5,6 +5,7 @@ from getpass import getpass
 from ...errors import UserCancelled, WatchOnlyError
 from ...network import get_network
 from ..context import require_wallet_network
+from ._post_submit import refresh_after_submit
 
 
 def execute_send(
@@ -51,6 +52,7 @@ def execute_send(
         services.transfer_service.sign(session.wallet, prepared)
         result = services.transfer_service.submit(prepared)
         renderer.render_result(result, get_network(runtime.network))
+        refresh_after_submit(services, session.wallet)
         return result
     finally:
         manager.lock()
