@@ -17,19 +17,7 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
       - name: Apply focused DEX presentation patch
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from textwrap import dedent
-
-          workflow = Path('.github/workflows/dex-polish-temp.yml').read_text()
-          marker = "          python - <<'PY'\n"
-          start = workflow.index(marker) + len(marker)
-          end = workflow.index("          PY\n", start)
-          script = dedent(workflow[start:end])
-          exec(compile(script, 'dex-polish-patch', 'exec'))
-          PY
+        run: python tools/dex_polish_patch.py
       - name: Diff check
         run: git diff --check
       - name: Install uv
