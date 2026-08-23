@@ -1,7 +1,11 @@
 from stellar_sdk import Keypair
 
 from fresnica.datastore import MemoryDataStore
-from fresnica.history_service import HISTORY_CACHE_LIMIT, HistoryService, SYNC_PAGE_LIMIT
+from fresnica.history_service import (
+    HISTORY_CACHE_LIMIT,
+    HistoryService,
+    SYNC_PAGE_LIMIT,
+)
 from fresnica.wallet import Wallet
 
 
@@ -48,7 +52,10 @@ def test_empty_history_bootstraps_latest_2000_from_head_backwards():
     assert fetched == HISTORY_CACHE_LIMIT
     assert len(adapter.calls) == HISTORY_CACHE_LIMIT // SYNC_PAGE_LIMIT
     assert adapter.calls[0][2:] == (None, True)
-    assert adapter.calls[1][2:] == (str(HISTORY_CACHE_LIMIT - SYNC_PAGE_LIMIT + 1), True)
+    assert adapter.calls[1][2:] == (
+        str(HISTORY_CACHE_LIMIT - SYNC_PAGE_LIMIT + 1),
+        True,
+    )
     cached = store.get_operations("mainnet", account, limit=None)
     assert len(cached) == HISTORY_CACHE_LIMIT
     assert cached[0]["paging_token"] == str(HISTORY_CACHE_LIMIT)
@@ -105,10 +112,12 @@ def test_enabling_full_history_catches_up_then_backfills_older_records():
     wallet = Wallet.from_address(account)
     store = MemoryDataStore()
     store.save_operations("mainnet", account, [_record(token) for token in range(101, 2101)])
-    adapter = PagingAdapter([
-        [_record(2101), _record(2102)],
-        [_record(token) for token in range(100, 0, -1)],
-    ])
+    adapter = PagingAdapter(
+        [
+            [_record(2101), _record(2102)],
+            [_record(token) for token in range(100, 0, -1)],
+        ]
+    )
     service = HistoryService(adapter, store, "mainnet", keep_full_history=True)
 
     fetched = service.sync_recent(wallet)
@@ -117,6 +126,24 @@ def test_enabling_full_history_catches_up_then_backfills_older_records():
     assert [call[3] for call in adapter.calls] == [False, True]
     assert [call[2] for call in adapter.calls] == ["2100", "101"]
     assert service.cached_operation_count(wallet) == 2102
+
+
+def test_disabling_full_history_trims_to_default_on_next_sync():
+    account = Keypair.random().public_key
+    wallet = Wallet.from_address(account)
+    store = MemoryDataStore()
+    store.save_operations("mainnet", account, [_record(token) for token in range(1, 2101)])
+    adapter = PagingAdapter([])
+    service = HistoryService(adapter, store, "mainnet", keep_full_history=True)
+
+    service.set_keep_full_history(False)
+    fetched = service.sync_recent(wallet)
+
+    assert fetched == 0
+    cached = store.get_operations("mainnet", account, limit=None)
+    assert len(cached) == HISTORY_CACHE_LIMIT
+    assert cached[0]["paging_token"] == "2100"
+    assert cached[-1]["paging_token"] == "101"
 
 
 def test_default_mode_does_not_network_backfill_older_history():
