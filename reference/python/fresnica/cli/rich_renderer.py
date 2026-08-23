@@ -94,6 +94,30 @@ class RichRenderer:
             )
         self.console.print(table)
 
+    def render_account_trade_segments(self, record, segments) -> None:
+        table = Table(title=f"Offer fills  {record.name}  [{record.network}]")
+        table.add_column("Time", style="dim")
+        table.add_column("Side", style="bold")
+        table.add_column("Pair")
+        table.add_column("Base", justify="right")
+        table.add_column("Counter", justify="right")
+        table.add_column("Price", justify="right")
+        table.add_column("Fills", justify="right")
+        table.add_column("Offer", style="dim")
+        for item in segments:
+            price = Decimal(item.price_r.n) / Decimal(item.price_r.d)
+            table.add_row(
+                item.last_time or item.first_time or "",
+                item.side.upper(),
+                f"{item.pair.base.display}/{item.pair.counter.display}",
+                format_amount(item.base_amount),
+                format_amount(item.counter_amount),
+                format_amount(price),
+                str(item.trade_count),
+                item.user_offer_id or "-",
+            )
+        self.console.print(table)
+
     def render_trades(self, base: str, counter: str, trades: list[dict], network: str) -> None:
         table = Table(title=f"Trades  {base} / {counter}  [{network}]")
         table.add_column("Time", style="dim")
@@ -162,6 +186,32 @@ class RichRenderer:
         if review.memo:
             text.append(f"\nMemo: {review.memo}", style="dim")
         self.console.print(Panel(text, title="Confirm transaction", border_style="yellow"))
+
+    def render_offer_review(self, review) -> None:
+        text = Text()
+        text.append("You (", style="dim")
+        text.append(review.wallet_name, style="bold cyan")
+        text.append(f", {short_address(review.source)})\n\n", style="dim")
+        if review.action == "cancel":
+            text.append("will cancel Stellar offer ", style="dim")
+            text.append(f"#{review.offer_id}", style="bold yellow")
+            text.append(
+                f"\n{review.base_asset} -> {review.counter_asset}",
+                style="dim",
+            )
+        else:
+            verb = "create" if review.action == "create" else "update"
+            text.append(f"will {verb} a ", style="dim")
+            text.append((review.side or "").upper(), style="bold cyan")
+            text.append(" limit offer\n\n", style="dim")
+            text.append(f"{review.amount} {review.base_asset}", style="bold green")
+            text.append(f" @ {review.price} {review.counter_asset}/{review.base_asset}")
+            text.append(f"\nTotal: {review.total} {review.counter_asset}", style="dim")
+            if review.offer_id:
+                text.append(f"\nOffer: #{review.offer_id}", style="dim")
+        text.append(f"\n\nFee: {review.fee} XLM", style="dim")
+        text.append(f"\nNetwork: {review.network}", style="dim")
+        self.console.print(Panel(text, title="Confirm offer", border_style="yellow"))
 
     def confirm(self) -> bool:
         return Confirm.ask("Confirm", default=False, console=self.console)
