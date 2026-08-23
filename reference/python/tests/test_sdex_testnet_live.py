@@ -169,7 +169,7 @@ def _wait_for_fill_segment(dex, wallet, pair, attempts=12):
 
 def test_sdex_write_and_account_fill_probe_on_testnet():
     adapter, offer_service, dex = _services()
-    friendbot = FriendbotService(TESTNET.friendbot_url)
+    friendbot = FriendbotService()
 
     issuer = Wallet.from_secret(Keypair.random().secret)
     maker = Wallet.from_secret(Keypair.random().secret)
