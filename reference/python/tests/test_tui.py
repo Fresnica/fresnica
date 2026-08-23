@@ -67,6 +67,7 @@ class FakeBalanceService:
                     selling_liabilities=Decimal("0"),
                     buying_liabilities=Decimal("0"),
                     available=Decimal("0"),
+                    raw={"_fresnica_issuer_domain": "example.org"},
                 ),
             ],
             [
@@ -220,21 +221,26 @@ def test_dashboard_is_responsive_and_formats_wallet_assets():
             assert "TESTNET" in wallet_text
             assert "Locked" in wallet_text
             assert "LOCKED" not in wallet_text
-            assert "W Wallets" not in str(app.query_one("#wallet-actions", Static).render())
-            assert "S Send" in str(app.query_one("#wallet-actions", Static).render())
+            assert len(app.query("#wallet-actions")) == 0
+            bindings = {binding.key: binding for binding in app.BINDINGS}
+            assert bindings["s"].show
+            assert bindings["l"].show
 
             balances = app.query_one("#balances")
             assert balances.row_count == 1
             row = list(balances.get_row_at(0))
             assert row[0] == "XLM"
             assert row[2] == "10"
-            assert row[4] == "0"
+            assert row[4] == ""
             assert app.query_one("#liquidity").row_count == 1
             assert "Updated" in str(app.query_one("#sync-status", Static).render())
 
             await pilot.press("z")
             await _settle(pilot)
             assert balances.row_count == 2
+            issued_row = list(balances.get_row_at(1))
+            assert issued_row[1] == "example.org"
+            assert issued_row[4] == ""
             assert "showing zero" in str(app.query_one("#assets-title", Label).render())
 
     async def narrow_scenario():
@@ -254,7 +260,6 @@ def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
         app = FresnicaApp(runtime)
         async with app.run_test(size=(120, 42)) as pilot:
             await _settle(pilot, 8)
-            assert "L Unlock" in str(app.query_one("#wallet-actions", Static).render())
 
             await pilot.press("l")
             assert isinstance(app.screen, UnlockDialog)
@@ -269,7 +274,6 @@ def test_tui_shows_wallet_state_and_independent_unlock_lock_flow():
             await pilot.click("#unlock")
             await _settle(pilot, 8)
             assert runtime.wallet_manager.state("alpha") is WalletState.UNLOCKED
-            assert "L Lock" in str(app.query_one("#wallet-actions", Static).render())
 
             await pilot.press("l")
             await _settle(pilot, 6)
