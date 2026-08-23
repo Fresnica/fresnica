@@ -47,6 +47,19 @@ def test_wallet_import_watch_is_canonical_command():
     assert args.address == "GDEST"
 
 
+def test_wallet_backup_and_restore_parse():
+    backup = parse_args(["wallet", "backup", "main", "backup.json", "--force"])
+    assert backup.wallet_command == "backup"
+    assert backup.name == "main"
+    assert backup.path == "backup.json"
+    assert backup.force is True
+
+    restore = parse_args(["wallet", "restore", "backup.json", "--name", "copy"])
+    assert restore.wallet_command == "restore"
+    assert restore.path == "backup.json"
+    assert restore.name == "copy"
+
+
 def test_wallet_help_is_grouped(capsys):
     with pytest.raises(SystemExit) as exc:
         parse_args(["wallet", "--help"])
@@ -54,6 +67,9 @@ def test_wallet_help_is_grouped(capsys):
     output = capsys.readouterr().out
     assert "Selection / lifecycle" in output
     assert "Create / import" in output
+    assert "Backup / restore" in output
     assert "Testnet" in output
     assert "import-watch NAME G..." in output
+    assert "backup NAME PATH" in output
+    assert "restore PATH" in output
     assert "testnet-fund" in output
