@@ -163,10 +163,7 @@ def _execute_offer_write(
 
 
 def _find_offer(service, wallet, offer_id: str):
-    for offer in service.get_open_offers(wallet, limit=200, refresh=True):
-        if offer.offer_id == str(offer_id):
-            return offer
-    raise ValueError(f"Offer not found: {offer_id}")
+    return service.get_open_offer(wallet, str(offer_id))
 
 
 def _pair(base: str, counter: str) -> MarketPair:
