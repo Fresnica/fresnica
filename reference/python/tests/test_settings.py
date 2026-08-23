@@ -12,6 +12,7 @@ def test_settings_store_persists_tui_preferences(tmp_path):
             show_zero_balances=True,
             hide_suspicious_claimables=True,
             use_local_time=False,
+            keep_full_history=True,
             theme="nord",
         )
     )
@@ -19,6 +20,7 @@ def test_settings_store_persists_tui_preferences(tmp_path):
     assert loaded.show_zero_balances is True
     assert loaded.hide_suspicious_claimables is True
     assert loaded.use_local_time is False
+    assert loaded.keep_full_history is True
     assert loaded.theme == "nord"
 
 

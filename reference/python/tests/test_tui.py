@@ -314,7 +314,12 @@ def test_history_key_opens_transaction_activity_screen():
             assert "Activity" in str(app.screen.query_one("#history-title", Static).render())
             await pilot.press("m")
             await _settle(pilot, 8)
-            assert runtime.history_services["testnet"].older == 1
+            # Older reveals the retained local cache; it no longer starts a
+            # separate Horizon backfill in the default 2,000-operation mode.
+            assert runtime.history_services["testnet"].older == 0
+            assert "No more cached activity" in str(
+                app.screen.query_one("#history-status", Static).render()
+            )
 
     asyncio.run(scenario())
 

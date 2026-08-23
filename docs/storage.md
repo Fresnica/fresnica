@@ -62,3 +62,8 @@ WalletStorage
 ```
 
 The storage layer should not define signing logic. It only provides wallet state and encrypted secret material.
+
+
+## Chain-Derived History Cache
+
+Raw Horizon operations live in the network-scoped chain-data cache, separate from wallet identity and secret storage. Fresnica keeps the newest 2,000 operations by default. `Keep full history locally` disables this retention limit for users who want to preserve all history Fresnica can obtain from their Horizon source. See [History Cache Model](history-cache.md).

@@ -41,3 +41,16 @@ def test_testnet_runtime_uses_one_shared_service_graph(tmp_path):
     assert services.offer_service.transaction_service is services.transaction_service
     assert services.transaction_service.submit_service is services.submit_service
     assert services.transaction_service.pending_service is services.pending_transaction_service
+
+
+def test_runtime_propagates_full_history_preference(tmp_path):
+    (tmp_path / "settings.json").write_text(
+        '{"keep_full_history": true}\n', encoding="utf-8"
+    )
+    runtime = Runtime(
+        home=tmp_path,
+        wallet_storage=MemoryWalletStorage(),
+        datastore=MemoryDataStore(),
+    )
+
+    assert runtime.services_for("mainnet").history_service.keep_full_history is True

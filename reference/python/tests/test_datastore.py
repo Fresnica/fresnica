@@ -56,3 +56,16 @@ def test_sqlite_operations_keep_raw_horizon_records(tmp_path):
 
     records = store.get_operations("mainnet", "G")
     assert [item["paging_token"] for item in records] == ["11", "10"]
+
+
+def test_sqlite_operations_can_trim_to_newest_window(tmp_path):
+    store = SQLiteDataStore(tmp_path / "chain.sqlite3")
+    records = [
+        {"paging_token": str(token), "type": "manage_data"}
+        for token in range(1, 6)
+    ]
+    store.save_operations("mainnet", "G", records)
+
+    assert store.trim_operations("mainnet", "G", 3) == 2
+    cached = store.get_operations("mainnet", "G", limit=None)
+    assert [item["paging_token"] for item in cached] == ["5", "4", "3"]

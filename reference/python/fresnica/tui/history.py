@@ -157,6 +157,7 @@ class HistoryScreen(ModalScreen[None]):
         Binding("escape", "close", "Back"),
         Binding("r", "refresh", "Refresh"),
         Binding("m", "more", "Older"),
+        Binding("f", "toggle_full_history", "Full history"),
         Binding("p", "toggle_suspicious", "Suspicious"),
         Binding("u", "toggle_timezone", "UTC / Local"),
         Binding("enter", "details", "Details"),
@@ -233,10 +234,25 @@ class HistoryScreen(ModalScreen[None]):
         self._refresh_history()
 
     def action_more(self) -> None:
+        if self.limit >= len(self._loaded_views):
+            self._loaded_message = "No more cached activity"
+        else:
+            self.limit += 200
+            self._loaded_message = "Showing older cached activity"
+        self._render_loaded()
+
+    def action_toggle_full_history(self) -> None:
+        settings = self._settings()
+        settings.keep_full_history = not settings.keep_full_history
+        setter = getattr(self.history_service, "set_keep_full_history", None)
+        if setter is not None:
+            setter(settings.keep_full_history)
+        self._save_settings()
+        mode = "enabled" if settings.keep_full_history else "disabled"
         self.query_one("#history-status", Static).update(
-            "Downloading 200 older operations from Horizon..."
+            f"Full local history {mode} · synchronizing..."
         )
-        self._load_more()
+        self._refresh_history()
 
     def action_toggle_suspicious(self) -> None:
         settings = self._settings()
@@ -315,7 +331,7 @@ class HistoryScreen(ModalScreen[None]):
         try:
             views = self.history_service.get_activity_views(
                 self.wallet,
-                limit=100000,
+                limit=None,
                 refresh=False,
             )
             count = self._cached_operation_count(views)
@@ -326,51 +342,29 @@ class HistoryScreen(ModalScreen[None]):
     @work(exclusive=True, thread=True, exit_on_error=False)
     def _refresh_history(self) -> None:
         try:
+            setter = getattr(self.history_service, "set_keep_full_history", None)
+            if setter is not None:
+                setter(self._settings().keep_full_history)
             sync_recent = getattr(self.history_service, "sync_recent", None)
-            sync_result = None
+            fetched = 0
             if sync_recent is not None:
-                sync_result = sync_recent(self.wallet)
+                fetched = int(sync_recent(self.wallet) or 0)
                 views = self.history_service.get_activity_views(
                     self.wallet,
-                    limit=100000,
+                    limit=None,
                     refresh=False,
                 )
             else:
                 views = self.history_service.get_activity_views(
                     self.wallet,
-                    limit=100000,
+                    limit=None,
                     refresh=True,
                 )
             count = self._cached_operation_count(views)
-            caught_up = bool(getattr(sync_result, "caught_up", True))
-            fetched = int(getattr(sync_result, "fetched_count", 0))
             message = (
-                "Activity updated"
-                if caught_up
-                else (
-                    f"Activity catch-up incomplete · {fetched} newer operations cached "
-                    "· refresh again"
-                )
-            )
-            self.app.call_from_thread(self._apply, views, count, message, None)
-        except (FresnicaError, ValueError) as exc:
-            self.app.call_from_thread(self._apply, [], 0, "", exc)
-
-    @work(exclusive=True, thread=True, exit_on_error=False)
-    def _load_more(self) -> None:
-        try:
-            added = self.history_service.load_older(self.wallet, limit=200)
-            self.limit += 200
-            views = self.history_service.get_activity_views(
-                self.wallet,
-                limit=100000,
-                refresh=False,
-            )
-            count = self._cached_operation_count(views)
-            message = (
-                f"Cached {added} older operations"
-                if added
-                else "No older operations returned"
+                f"Activity updated · {fetched} operations fetched"
+                if fetched
+                else "Activity up to date"
             )
             self.app.call_from_thread(self._apply, views, count, message, None)
         except (FresnicaError, ValueError) as exc:
@@ -438,9 +432,15 @@ class HistoryScreen(ModalScreen[None]):
             return
         suspicious = "hidden" if settings.hide_suspicious_claimables else "shown (dimmed)"
         zone = "local time" if settings.use_local_time else "UTC"
+        cache_mode = (
+            "full available history"
+            if settings.keep_full_history
+            else "recent 2,000 ops"
+        )
         status.update(
             f"{message} · {len(self._visible_views)} activities shown · / search · "
-            f"{cached_operations} operations cached · suspicious claimables {suspicious} · {zone}"
+            f"{cached_operations} operations cached · cache {cache_mode} · "
+            f"suspicious claimables {suspicious} · {zone}"
         )
 
     def _settings(self):

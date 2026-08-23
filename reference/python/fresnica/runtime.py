@@ -83,7 +83,12 @@ class Runtime:
             services = NetworkServices(
                 adapter=adapter,
                 balance_service=balance,
-                history_service=HistoryService(adapter, self.datastore, network.name),
+                history_service=HistoryService(
+                    adapter,
+                    self.datastore,
+                    network.name,
+                    keep_full_history=self.settings.keep_full_history,
+                ),
                 dex_service=DexService(adapter, self.datastore, network.name),
                 offer_service=OfferService(builder, transaction),
                 transaction_builder=builder,

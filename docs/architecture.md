@@ -64,3 +64,10 @@ Clients:
 - CLI
 - TUI
 - SDK
+
+
+## History Cache
+
+History is a network-and-account-scoped cache of raw Horizon operations, not a full-chain indexer. The default cache retains the newest 2,000 operations; users may opt into keeping all history that their Horizon source still exposes. Empty caches are built from the current head backwards, while later refreshes always move from the newest local cursor forward to the current head.
+
+See [History Cache Model](history-cache.md) and the [Architecture Decision Log](decision-log.md).
