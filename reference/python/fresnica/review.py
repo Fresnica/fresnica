@@ -1,4 +1,4 @@
-"""Human-readable transaction review model."""
+"""Human-readable transaction review models."""
 
 from dataclasses import dataclass
 
@@ -15,3 +15,20 @@ class TransactionReview:
     operation: str = "payment"
     memo: str | None = None
     contact_name: str | None = None
+
+
+@dataclass(frozen=True)
+class OfferReview:
+    wallet_name: str
+    source: str
+    action: str
+    side: str | None
+    base_asset: str
+    counter_asset: str
+    amount: str | None
+    price: str | None
+    total: str | None
+    fee: str
+    network: str
+    offer_id: str | None = None
+    trustline_asset: str | None = None

@@ -130,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fund.add_argument("--wallet", help="Wallet name; defaults to active wallet")
 
-    dex = sub.add_parser("dex", help="Read Stellar DEX market data")
+    dex = sub.add_parser("dex", help="Read and trade on the Stellar DEX")
     dex_sub = dex.add_subparsers(dest="dex_command", required=True)
 
     orderbook = dex_sub.add_parser("orderbook", help="Show an order book")
@@ -141,6 +141,39 @@ def build_parser() -> argparse.ArgumentParser:
     offers.add_argument("--wallet", help="Wallet name; defaults to active wallet")
     offers.add_argument("--limit", type=int, default=20)
     offers.add_argument("--cached", action="store_true", help="Use local cache only")
+
+    for side in ("buy", "sell"):
+        command = dex_sub.add_parser(side, help=f"Create a {side.upper()} limit offer")
+        command.add_argument("base")
+        command.add_argument("counter")
+        command.add_argument("amount", help="Base-asset amount")
+        command.add_argument("price", help="Counter units per one base unit")
+        command.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+        command.add_argument(
+            "--allow-trustline",
+            action="store_true",
+            help="Explicitly approve creating a missing receiving trustline",
+        )
+        command.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    update = dex_sub.add_parser("update", help="Update an existing offer")
+    update.add_argument("offer_id")
+    update.add_argument("base")
+    update.add_argument("counter")
+    update.add_argument("amount", help="New base-asset amount")
+    update.add_argument("price", help="New counter/base price")
+    update.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    update.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    cancel = dex_sub.add_parser("cancel", help="Cancel an existing offer")
+    cancel.add_argument("offer_id")
+    cancel.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    cancel.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    fills = dex_sub.add_parser("fills", help="Show recent wallet offer fills")
+    fills.add_argument("--wallet", help="Wallet name; defaults to active wallet")
+    fills.add_argument("--limit", type=int, default=200)
+    fills.add_argument("--cached", action="store_true", help="Use local cache only")
 
     trades = dex_sub.add_parser("trades", help="Show recent trades for an asset pair")
     trades.add_argument("base")

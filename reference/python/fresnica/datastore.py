@@ -125,7 +125,7 @@ class MemoryDataStore(DataStore):
         items.sort(
             key=lambda item: (
                 item.get("ledger_close_time", ""),
-                str(item.get("paging_token", "")),
+                _trade_paging_key(item.get("paging_token", item.get("id", ""))),
             ),
             reverse=True,
         )
@@ -436,7 +436,23 @@ class SQLiteDataStore(DataStore):
                 """
                 SELECT raw_json FROM trades
                 WHERE network = ? AND pair_key = ?
-                ORDER BY ledger_close_time DESC, paging_token DESC
+                ORDER BY
+                    ledger_close_time DESC,
+                    CAST(
+                        CASE
+                            WHEN instr(paging_token, '-') > 0
+                            THEN substr(paging_token, 1, instr(paging_token, '-') - 1)
+                            ELSE paging_token
+                        END AS INTEGER
+                    ) DESC,
+                    CAST(
+                        CASE
+                            WHEN instr(paging_token, '-') > 0
+                            THEN substr(paging_token, instr(paging_token, '-') + 1)
+                            ELSE '0'
+                        END AS INTEGER
+                    ) DESC,
+                    paging_token DESC
                 LIMIT ?
                 """,
                 (network, pair_key, limit),
@@ -501,6 +517,20 @@ def _records(payload) -> list[dict]:
     if isinstance(payload, dict):
         return list(payload.get("_embedded", {}).get("records", []))
     return []
+
+
+def _trade_paging_key(value) -> tuple[int, int, str]:
+    text = str(value or "")
+    first, separator, rest = text.partition("-")
+    try:
+        primary = int(first)
+    except ValueError:
+        primary = 0
+    try:
+        secondary = int(rest) if separator else 0
+    except ValueError:
+        secondary = 0
+    return primary, secondary, text
 
 
 def _asset_key(asset: dict) -> str:

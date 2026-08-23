@@ -1,17 +1,17 @@
-"""Turn wallet-level payment intent into an SDK transaction envelope."""
+"""Turn wallet-level transaction intent into an SDK transaction envelope."""
 
 from dataclasses import dataclass
 from decimal import Decimal
 
 from .availability import STROOPS_PER_XLM
-from .models import Asset
-from .review import TransactionReview
+from .models import Asset, OfferIntent, OpenOffer
+from .review import OfferReview, TransactionReview
 
 
 @dataclass
 class PreparedTransaction:
     envelope: object
-    review: TransactionReview
+    review: TransactionReview | OfferReview
 
 
 class TransactionBuilderService:
@@ -54,9 +54,107 @@ class TransactionBuilderService:
         )
         return PreparedTransaction(envelope=envelope, review=review)
 
+    def build_offer(
+        self,
+        wallet_name: str,
+        wallet,
+        intent: OfferIntent,
+        base_fee_stroops: int,
+        offer_id: int = 0,
+        action: str = "create",
+        trustline_asset: Asset | None = None,
+    ) -> PreparedTransaction:
+        amount = _amount_text(intent.amount)
+        price = _amount_text(intent.price)
+        if intent.side == "buy":
+            selling = intent.pair.counter
+            buying = intent.pair.base
+            envelope = self.adapter.build_manage_buy_offer(
+                source=wallet.address(),
+                selling=selling,
+                buying=buying,
+                buy_amount=amount,
+                price=price,
+                base_fee=base_fee_stroops,
+                offer_id=offer_id,
+                trustline_asset=trustline_asset,
+            )
+        else:
+            selling = intent.pair.base
+            buying = intent.pair.counter
+            envelope = self.adapter.build_manage_sell_offer(
+                source=wallet.address(),
+                selling=selling,
+                buying=buying,
+                amount=amount,
+                price=price,
+                base_fee=base_fee_stroops,
+                offer_id=offer_id,
+                trustline_asset=trustline_asset,
+            )
+        operation_count = 2 if trustline_asset is not None else 1
+        fee_xlm = Decimal(base_fee_stroops * operation_count) / STROOPS_PER_XLM
+        review = OfferReview(
+            wallet_name=wallet_name,
+            source=wallet.address(),
+            action=action,
+            side=intent.side,
+            base_asset=_review_asset(intent.pair.base),
+            counter_asset=_review_asset(intent.pair.counter),
+            amount=amount,
+            price=price,
+            total=_amount_text(intent.amount * intent.price),
+            fee=_amount_text(fee_xlm),
+            network=self.adapter.network.name,
+            offer_id=str(offer_id) if offer_id else None,
+            trustline_asset=_review_asset(trustline_asset) if trustline_asset else None,
+        )
+        return PreparedTransaction(envelope=envelope, review=review)
+
+    def build_cancel_offer(
+        self,
+        wallet_name: str,
+        wallet,
+        offer: OpenOffer,
+        base_fee_stroops: int,
+    ) -> PreparedTransaction:
+        envelope = self.adapter.build_manage_sell_offer(
+            source=wallet.address(),
+            selling=offer.selling,
+            buying=offer.buying,
+            amount="0",
+            price=offer.price_r,
+            base_fee=base_fee_stroops,
+            offer_id=int(offer.offer_id),
+        )
+        fee_xlm = Decimal(base_fee_stroops) / STROOPS_PER_XLM
+        review = OfferReview(
+            wallet_name=wallet_name,
+            source=wallet.address(),
+            action="cancel",
+            side=None,
+            base_asset=_review_asset(offer.selling),
+            counter_asset=_review_asset(offer.buying),
+            amount=None,
+            price=None,
+            total=None,
+            fee=_amount_text(fee_xlm),
+            network=self.adapter.network.name,
+            offer_id=offer.offer_id,
+        )
+        return PreparedTransaction(envelope=envelope, review=review)
+
 
 def _amount_text(value: Decimal) -> str:
     text = format(value, "f")
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _review_asset(asset: Asset) -> str:
+    if asset.is_native:
+        return "XLM"
+    if asset.is_liquidity_pool:
+        return asset.display
+    return f"{asset.code}:{asset.issuer}"

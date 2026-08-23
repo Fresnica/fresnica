@@ -1,6 +1,8 @@
-"""Read-only SDEX market data built on Horizon through the Stellar SDK."""
+"""SDEX market and account data built on Horizon through the Stellar SDK."""
 
 from .models import Asset
+from .offer_service import open_offer_from_horizon
+from .trade_segments import account_trade_from_horizon, compress_account_trades
 
 
 RESOLUTIONS = {
@@ -11,6 +13,8 @@ RESOLUTIONS = {
     "1d": 86_400_000,
     "1w": 604_800_000,
 }
+ACCOUNT_TRADE_PAGE_LIMIT = 200
+ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES = 5
 
 
 class DexService:
@@ -31,6 +35,81 @@ class DexService:
             self.datastore.save_offers(self.network_name, address, response)
             return _records(response)
         return self.datastore.get_offers(self.network_name, address, limit=limit)
+
+    def get_open_offers(self, wallet, limit: int = 20, refresh: bool = True):
+        return [
+            open_offer_from_horizon(item)
+            for item in self.get_offers(wallet, limit=limit, refresh=refresh)
+        ]
+
+    def get_open_offer(self, wallet, offer_id: str):
+        raw = self.adapter.get_offer(offer_id)
+        if raw.get("seller") != wallet.address():
+            raise ValueError(f"Offer {offer_id} does not belong to this wallet")
+        return open_offer_from_horizon(raw)
+
+    def get_account_trade_segments(
+        self,
+        wallet,
+        limit: int = 1000,
+        refresh: bool = True,
+    ):
+        """Sync wallet trades incrementally, then aggregate consecutive offer fills."""
+        address = wallet.address()
+        cache_key = account_trade_cache_key(address)
+        if refresh:
+            latest = self.datastore.get_trades(
+                self.network_name,
+                cache_key,
+                limit=1,
+            )
+            cursor = _paging_token(latest[0]) if latest else None
+            if cursor:
+                self._sync_account_trade_increment(address, cache_key, cursor)
+            else:
+                response = self.adapter.get_account_trades(
+                    address,
+                    limit=min(ACCOUNT_TRADE_PAGE_LIMIT, max(limit, 1)),
+                    desc=True,
+                )
+                self.datastore.save_trades(
+                    self.network_name,
+                    cache_key,
+                    response,
+                )
+
+        raw = self.datastore.get_trades(
+            self.network_name,
+            cache_key,
+            limit=limit,
+        )
+        trades = [account_trade_from_horizon(item, address) for item in raw]
+        return compress_account_trades(trades, address)
+
+    def _sync_account_trade_increment(
+        self,
+        address: str,
+        cache_key: str,
+        cursor: str,
+    ) -> None:
+        next_cursor = cursor
+        for _ in range(ACCOUNT_TRADE_MAX_INCREMENTAL_PAGES):
+            response = self.adapter.get_account_trades(
+                address,
+                limit=ACCOUNT_TRADE_PAGE_LIMIT,
+                cursor=next_cursor,
+                desc=False,
+            )
+            records = _records(response)
+            if not records:
+                return
+            self.datastore.save_trades(self.network_name, cache_key, records)
+            last_cursor = _paging_token(records[-1])
+            if last_cursor is None or last_cursor == next_cursor:
+                return
+            next_cursor = last_cursor
+            if len(records) < ACCOUNT_TRADE_PAGE_LIMIT:
+                return
 
     def get_trades(
         self,
@@ -109,6 +188,10 @@ def asset_pair_key(base: Asset, counter: Asset) -> str:
     return f"{_asset_key(base)}>{_asset_key(counter)}"
 
 
+def account_trade_cache_key(address: str) -> str:
+    return f"account:{address}"
+
+
 def _asset(value) -> Asset:
     return value if isinstance(value, Asset) else Asset.parse(value)
 
@@ -117,6 +200,11 @@ def _asset_key(asset: Asset) -> str:
     if asset.is_native:
         return "XLM"
     return f"{asset.code}:{asset.issuer}"
+
+
+def _paging_token(item: dict) -> str | None:
+    value = item.get("paging_token", item.get("id"))
+    return None if value is None else str(value)
 
 
 def _records(payload) -> list[dict]:

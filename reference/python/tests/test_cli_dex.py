@@ -12,6 +12,10 @@ class FakeDexService:
         self.calls.append(("orderbook", selling, buying))
         return {"bids": [], "asks": []}
 
+    def get_account_trade_segments(self, wallet, limit=200, refresh=True):
+        self.calls.append(("fills", wallet, limit, refresh))
+        return []
+
     def get_trades(self, base, counter, limit=20, refresh=True):
         self.calls.append(("trades", base, counter, limit, refresh))
         return []
@@ -28,6 +32,9 @@ class FakeRenderer:
     def render_orderbook(self, *args):
         self.rendered = ("orderbook", args)
 
+    def render_account_trade_segments(self, *args):
+        self.rendered = ("fills", args)
+
     def render_trades(self, *args):
         self.rendered = ("trades", args)
 
@@ -35,9 +42,22 @@ class FakeRenderer:
         self.rendered = ("candles", args)
 
 
+class FakeWalletManager:
+    def __init__(self):
+        self.record = SimpleNamespace(name="observer", network="testnet")
+        self.wallet = object()
+
+    def get_record(self, name=None):
+        return self.record
+
+    def view(self, name=None):
+        return SimpleNamespace(record=self.record, wallet=self.wallet)
+
+
 def _runtime(service):
     return SimpleNamespace(
         network="testnet",
+        wallet_manager=FakeWalletManager(),
         services_for=lambda: SimpleNamespace(dex_service=service),
     )
 
@@ -54,14 +74,21 @@ def test_dex_parser_and_dispatch():
     assert renderer.rendered[0] == "orderbook"
 
 
-def test_dex_trade_and_candle_options():
+def test_dex_trade_fill_and_candle_options():
     service = FakeDexService()
     renderer = FakeRenderer()
+    runtime = _runtime(service)
+
+    fills = parse_args(
+        ["--network", "testnet", "dex", "fills", "--limit", "50", "--cached"]
+    )
+    execute_dex(runtime, fills, renderer)
+    assert service.calls[-1] == ("fills", runtime.wallet_manager.wallet, 50, False)
 
     trades = parse_args(
         ["--network", "testnet", "dex", "trades", "XLM", "USD:GISSUER", "--limit", "7", "--cached"]
     )
-    execute_dex(_runtime(service), trades, renderer)
+    execute_dex(runtime, trades, renderer)
     assert service.calls[-1] == ("trades", "XLM", "USD:GISSUER", 7, False)
 
     candles = parse_args(
@@ -82,7 +109,7 @@ def test_dex_trade_and_candle_options():
             "12",
         ]
     )
-    execute_dex(_runtime(service), candles, renderer)
+    execute_dex(runtime, candles, renderer)
     _, base, counter, kwargs = service.calls[-1]
     assert (base, counter) == ("XLM", "USD:GISSUER")
     assert kwargs["resolution"] == "15m"

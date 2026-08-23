@@ -7,6 +7,7 @@ workflow.
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Literal
 
 from .errors import InvalidAssetError
 
@@ -58,6 +59,104 @@ class Asset:
         if text.lower() == "native" or text.upper() == "XLM":
             return cls("XLM")
         return cls.parse(text)
+
+
+OrderSide = Literal["buy", "sell"]
+
+
+@dataclass(frozen=True)
+class MarketPair:
+    """A user-facing market orientation: base / counter."""
+
+    base: Asset
+    counter: Asset
+
+
+@dataclass(frozen=True)
+class PriceRatio:
+    """Exact Stellar price fraction."""
+
+    n: int
+    d: int
+
+    def __post_init__(self) -> None:
+        if self.n <= 0 or self.d <= 0:
+            raise ValueError("Price ratio numerator and denominator must be positive")
+
+
+@dataclass
+class OpenOffer:
+    """Canonical current offer state as stored on the Stellar ledger."""
+
+    offer_id: str
+    selling: Asset
+    buying: Asset
+    selling_amount: Decimal
+    price_r: PriceRatio
+    seller: str | None = None
+    last_modified_ledger: int | None = None
+    last_modified_time: str | None = None
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OfferView:
+    """An open offer projected into a selected market orientation."""
+
+    pair: MarketPair
+    side: OrderSide
+    amount: Decimal
+    price: Decimal
+    total: Decimal
+
+
+@dataclass(frozen=True)
+class OfferIntent:
+    """User intent: amount is always base units and price is counter/base."""
+
+    pair: MarketPair
+    side: OrderSide
+    amount: Decimal
+    price: Decimal
+
+
+@dataclass
+class AccountTrade:
+    """One Horizon trade involving the wallet, before user-facing aggregation."""
+
+    trade_id: str
+    pair: MarketPair
+    base_amount: Decimal
+    counter_amount: Decimal
+    price_r: PriceRatio
+    side: OrderSide
+    time: str | None
+    paging_token: str | None = None
+    base_account: str | None = None
+    counter_account: str | None = None
+    base_offer_id: str | None = None
+    counter_offer_id: str | None = None
+    transaction_hash: str | None = None
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass
+class AccountTradeSegment:
+    """Consecutive fills from one wallet offer at one exact price."""
+
+    segment_key: str
+    pair: MarketPair
+    side: OrderSide
+    base_amount: Decimal
+    counter_amount: Decimal
+    price_r: PriceRatio
+    user_offer_id: str | None
+    trade_count: int
+    first_time: str | None
+    last_time: str | None
+    first_trade_id: str
+    last_trade_id: str
+    raw: list[dict] = field(default_factory=list)
 
 
 @dataclass

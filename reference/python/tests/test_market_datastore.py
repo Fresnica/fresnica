@@ -63,13 +63,34 @@ def _exercise(store):
     ) == []
 
 
+def _exercise_trade_cursor_order(store):
+    same_time = "2026-08-23T00:00:00Z"
+    records = [
+        {**TRADE, "id": "100089067462524929-2", "paging_token": "100089067462524929-2", "ledger_close_time": same_time},
+        {**TRADE, "id": "100089067462524929-10", "paging_token": "100089067462524929-10", "ledger_close_time": same_time},
+        {**TRADE, "id": "100089067462524930-0", "paging_token": "100089067462524930-0", "ledger_close_time": same_time},
+    ]
+    store.save_trades("mainnet", "account:GACCOUNT", records)
+    assert [
+        item["paging_token"]
+        for item in store.get_trades("mainnet", "account:GACCOUNT", limit=3)
+    ] == [
+        "100089067462524930-0",
+        "100089067462524929-10",
+        "100089067462524929-2",
+    ]
+
+
 def test_memory_market_cache():
-    _exercise(MemoryDataStore())
+    store = MemoryDataStore()
+    _exercise(store)
+    _exercise_trade_cursor_order(store)
 
 
 def test_sqlite_market_cache(tmp_path):
     store = SQLiteDataStore(tmp_path / "market.sqlite3")
     _exercise(store)
+    _exercise_trade_cursor_order(store)
 
     with store._connect() as db:
         offer = db.execute(
