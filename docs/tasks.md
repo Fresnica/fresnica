@@ -39,6 +39,7 @@
 - [x] `send AMOUNT ASSET to DESTINATION`
 - [x] `info`
 - [x] wallet lifecycle commands
+- [x] `trust add/limit/remove`
 - [x] Human transaction review + Y/n confirmation
 - [x] `--json` balance output
 - [x] Contact/address book integration
@@ -57,6 +58,7 @@
 
 - [x] Asset parsing
 - [x] Reserve/liability-aware available amount
+- [x] Standalone trustline add/limit/remove workflow
 - [x] Transaction build via Stellar SDK
 - [x] Sign flow
 - [x] Submit flow
