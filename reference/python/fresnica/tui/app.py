@@ -1,24 +1,44 @@
 """Product-facing Fresnica TUI shell.
 
 The stable transaction and wallet workflows live in app_base. This layer owns
-presentation preferences, transaction-level activity, and wallet-management
-information architecture.
+presentation preferences, transaction-level activity, wallet-management
+information architecture, and pair-scoped SDEX presentation.
 """
 
-from textual import work
+from decimal import Decimal, InvalidOperation
 
-from ..errors import FresnicaError, NetworkError, WalletNotFoundError
+from textual import work
+from textual.binding import Binding
+
+from ..errors import (
+    FresnicaError,
+    NetworkError,
+    TrustlineConfirmationRequired,
+    WalletLockedError,
+    WalletNotFoundError,
+)
+from ..manager import WalletState
+from ..models import OfferIntent
 from .app_base import FresnicaApp as BaseFresnicaApp
+from .dex import DexOfferAction, DexScreen, MarketPairDialog, OfferReviewDialog
+from .screens import ConfirmDialog
 from .wallet_management import WalletManagerDialog
 
 
 class FresnicaApp(BaseFresnicaApp):
+    BINDINGS = [
+        *BaseFresnicaApp.BINDINGS,
+        Binding("d", "dex", "DEX"),
+    ]
+
     def __init__(self, runtime):
         super().__init__(runtime)
         settings = getattr(runtime, "settings", None)
         self._show_zero_balances = bool(
             getattr(settings, "show_zero_balances", False)
         )
+        self._pending_dex_unlock = None
+        self._pending_dex_submit = None
 
     def action_toggle_zero(self) -> None:
         self._show_zero_balances = not self._show_zero_balances
@@ -31,6 +51,246 @@ class FresnicaApp(BaseFresnicaApp):
         self._render_balances()
         mode = "shown" if self._show_zero_balances else "hidden"
         self._set_sync(f"Zero-balance assets {mode} · preference saved")
+
+    def action_dex(self) -> None:
+        try:
+            self.runtime.wallet_manager.get_record()
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before opening the DEX.")
+            return
+        self.push_screen(MarketPairDialog(), self._open_dex_market)
+
+    def _open_dex_market(self, pair) -> None:
+        if pair is None:
+            return
+        self.push_screen(DexScreen(self.runtime, pair, self._on_dex_action))
+
+    def _on_dex_action(self, screen: DexScreen, action: DexOfferAction) -> None:
+        manager = self.runtime.wallet_manager
+        try:
+            record = manager.get_record()
+            state = manager.state(record.name)
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before trading.")
+            return
+
+        if state is WalletState.WATCH_ONLY:
+            screen.set_status("Watch-only wallet · market data is available, signing is not.")
+            self._show_notice(
+                "Watch-only wallet",
+                "This wallet can inspect the market, offers, and fills but cannot sign DEX operations.",
+            )
+            return
+
+        if state is WalletState.LOCKED:
+            self._pending_dex_unlock = (screen, action)
+            self._request_unlock(record.name, after="dex")
+            return
+
+        self._prepare_dex_action(screen, action)
+
+    def _on_unlock_response(
+        self,
+        wallet_name: str,
+        after: str | None,
+        password: str | None,
+    ) -> None:
+        if after != "dex":
+            super()._on_unlock_response(wallet_name, after, password)
+            return
+        if password is None:
+            self._pending_dex_unlock = None
+            return
+
+        manager = self.runtime.wallet_manager
+        try:
+            manager.set_default(wallet_name)
+            manager.unlock(wallet_name, password)
+        except (FresnicaError, ValueError) as exc:
+            self._request_unlock(wallet_name, after="dex", error=str(exc))
+            return
+
+        self.refresh_wallet(f"Unlocked wallet {wallet_name}")
+        pending = self._pending_dex_unlock
+        self._pending_dex_unlock = None
+        if pending is not None:
+            screen, action = pending
+            if screen.is_mounted:
+                self._prepare_dex_action(screen, action)
+
+    @work(thread=True, exit_on_error=False)
+    def _prepare_dex_action(
+        self,
+        screen: DexScreen,
+        action: DexOfferAction,
+        allow_trustline: bool = False,
+    ) -> None:
+        try:
+            manager = self.runtime.wallet_manager
+            record = manager.get_record()
+            session = manager.current()
+            if session is None or session.record.name != record.name:
+                raise WalletLockedError(f'Wallet "{record.name}" is locked')
+            services = self.runtime.services_for(record.network)
+            offer_service = services.offer_service
+
+            if action.kind == "cancel":
+                if action.offer is None:
+                    raise ValueError("No offer selected for cancellation")
+                prepared = offer_service.prepare_cancel(
+                    record.name,
+                    session.wallet,
+                    action.offer,
+                )
+            else:
+                if action.side not in ("buy", "sell"):
+                    raise ValueError("DEX action is missing BUY/SELL side")
+                try:
+                    amount = Decimal(str(action.amount))
+                    price = Decimal(str(action.price))
+                except InvalidOperation as exc:
+                    raise ValueError("Invalid DEX amount or price") from exc
+                intent = OfferIntent(
+                    pair=action.pair,
+                    side=action.side,
+                    amount=amount,
+                    price=price,
+                )
+                if action.kind == "create":
+                    prepared = offer_service.prepare_create(
+                        record.name,
+                        session.wallet,
+                        intent,
+                        allow_trustline=allow_trustline,
+                    )
+                elif action.kind == "update":
+                    if action.offer is None:
+                        raise ValueError("No offer selected for update")
+                    prepared = offer_service.prepare_update(
+                        record.name,
+                        session.wallet,
+                        action.offer,
+                        intent,
+                    )
+                else:
+                    raise ValueError(f"Unsupported DEX action: {action.kind}")
+
+            self.call_from_thread(
+                self._show_dex_review,
+                screen,
+                session.wallet,
+                services,
+                prepared,
+                record.network,
+            )
+        except TrustlineConfirmationRequired:
+            self.call_from_thread(self._confirm_dex_trustline, screen, action)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._finish_dex_prepare_error, screen, exc)
+
+    def _confirm_dex_trustline(
+        self,
+        screen: DexScreen,
+        action: DexOfferAction,
+    ) -> None:
+        if not screen.is_mounted:
+            return
+        receiving = action.pair.base if action.side == "buy" else action.pair.counter
+        identity = (
+            "XLM"
+            if receiving.is_native
+            else f"{receiving.code}:{receiving.issuer}"
+        )
+        screen.set_status(f"Receiving {receiving.display} needs a trustline confirmation.")
+        self.push_screen(
+            ConfirmDialog(
+                "Create receiving trustline",
+                f"This offer requires a new trustline for {identity}. "
+                "Fresnica will submit ChangeTrust and the offer in one transaction.",
+                "Create & continue",
+            ),
+            lambda confirmed: self._on_dex_trustline_confirmation(
+                screen,
+                action,
+                confirmed,
+            ),
+        )
+
+    def _on_dex_trustline_confirmation(
+        self,
+        screen: DexScreen,
+        action: DexOfferAction,
+        confirmed: bool,
+    ) -> None:
+        if not confirmed:
+            screen.set_status("Offer cancelled · receiving trustline was not approved.")
+            return
+        screen.set_status("Preparing offer with confirmed receiving trustline...")
+        self._prepare_dex_action(screen, action, allow_trustline=True)
+
+    def _finish_dex_prepare_error(self, screen: DexScreen, error) -> None:
+        if screen.is_mounted:
+            screen.set_status(f"Offer preparation failed: {error}")
+        self._show_error(error)
+
+    def _show_dex_review(
+        self,
+        screen: DexScreen,
+        wallet,
+        services,
+        prepared,
+        network: str,
+    ) -> None:
+        if not screen.is_mounted:
+            return
+        self._pending_dex_submit = (screen, wallet, services, prepared, network)
+        screen.set_status("DEX operation ready for review.")
+        self.push_screen(OfferReviewDialog(prepared.review), self._on_dex_review)
+
+    def _on_dex_review(self, confirmed: bool) -> None:
+        pending = self._pending_dex_submit
+        if pending is None:
+            return
+        screen = pending[0]
+        if not confirmed:
+            self._pending_dex_submit = None
+            if screen.is_mounted:
+                screen.set_status("DEX operation cancelled · wallet remains unlocked.")
+            return
+        if screen.is_mounted:
+            screen.set_status("Submitting DEX operation...")
+        self._submit_dex_pending()
+
+    @work(thread=True, exit_on_error=False)
+    def _submit_dex_pending(self) -> None:
+        pending = self._pending_dex_submit
+        if pending is None:
+            return
+        screen, wallet, services, prepared, network = pending
+        try:
+            services.offer_service.sign(wallet, prepared)
+            result = services.offer_service.submit(prepared)
+            self.call_from_thread(self._finish_dex_submit, screen, result, network, None)
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._finish_dex_submit, screen, None, network, exc)
+        finally:
+            self._pending_dex_submit = None
+
+    def _finish_dex_submit(self, screen: DexScreen, result, network: str, error) -> None:
+        if error is not None:
+            if screen.is_mounted:
+                screen.set_status(f"DEX submission failed: {error}")
+            self._show_error(error)
+            return
+
+        message = (
+            f"DEX transaction submitted on {network}: {result.hash}"
+            + (f" · ledger {result.ledger}" if result.ledger is not None else "")
+        )
+        if screen.is_mounted:
+            screen.set_status(message)
+            screen.refresh_market()
+        self.refresh_wallet(message)
 
     def _open_wallet_manager(self) -> None:
         manager = self.runtime.wallet_manager
