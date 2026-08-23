@@ -86,6 +86,29 @@ def test_adapter_builds_manage_sell_and_manage_buy_offer_operations():
     assert buy.offer_id == 8
 
 
+def test_adapter_places_confirmed_trustline_before_offer():
+    source = Keypair.random()
+    selling = Asset("XLM")
+    buying = Asset("USD", Keypair.random().public_key)
+    adapter = StellarAdapter(TESTNET)
+    adapter.server = BuildServer(source.public_key)
+
+    envelope = adapter.build_manage_sell_offer(
+        source=source.public_key,
+        selling=selling,
+        buying=buying,
+        amount="1",
+        price="2",
+        base_fee=100,
+        trustline_asset=buying,
+    )
+
+    assert [type(op).__name__ for op in envelope.transaction.operations] == [
+        "ChangeTrust",
+        "ManageSellOffer",
+    ]
+
+
 def test_adapter_preserves_exact_price_fraction_for_cancel():
     source = Keypair.random()
     adapter = StellarAdapter(TESTNET)
