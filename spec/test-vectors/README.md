@@ -2,9 +2,20 @@
 
 These files define language-neutral behavior that future Fresnica cores and clients must agree on. They are semantic fixtures, not serialized Python objects and not a public wire protocol.
 
+Current sets:
+
+- `wallet-v1.json`: deterministic SEP-0005 mnemonic/passphrase/account-index derivation to Stellar public keys.
+- `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
+
 ## Versioning
 
-`sdex-v1.json` is the first SDEX behavior set. Existing vector meaning must not be changed silently. If a later implementation intentionally changes a normative behavior, add a new version and document the compatibility decision.
+Existing vector meaning must not be changed silently. If a later implementation intentionally changes a normative behavior, add a new version and document the compatibility decision.
+
+## Wallet derivation
+
+`wallet-v1.json` uses public SEP-0005 / stellar-sdk reference cases. Fresnica stores only the mnemonic/passphrase/index inputs and expected **public key** outputs; upstream test secret seeds are intentionally not copied into this repository.
+
+The derivation contract is Stellar SEP-0005, including the account index path and BIP39 passphrase. A future Rust Core must produce the same public key for every vector before it can be considered wallet-compatible.
 
 ## Numeric rules
 
