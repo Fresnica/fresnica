@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from .errors import WalletError
+from .errors import NetworkError, WalletError
 from .network import get_network
 from .storage import WalletRecord
 from .wallet import Wallet
@@ -76,7 +76,10 @@ def _validate_record(record: WalletRecord) -> None:
         raise WalletError("Invalid wallet backup: wallet name is missing")
     if record.wallet_type not in {"watch-only", "secret", "mnemonic"}:
         raise WalletError(f"Invalid wallet backup: unsupported wallet type {record.wallet_type}")
-    get_network(record.network)
+    try:
+        get_network(record.network)
+    except NetworkError as exc:
+        raise WalletError(f"Invalid wallet backup: unknown network {record.network}") from exc
     try:
         wallet = Wallet.from_address(record.address)
     except (TypeError, ValueError) as exc:
