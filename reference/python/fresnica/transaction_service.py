@@ -1,6 +1,7 @@
 """Generic transaction signing and submission workflow."""
 
 from .models import TransactionResult
+from .offer_result import parse_offer_submission_outcome
 
 
 class TransactionService:
@@ -18,4 +19,5 @@ class TransactionService:
             ledger=response.get("ledger"),
             successful=bool(response.get("successful", True)),
             raw=response,
+            offer_outcome=parse_offer_submission_outcome(response.get("result_xdr")),
         )
