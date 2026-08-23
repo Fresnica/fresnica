@@ -26,6 +26,7 @@ from .app_base import FresnicaApp as BaseFresnicaApp
 from .dex import DexOfferAction, DexScreen, MarketPairDialog
 from .review_dialog import ReviewPresentationDialog
 from .screens import ConfirmDialog
+from .trustlines import TrustlineAction, TrustlineScreen
 from .wallet_management import WalletManagerDialog
 
 
@@ -33,6 +34,7 @@ class FresnicaApp(BaseFresnicaApp):
     BINDINGS = [
         *BaseFresnicaApp.BINDINGS,
         Binding("d", "dex", "DEX"),
+        Binding("t", "trustlines", "Trustlines"),
     ]
 
     def __init__(self, runtime):
@@ -43,6 +45,8 @@ class FresnicaApp(BaseFresnicaApp):
         )
         self._pending_dex_unlock = None
         self._pending_dex_submit = None
+        self._pending_trustline_unlock = None
+        self._pending_trustline_submit = None
 
     def action_toggle_zero(self) -> None:
         self._show_zero_balances = not self._show_zero_balances
@@ -111,7 +115,50 @@ class FresnicaApp(BaseFresnicaApp):
 
         self._prepare_dex_action(screen, action)
 
-    def _ensure_write_clear(self, record, screen: DexScreen | None = None) -> bool:
+    def action_trustlines(self) -> None:
+        try:
+            self.runtime.wallet_manager.get_record()
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before managing trustlines.")
+            return
+        self.push_screen(TrustlineScreen(self.runtime, self._on_trustline_action))
+
+    def _on_trustline_action(
+        self,
+        screen: TrustlineScreen,
+        action: TrustlineAction,
+    ) -> None:
+        manager = self.runtime.wallet_manager
+        try:
+            record = manager.get_record()
+            state = manager.state(record.name)
+        except WalletNotFoundError:
+            self._show_notice("No wallet", "Add or import a wallet before changing trustlines.")
+            return
+
+        if state is WalletState.WATCH_ONLY:
+            screen.set_status("Watch-only wallet · trustlines are read-only.")
+            self._show_notice(
+                "Watch-only wallet",
+                "This wallet can inspect trustlines but cannot sign ChangeTrust operations.",
+            )
+            return
+
+        if not self._ensure_write_clear(record, screen=screen):
+            return
+
+        if state is WalletState.LOCKED:
+            self._pending_trustline_unlock = (screen, action)
+            self._request_unlock(record.name, after="trustline")
+            return
+
+        self._prepare_trustline_action(screen, action)
+
+    def _ensure_write_clear(
+        self,
+        record,
+        screen: DexScreen | TrustlineScreen | None = None,
+    ) -> bool:
         services = self.runtime.services_for(record.network)
         pending = getattr(services, "pending_transaction_service", None)
         if pending is None:
@@ -156,11 +203,14 @@ class FresnicaApp(BaseFresnicaApp):
         after: str | None,
         password: str | None,
     ) -> None:
-        if after != "dex":
+        if after not in {"dex", "trustline"}:
             super()._on_unlock_response(wallet_name, after, password)
             return
         if password is None:
-            self._pending_dex_unlock = None
+            if after == "dex":
+                self._pending_dex_unlock = None
+            else:
+                self._pending_trustline_unlock = None
             return
 
         manager = self.runtime.wallet_manager
@@ -168,16 +218,25 @@ class FresnicaApp(BaseFresnicaApp):
             manager.set_default(wallet_name)
             manager.unlock(wallet_name, password)
         except (FresnicaError, ValueError) as exc:
-            self._request_unlock(wallet_name, after="dex", error=str(exc))
+            self._request_unlock(wallet_name, after=after, error=str(exc))
             return
 
         self.refresh_wallet(f"Unlocked wallet {wallet_name}")
-        pending = self._pending_dex_unlock
-        self._pending_dex_unlock = None
+        if after == "dex":
+            pending = self._pending_dex_unlock
+            self._pending_dex_unlock = None
+            if pending is not None:
+                screen, action = pending
+                if screen.is_mounted:
+                    self._prepare_dex_action(screen, action)
+            return
+
+        pending = self._pending_trustline_unlock
+        self._pending_trustline_unlock = None
         if pending is not None:
             screen, action = pending
             if screen.is_mounted:
-                self._prepare_dex_action(screen, action)
+                self._prepare_trustline_action(screen, action)
 
     @work(thread=True, exit_on_error=False)
     def _prepare_dex_action(
@@ -250,6 +309,53 @@ class FresnicaApp(BaseFresnicaApp):
         except (FresnicaError, ValueError) as exc:
             self.call_from_thread(self._finish_dex_prepare_error, screen, exc)
 
+    @work(thread=True, exit_on_error=False)
+    def _prepare_trustline_action(
+        self,
+        screen: TrustlineScreen,
+        action: TrustlineAction,
+    ) -> None:
+        try:
+            manager = self.runtime.wallet_manager
+            record = manager.get_record()
+            session = manager.current()
+            if session is None or session.record.name != record.name:
+                raise WalletLockedError(f'Wallet "{record.name}" is locked')
+            services = self.runtime.services_for(record.network)
+            service = services.trustline_service
+            if action.kind == "add":
+                prepared = service.prepare_add(
+                    record.name,
+                    session.wallet,
+                    action.asset,
+                    limit=action.limit,
+                )
+            elif action.kind == "limit":
+                prepared = service.prepare_limit(
+                    record.name,
+                    session.wallet,
+                    action.asset,
+                    action.limit,
+                )
+            elif action.kind == "remove":
+                prepared = service.prepare_remove(
+                    record.name,
+                    session.wallet,
+                    action.asset,
+                )
+            else:
+                raise ValueError(f"Unsupported trustline action: {action.kind}")
+            self.call_from_thread(
+                self._show_trustline_review,
+                screen,
+                session.wallet,
+                services,
+                prepared,
+                record.network,
+            )
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(self._finish_trustline_prepare_error, screen, exc)
+
     def _confirm_dex_trustline(
         self,
         screen: DexScreen,
@@ -295,6 +401,11 @@ class FresnicaApp(BaseFresnicaApp):
             screen.set_status(f"Offer preparation failed: {error}")
         self._show_error(error)
 
+    def _finish_trustline_prepare_error(self, screen: TrustlineScreen, error) -> None:
+        if screen.is_mounted:
+            screen.set_status(f"Trustline preparation failed: {error}")
+        self._show_error(error)
+
     def _show_dex_review(
         self,
         screen: DexScreen,
@@ -308,6 +419,23 @@ class FresnicaApp(BaseFresnicaApp):
         self._pending_dex_submit = (screen, wallet, services, prepared, network)
         screen.set_status("DEX operation ready for review.")
         self.push_screen(ReviewPresentationDialog(prepared.review), self._on_dex_review)
+
+    def _show_trustline_review(
+        self,
+        screen: TrustlineScreen,
+        wallet,
+        services,
+        prepared,
+        network: str,
+    ) -> None:
+        if not screen.is_mounted:
+            return
+        self._pending_trustline_submit = (screen, wallet, services, prepared, network)
+        screen.set_status("Trustline operation ready for review.")
+        self.push_screen(
+            ReviewPresentationDialog(prepared.review),
+            self._on_trustline_review,
+        )
 
     def _on_dex_review(self, confirmed: bool) -> None:
         pending = self._pending_dex_submit
@@ -323,6 +451,20 @@ class FresnicaApp(BaseFresnicaApp):
             screen.set_status("Submitting DEX operation...")
         self._submit_dex_pending()
 
+    def _on_trustline_review(self, confirmed: bool) -> None:
+        pending = self._pending_trustline_submit
+        if pending is None:
+            return
+        screen = pending[0]
+        if not confirmed:
+            self._pending_trustline_submit = None
+            if screen.is_mounted:
+                screen.set_status("Trustline operation cancelled · wallet remains unlocked.")
+            return
+        if screen.is_mounted:
+            screen.set_status("Submitting trustline operation...")
+        self._submit_trustline_pending()
+
     @work(thread=True, exit_on_error=False)
     def _submit_dex_pending(self) -> None:
         pending = self._pending_dex_submit
@@ -337,6 +479,33 @@ class FresnicaApp(BaseFresnicaApp):
             self.call_from_thread(self._finish_dex_submit, screen, None, network, exc)
         finally:
             self._pending_dex_submit = None
+
+    @work(thread=True, exit_on_error=False)
+    def _submit_trustline_pending(self) -> None:
+        pending = self._pending_trustline_submit
+        if pending is None:
+            return
+        screen, wallet, services, prepared, network = pending
+        try:
+            services.trustline_service.sign(wallet, prepared)
+            result = services.trustline_service.submit(prepared)
+            self.call_from_thread(
+                self._finish_trustline_submit,
+                screen,
+                result,
+                network,
+                None,
+            )
+        except (FresnicaError, ValueError) as exc:
+            self.call_from_thread(
+                self._finish_trustline_submit,
+                screen,
+                None,
+                network,
+                exc,
+            )
+        finally:
+            self._pending_trustline_submit = None
 
     def _finish_dex_submit(self, screen: DexScreen, result, network: str, error) -> None:
         if isinstance(error, TransactionSubmissionUncertain):
@@ -365,6 +534,38 @@ class FresnicaApp(BaseFresnicaApp):
         if screen.is_mounted:
             screen.set_status(message)
             screen.refresh_market()
+        self.refresh_wallet(message)
+
+    def _finish_trustline_submit(
+        self,
+        screen: TrustlineScreen,
+        result,
+        network: str,
+        error,
+    ) -> None:
+        if isinstance(error, TransactionSubmissionUncertain):
+            message = f"Submission status unknown · {error.tx_hash}"
+            if screen.is_mounted:
+                screen.set_status(message)
+            self._show_notice(
+                "Submission status unknown",
+                f"The transaction may already be on Stellar. Fresnica saved {error.tx_hash} "
+                "and will resolve it by hash before allowing another write from this account.",
+            )
+            return
+        if error is not None:
+            if screen.is_mounted:
+                screen.set_status(f"Trustline submission failed: {error}")
+            self._show_error(error)
+            return
+
+        message = (
+            f"Trustline transaction submitted on {network}: {result.hash}"
+            + (f" · ledger {result.ledger}" if result.ledger is not None else "")
+        )
+        if screen.is_mounted:
+            screen.set_status(message)
+            screen.refresh_trustlines()
         self.refresh_wallet(message)
 
     def _finish_send(self, result, network: str, error) -> None:
