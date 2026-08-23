@@ -1,4 +1,4 @@
-"""Asset-level wallet actions and lazy anchor capability presentation."""
+"""Asset-level wallet actions and explicit anchor capability presentation."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -57,11 +57,12 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         Binding("s", "send", "Send"),
         Binding("r", "receive", "Receive"),
         Binding("t", "trustline", "Trustline"),
+        Binding("a", "anchor", "Anchor"),
     ]
 
     CSS = """
     AssetDetailsScreen { align: center middle; }
-    AssetDetailsScreen > #asset-dialog { width: 100; height: auto; max-height: 90%; padding: 1 2; border: round $accent; background: $surface; }
+    AssetDetailsScreen > #asset-dialog { width: 100; height: auto; max-height: 86%; padding: 1 2; border: round $accent; background: $surface; }
     #asset-identity { text-style: bold; }
     #asset-balance, #asset-trustline, #asset-anchor { margin-top: 1; }
     #asset-anchor { color: $text-muted; }
@@ -73,13 +74,12 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         super().__init__()
         self.balance = balance
         self.asset = balance.asset
+        self.domain = str(balance.raw.get(ISSUER_DOMAIN_CACHE_KEY) or "").strip()
+        self._anchor_loading = False
 
     def compose(self) -> ComposeResult:
         identity = _asset_identity(self.balance)
-        source = asset_source(
-            self.asset,
-            str(self.balance.raw.get(ISSUER_DOMAIN_CACHE_KEY) or "") or None,
-        )
+        source = asset_source(self.asset, self.domain or None)
         with Vertical(id="asset-dialog"):
             yield Label("Asset details")
             yield Static(identity, id="asset-identity")
@@ -98,13 +98,10 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
                     yield Button("Send", id="send", variant="primary")
                 if not self.asset.is_native and not self.asset.is_liquidity_pool:
                     yield Button("Trustline", id="trustline")
+                    if self.domain:
+                        yield Button("Discover anchor", id="discover-anchor")
                 yield Button("Back", id="close")
-            yield Footer()
-
-    def on_mount(self) -> None:
-        domain = str(self.balance.raw.get(ISSUER_DOMAIN_CACHE_KEY) or "").strip()
-        if domain and not self.asset.is_native and not self.asset.is_liquidity_pool:
-            self._discover_anchor(domain)
+        yield Footer()
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -121,12 +118,27 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         if not self.asset.is_native and not self.asset.is_liquidity_pool:
             self.dismiss(AssetDetailAction("trustline", _asset_identity(self.balance)))
 
+    def action_anchor(self) -> None:
+        if (
+            not self.domain
+            or self.asset.is_native
+            or self.asset.is_liquidity_pool
+            or self._anchor_loading
+        ):
+            return
+        self._anchor_loading = True
+        self.query_one("#asset-anchor", Static).update(
+            f"Anchor discovery: loading stellar.toml and transfer capabilities from {self.domain}..."
+        )
+        self._discover_anchor(self.domain)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {
             "close": self.action_close,
             "send": self.action_send,
             "receive": self.action_receive,
             "trustline": self.action_trustline,
+            "discover-anchor": self.action_anchor,
         }
         action = actions.get(event.button.id)
         if action is not None:
@@ -141,6 +153,7 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             self.app.call_from_thread(self._apply_anchor, None, exc)
 
     def _apply_anchor(self, capabilities: AnchorCapabilities | None, error) -> None:
+        self._anchor_loading = False
         if not self.is_mounted:
             return
         widget = self.query_one("#asset-anchor", Static)
@@ -158,6 +171,8 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             parts.append(f"SEP-24: {methods} · {capabilities.sep24_url}")
         if capabilities.web_auth_url:
             parts.append(f"SEP-10 auth: {capabilities.web_auth_url}")
+        if capabilities.kyc_url:
+            parts.append(f"SEP-12 KYC: {capabilities.kyc_url}")
         if capabilities.direct_payment_url:
             parts.append(f"SEP-31: {capabilities.direct_payment_url}")
         parts.extend(f"Note: {warning}" for warning in capabilities.warnings)
@@ -197,7 +212,9 @@ def _anchor_initial_text(balance: BalanceView) -> str:
     if balance.asset.is_native or balance.asset.is_liquidity_pool:
         return ""
     domain = str(balance.raw.get(ISSUER_DOMAIN_CACHE_KEY) or "").strip()
-    return f"Anchor discovery: checking {domain}..." if domain else "Anchor discovery: issuer has no home_domain"
+    if domain:
+        return f"Anchor metadata available from {domain} · press A to discover SEP capabilities"
+    return "Anchor discovery: issuer has no home_domain"
 
 
 def _methods(deposit: bool, withdraw: bool) -> str:
