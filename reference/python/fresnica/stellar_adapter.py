@@ -102,6 +102,15 @@ class StellarAdapter:
                 details=_sdk_error_details(exc),
             ) from exc
 
+    def get_offer(self, offer_id: str | int) -> dict:
+        try:
+            return self.server.offers().offer(offer_id).call()
+        except SdkError as exc:
+            raise NetworkError(
+                f"Unable to load Stellar offer {offer_id}",
+                details=_sdk_error_details(exc),
+            ) from exc
+
     def get_trades(self, base: Asset, counter: Asset, limit: int = 20) -> dict:
         try:
             return (
