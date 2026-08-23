@@ -123,6 +123,76 @@ def test_claimable_plus_clawback_transaction_is_never_hidden_as_suspicious():
     assert not is_suspicious_claimable_activity(activity)
 
 
+def test_claimable_plus_same_sender_two_stroop_payment_is_suspicious():
+    account = Keypair.random().public_key
+    sender = Keypair.random().public_key
+    issuer = Keypair.random().public_key
+    service = _service(
+        account,
+        [
+            {
+                "paging_token": "51",
+                "transaction_hash": "spam-with-bait",
+                "type": "create_claimable_balance",
+                "source_account": sender,
+                "amount": "16.0000000",
+                "asset": f"GMB:{issuer}",
+                "claimants": [{"destination": account, "predicate": {"unconditional": True}}],
+            },
+            {
+                "paging_token": "50",
+                "transaction_hash": "spam-with-bait",
+                "type": "payment",
+                "source_account": sender,
+                "from": sender,
+                "to": account,
+                "amount": "0.0000002",
+                "asset_type": "native",
+            },
+        ],
+    )
+
+    [activity] = service.get_activity_views(Wallet.from_address(account), refresh=False)
+
+    assert is_suspicious_claimable_activity(activity)
+    assert "Incoming claimable asset: 16 GMB" in activity.summary
+    assert "Received 0.0000002 XLM" in activity.summary
+
+
+def test_claimable_plus_meaningful_payment_remains_visible():
+    account = Keypair.random().public_key
+    sender = Keypair.random().public_key
+    issuer = Keypair.random().public_key
+    service = _service(
+        account,
+        [
+            {
+                "paging_token": "61",
+                "transaction_hash": "mixed-payment",
+                "type": "create_claimable_balance",
+                "source_account": sender,
+                "amount": "16.0000000",
+                "asset": f"GMB:{issuer}",
+                "claimants": [{"destination": account, "predicate": {"unconditional": True}}],
+            },
+            {
+                "paging_token": "60",
+                "transaction_hash": "mixed-payment",
+                "type": "payment",
+                "source_account": sender,
+                "from": sender,
+                "to": account,
+                "amount": "1.0000000",
+                "asset_type": "native",
+            },
+        ],
+    )
+
+    [activity] = service.get_activity_views(Wallet.from_address(account), refresh=False)
+
+    assert not is_suspicious_claimable_activity(activity)
+
+
 def test_contract_call_summarizes_asset_changes_and_uses_current_metadata():
     account = Keypair.random().public_key
     sender = Keypair.random().public_key
@@ -160,7 +230,7 @@ def test_contract_call_summarizes_asset_changes_and_uses_current_metadata():
     )
 
     assert summary.startswith("Contract call · Received 12.5 USDC · circle.com")
-    assert "Alice ·" in summary
+    assert "👤 Alice ·" in summary
     assert sender in activity_counterparties(activity, account)
 
 

@@ -1,10 +1,13 @@
 """Account activity with local caching and human-readable summaries."""
 
+from decimal import Decimal, InvalidOperation
+
 from .models import ActivityView, OperationView
 from .presentation import format_amount, short_address
 
 
 SYNC_PAGE_LIMIT = 200
+SUSPICIOUS_NATIVE_DUST_MAX = Decimal("0.0000010")
 
 
 class HistoryService:
@@ -138,21 +141,65 @@ def _group_activities(operations: list[OperationView]) -> list[ActivityView]:
 
 
 def is_suspicious_claimable_activity(activity: ActivityView) -> bool:
-    """Return true only for activities made entirely of unsolicited claimables.
+    """Recognize unsolicited claimables and their same-sender stroop bait.
 
-    The previous implementation hid an entire transaction when *any* operation
-    was an unsolicited incoming claimable. That could hide legitimate sibling
-    operations such as clawbacks. A mixed transaction is therefore never
-    classified as suspicious here.
+    A claimable-only transaction is suspicious. A mixed transaction is also
+    suspicious when every sibling operation is a tiny incoming native payment
+    from the same sender to the same claimant. Other mixed transactions remain
+    visible, so legitimate sibling operations such as clawbacks are not hidden.
     """
     operations = list(activity.operations)
-    if not operations:
+    claimables = [item for item in operations if _is_unsolicited_claimable(item)]
+    if not claimables:
+        return False
+    if len(claimables) == len(operations):
+        return True
+
+    sources = {
+        str(item.raw.get("source_account"))
+        for item in claimables
+        if item.raw.get("source_account")
+    }
+    claimants = {
+        str(claimant.get("destination"))
+        for item in claimables
+        for claimant in item.raw.get("claimants", []) or []
+        if isinstance(claimant, dict) and claimant.get("destination")
+    }
+    if not sources or not claimants:
         return False
     return all(
-        item.operation_type == "create_claimable_balance"
-        and bool(item.raw.get("_fresnica_unsolicited_claimable"))
+        _is_unsolicited_claimable(item)
+        or _is_suspicious_native_companion(item, sources, claimants)
         for item in operations
     )
+
+
+def _is_unsolicited_claimable(operation: OperationView) -> bool:
+    return (
+        operation.operation_type == "create_claimable_balance"
+        and bool(operation.raw.get("_fresnica_unsolicited_claimable"))
+    )
+
+
+def _is_suspicious_native_companion(
+    operation: OperationView,
+    sources: set[str],
+    claimants: set[str],
+) -> bool:
+    if operation.operation_type != "payment":
+        return False
+    raw = operation.raw
+    source = raw.get("from") or raw.get("source_account")
+    if str(source or "") not in sources or str(raw.get("to") or "") not in claimants:
+        return False
+    if raw.get("asset_type") != "native":
+        return False
+    try:
+        amount = Decimal(str(raw.get("amount", "")))
+    except InvalidOperation:
+        return False
+    return Decimal("0") < amount <= SUSPICIOUS_NATIVE_DUST_MAX
 
 
 # Compatibility for callers outside the TUI while the old name ages out.
@@ -418,7 +465,7 @@ def _contract_asset_change(change, account, contact_names, issuer_domains) -> st
 def _address(value, contact_names: dict[str, str] | None) -> str:
     text = str(value or "?")
     if contact_names and text in contact_names:
-        return f"{contact_names[text]} · {short_address(text)}"
+        return f"👤 {contact_names[text]} · {short_address(text)}"
     return short_address(text)
 
 

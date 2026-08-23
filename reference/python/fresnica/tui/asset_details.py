@@ -20,7 +20,7 @@ from ..models import BalanceView
 from ..network import get_network
 from ..presentation import asset_source, format_amount, short_address
 from .screens import SendDialog, UnlockDialog
-from .trustlines import TrustlineAction, TrustlineFormDialog
+from .trustlines import TrustlineAction
 
 
 AssetDetailActionKind = Literal["send"]
@@ -60,7 +60,6 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
     BINDINGS = [
         Binding("escape", "close", "Back"),
         Binding("s", "send", "Send"),
-        Binding("l", "set_limit", "Set limit"),
         Binding("x", "remove_trustline", "Remove"),
         Binding("a", "anchor", "Anchor"),
         Binding("d", "anchor_deposit", "Deposit"),
@@ -100,7 +99,6 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
                 if not self.asset.is_liquidity_pool:
                     yield Button(Text("Send [S]"), id="send", variant="primary")
                 if not self.asset.is_native and not self.asset.is_liquidity_pool:
-                    yield Button(Text("Set limit [L]"), id="set-limit")
                     yield Button(Text("Remove [X]"), id="remove-trustline")
                     if self.domain:
                         yield Button(Text("Discover anchor [A]"), id="discover-anchor")
@@ -119,6 +117,7 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             buttons = self.query(selector)
             if buttons:
                 buttons.first().display = False
+        self._load_cached_anchor()
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -126,18 +125,6 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
     def action_send(self) -> None:
         if not self.asset.is_liquidity_pool:
             self.dismiss(AssetDetailAction("send", _asset_identity(self.balance)))
-
-    def action_set_limit(self) -> None:
-        if self.asset.is_native or self.asset.is_liquidity_pool:
-            return
-        self.app.push_screen(
-            TrustlineFormDialog(
-                "limit",
-                asset=_asset_identity(self.balance),
-                limit=str(self.balance.raw.get("limit", "")),
-            ),
-            self._on_trustline_form,
-        )
 
     def action_remove_trustline(self) -> None:
         if self.asset.is_native or self.asset.is_liquidity_pool:
@@ -149,10 +136,6 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             self,
             TrustlineAction(kind="remove", asset=_asset_identity(self.balance)),
         )
-
-    def _on_trustline_form(self, action: TrustlineAction | None) -> None:
-        if action is not None and self.on_trustline_action is not None:
-            self.on_trustline_action(self, action)
 
     def action_anchor(self) -> None:
         if (
@@ -260,7 +243,6 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         actions = {
             "close": self.action_close,
             "send": self.action_send,
-            "set-limit": self.action_set_limit,
             "remove-trustline": self.action_remove_trustline,
             "discover-anchor": self.action_anchor,
             "anchor-deposit": self.action_anchor_deposit,
@@ -278,6 +260,19 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         except (FresnicaError, ValueError) as exc:
             self.app.call_from_thread(self._apply_anchor, None, exc)
 
+    def _load_cached_anchor(self) -> None:
+        if self.runtime is None or not self.domain:
+            return
+        store = getattr(self.runtime, "anchor_capabilities_store", None)
+        if store is None:
+            return
+        try:
+            capabilities = store.get(self.asset, self.domain)
+        except FresnicaError:
+            return
+        if capabilities is not None:
+            self._show_anchor(capabilities)
+
     def _apply_anchor(self, capabilities: AnchorCapabilities | None, error) -> None:
         self._anchor_loading = False
         if not self.is_mounted:
@@ -288,7 +283,22 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             return
         if capabilities is None:
             return
+        cache_error = None
+        store = getattr(self.runtime, "anchor_capabilities_store", None) if self.runtime else None
+        if store is not None:
+            try:
+                store.put(self.asset, capabilities)
+            except FresnicaError as exc:
+                cache_error = exc
+        self._show_anchor(capabilities)
+        if cache_error is not None:
+            self.set_status(f"Anchor discovered · cache unavailable: {cache_error}")
+        else:
+            self.set_status("Anchor capabilities updated and cached.")
+
+    def _show_anchor(self, capabilities: AnchorCapabilities) -> None:
         self._anchor_capabilities = capabilities
+        widget = self.query_one("#asset-anchor", Static)
         parts = [f"Anchor: {capabilities.domain}"]
         if capabilities.sep24_url:
             methods = _methods(capabilities.sep24_deposit, capabilities.sep24_withdraw)
@@ -305,6 +315,9 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
             parts.append("No SEP-6/SEP-24 transfer service advertised")
         widget.update("\n".join(parts))
 
+        discover = self.query("#discover-anchor")
+        if discover:
+            discover.first().label = Text("Refresh anchor [A]")
         deposit = self.query("#anchor-deposit")
         withdraw = self.query("#anchor-withdraw")
         if deposit:
@@ -347,7 +360,7 @@ class AssetDetailsScreen(ModalScreen[AssetDetailAction | None]):
         if balance is None:
             self.query_one("#asset-trustline", Static).update("Trustline removed")
             self.set_status("Trustline removed · return to Assets (Esc).")
-            for selector in ("#set-limit", "#remove-trustline"):
+            for selector in ("#remove-trustline",):
                 widgets = self.query(selector)
                 if widgets:
                     widgets.first().display = False

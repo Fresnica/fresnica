@@ -3,15 +3,15 @@ from decimal import Decimal
 
 from stellar_sdk import Keypair
 from textual.app import App
-from textual.widgets import Input, Static
+from textual.widgets import Static
 
+from fresnica.anchor_cache import AnchorCapabilitiesStore
 from fresnica.anchor_service import AnchorCapabilities, AnchorInteractiveTransfer
 from fresnica.balance_service import ISSUER_DOMAIN_CACHE_KEY
 from fresnica.manager import WalletManager
 from fresnica.models import Asset, BalanceView
 from fresnica.storage import MemoryWalletStorage
 from fresnica.tui.asset_details import AssetDetailsScreen
-from fresnica.tui.trustlines import TrustlineFormDialog
 
 
 async def _settle(pilot, rounds=6):
@@ -20,7 +20,8 @@ async def _settle(pilot, rounds=6):
 
 
 class Runtime:
-    def __init__(self):
+    def __init__(self, tmp_path):
+        self.anchor_capabilities_store = AnchorCapabilitiesStore(tmp_path / "anchors.json")
         self.wallet_manager = WalletManager(MemoryWalletStorage())
         self.keypair = Keypair.random()
         self.wallet_manager.import_secret(
@@ -56,9 +57,9 @@ def _balance():
     )
 
 
-def test_asset_details_has_direct_trustline_actions_and_no_generic_receive():
+def test_asset_details_hides_advanced_limit_action_but_keeps_remove(tmp_path):
     async def scenario():
-        runtime = Runtime()
+        runtime = Runtime(tmp_path)
         actions = []
         app = HostApp(runtime)
         balance = _balance()
@@ -72,22 +73,8 @@ def test_asset_details_has_direct_trustline_actions_and_no_generic_receive():
             await _settle(pilot)
 
             assert len(screen.query("#receive")) == 0
-            assert len(screen.query("#set-limit")) == 1
+            assert len(screen.query("#set-limit")) == 0
             assert len(screen.query("#remove-trustline")) == 1
-
-            await pilot.press("l")
-            await _settle(pilot)
-            assert isinstance(app.screen, TrustlineFormDialog)
-            assert str(app.screen.query_one("#asset-label", Static).render()) == (
-                f"USD:{balance.asset.issuer}"
-            )
-            app.screen.query_one("#limit", Input).value = "250"
-            await pilot.click("#review")
-            await _settle(pilot)
-            assert actions[-1][0] is screen
-            assert actions[-1][1].kind == "limit"
-            assert actions[-1][1].asset == f"USD:{balance.asset.issuer}"
-            assert actions[-1][1].limit == "250"
 
             await pilot.press("x")
             await _settle(pilot)
@@ -97,12 +84,13 @@ def test_asset_details_has_direct_trustline_actions_and_no_generic_receive():
     asyncio.run(scenario())
 
 
-def test_anchor_discovery_exposes_real_sep24_action_and_opens_browser(monkeypatch):
+def test_anchor_discovery_is_cached_and_reused_without_network(tmp_path, monkeypatch):
     async def scenario():
-        runtime = Runtime()
+        runtime = Runtime(tmp_path)
         runtime.wallet_manager.unlock("main", "pw")
         opened = []
         started = []
+        discoveries = []
         balance = _balance()
         capabilities = AnchorCapabilities(
             domain="anchor.example",
@@ -117,6 +105,7 @@ def test_anchor_discovery_exposes_real_sep24_action_and_opens_browser(monkeypatc
             def discover(self, asset, domain):
                 assert asset == balance.asset
                 assert domain == "anchor.example"
+                discoveries.append((asset, domain))
                 return capabilities
 
             def start_sep24(self, wallet, asset, found, kind, network_passphrase):
@@ -142,15 +131,27 @@ def test_anchor_discovery_exposes_real_sep24_action_and_opens_browser(monkeypatc
 
             await pilot.press("a")
             await _settle(pilot, 8)
+            assert discoveries == [(balance.asset, "anchor.example")]
+            assert runtime.anchor_capabilities_store.get(balance.asset, "anchor.example") == capabilities
             assert screen.query_one("#anchor-deposit").display is True
             assert screen.query_one("#anchor-withdraw").display is True
+
+            await pilot.press("escape")
+            await _settle(pilot, 3)
+            cached_screen = AssetDetailsScreen(balance, runtime=runtime)
+            app.push_screen(cached_screen)
+            await _settle(pilot, 5)
+            assert discoveries == [(balance.asset, "anchor.example")]
+            assert cached_screen.query_one("#anchor-deposit").display is True
+            assert cached_screen.query_one("#anchor-withdraw").display is True
+            assert cached_screen.query_one("#discover-anchor").label.plain == "Refresh anchor [A]"
 
             await pilot.press("d")
             await _settle(pilot, 8)
             assert started and started[0][3] == "deposit"
             assert opened == [("https://anchor.example/interactive/1", 2)]
             assert "Opened anchor deposit flow" in str(
-                screen.query_one("#asset-status", Static).render()
+                cached_screen.query_one("#asset-status", Static).render()
             )
 
     asyncio.run(scenario())

@@ -475,6 +475,9 @@ class DexScreen(ModalScreen[None]):
     .dex-section { height: 1; text-style: bold; }
     #book-row { height: 2fr; min-height: 8; }
     .book-pane { width: 1fr; height: 1fr; padding: 0 1; }
+    #bids-pane { align-horizontal: right; }
+    .bid-section { text-align: right; }
+    #dex-bids { width: auto; min-width: 34; }
     #dex-asks, #dex-bids { height: 1fr; }
     #dex-trades { height: 1fr; min-height: 6; }
     #account-row { height: 2fr; min-height: 8; }
@@ -488,6 +491,7 @@ class DexScreen(ModalScreen[None]):
         self.pair = pair
         self.on_offer_action = on_offer_action
         self._visible_offers: list[OpenOffer] = []
+        self._visible_fills = []
         self._recent_trades: list[dict] = []
         self._orderbook: dict = {}
         self._refresh_revision = 0
@@ -508,10 +512,10 @@ class DexScreen(ModalScreen[None]):
             yield Button(Text("★ Star [F]"), id="favorite")
         yield Static("Loading market snapshot...", id="dex-status")
         with Horizontal(id="book-row"):
-            with Vertical(classes="book-pane"):
-                yield Label("BID · BUY", classes="dex-section")
+            with Vertical(id="bids-pane", classes="book-pane"):
+                yield Label("BID · BUY", classes="dex-section bid-section")
                 yield DataTable(id="dex-bids")
-            with Vertical(classes="book-pane"):
+            with Vertical(id="asks-pane", classes="book-pane"):
                 yield Label("ASK · SELL", classes="dex-section")
                 yield DataTable(id="dex-asks")
         yield Label("Recent market trades · realtime", classes="dex-section")
@@ -574,7 +578,11 @@ class DexScreen(ModalScreen[None]):
         if store is not None:
             store.save(settings)
         self._update_time_columns()
-        self.refresh_market()
+        self._render_recent_trades()
+        self._render_fills()
+        zone = "local" if settings.use_local_time else "UTC"
+        suffix = self._realtime_label() if self._streams_started else "snapshot loaded"
+        self._set_market_status(f"{suffix} · {zone} time")
 
     def action_favorite_market(self) -> None:
         store = getattr(self.runtime, "market_preferences", None)
@@ -605,6 +613,7 @@ class DexScreen(ModalScreen[None]):
         self._stop_realtime()
         self.pair = swapped
         self._visible_offers = []
+        self._visible_fills = []
         self._recent_trades = []
         self._orderbook = {}
         self._counts = (0, 0, 0, 0, 0)
@@ -755,18 +764,8 @@ class DexScreen(ModalScreen[None]):
                 offer.offer_id,
             )
 
-        fill_table = self.query_one("#dex-fills", DataTable)
-        fill_table.clear()
-        for item in fills:
-            fill_table.add_row(
-                self._time(item.last_time or item.first_time),
-                item.side.upper(),
-                format_amount(item.base_amount),
-                _stellar_ratio_text(item.price_r),
-                format_amount(item.counter_amount),
-                str(item.trade_count),
-                offer_id_label(item.user_offer_id),
-            )
+        self._visible_fills = list(fills)
+        self._render_fills()
 
         self._counts = (
             len(orderbook.get("asks", [])),
@@ -800,8 +799,8 @@ class DexScreen(ModalScreen[None]):
         for row in orderbook.get("bids", []):
             amount = _bid_base_amount(row)
             bids.add_row(
-                _stellar_decimal_text(amount),
-                _stellar_decimal_text(_book_price(row), style="green"),
+                _stellar_decimal_text(amount, justify="right"),
+                _stellar_decimal_text(_book_price(row), style="green", justify="right"),
             )
 
     def _render_recent_trades(self) -> None:
@@ -813,6 +812,20 @@ class DexScreen(ModalScreen[None]):
                 _stellar_decimal_text(_trade_price(raw), style="green" if buy else "red"),
                 format_amount(_decimal(raw.get("base_amount", "0"))),
                 self._time(raw.get("ledger_close_time")),
+            )
+
+    def _render_fills(self) -> None:
+        table = self.query_one("#dex-fills", DataTable)
+        table.clear()
+        for item in self._visible_fills:
+            table.add_row(
+                self._time(item.last_time or item.first_time),
+                item.side.upper(),
+                format_amount(item.base_amount),
+                _stellar_ratio_text(item.price_r),
+                format_amount(item.counter_amount),
+                str(item.trade_count),
+                offer_id_label(item.user_offer_id),
             )
 
     def _start_realtime(self, pair: MarketPair) -> None:
@@ -1082,9 +1095,13 @@ def _trade_price(raw: dict) -> Decimal:
     return counter / base if base > 0 else Decimal("0")
 
 
-def _stellar_decimal_text(value, style: str | None = None) -> Text:
+def _stellar_decimal_text(
+    value,
+    style: str | None = None,
+    justify: str | None = None,
+) -> Text:
     significant, padding = stellar_decimal_parts(value)
-    text = Text()
+    text = Text(justify=justify)
     text.append(significant, style=style)
     if padding:
         pad_style = f"{style} dim" if style else "dim"

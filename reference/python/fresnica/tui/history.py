@@ -4,7 +4,7 @@ from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Label, Select, Static
 
@@ -65,7 +65,8 @@ class ActivityDetailDialog(ModalScreen[str | None]):
     ActivityDetailDialog { align: center middle; }
     ActivityDetailDialog > #dialog { width: 100; height: auto; max-height: 90%; padding: 1 2; border: round $accent; background: $surface; }
     #activity-detail { margin: 1 0; }
-    #activity-ops { height: auto; max-height: 18; }
+    #activity-ops { height: auto; min-height: 3; max-height: 18; margin-top: 1; }
+    .activity-op { width: 100%; height: auto; margin-bottom: 1; }
     #activity-actions { height: auto; margin-top: 1; align-horizontal: right; }
     """
 
@@ -109,32 +110,31 @@ class ActivityDetailDialog(ModalScreen[str | None]):
         with Vertical(id="dialog"):
             yield Label("Activity details")
             yield Static(text, id="activity-detail")
-            yield DataTable(id="activity-ops")
+            with VerticalScroll(id="activity-ops"):
+                for index, operation in enumerate(self.operations, start=1):
+                    yield Static(self._operation_detail(index, operation), classes="activity-op")
             with Horizontal(id="activity-actions"):
                 if self.counterparties:
                     yield Button("Add contact [A]", id="add-contact")
                 yield Button("Back [Esc]", id="close", variant="primary")
 
-    def on_mount(self) -> None:
-        table = self.query_one("#activity-ops", DataTable)
-        if not table.columns:
-            table.add_columns("#", "Operation", "Details")
-        table.cursor_type = "row"
-        if table.row_count:
-            return
-        for index, operation in enumerate(self.operations, start=1):
-            raw = operation.raw
-            details = operation.summary
-            source = raw.get("source_account")
-            if source and source != self.account:
-                details += f" · source {_address_label(source, self.contact_names)}"
-            changes = raw.get("asset_balance_changes", []) or []
-            if changes:
-                details += f" · {len(changes)} asset change{'s' if len(changes) != 1 else ''}"
-            token = raw.get("paging_token") or raw.get("id")
-            if token:
-                details += f" · op {token}"
-            table.add_row(str(index), _operation_label(operation.operation_type), details)
+    def _operation_detail(self, index: int, operation) -> Text:
+        raw = operation.raw
+        details = operation.summary
+        source = raw.get("source_account")
+        if source and source != self.account:
+            details += f" · source {_address_label(source, self.contact_names)}"
+        changes = raw.get("asset_balance_changes", []) or []
+        if changes:
+            details += f" · {len(changes)} asset change{'s' if len(changes) != 1 else ''}"
+        token = raw.get("paging_token") or raw.get("id")
+        if token:
+            details += f" · op {token}"
+        text = Text()
+        text.append(f"#{index} {_operation_label(operation.operation_type)}", style="bold")
+        text.append("\n")
+        text.append(details)
+        return text
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -393,7 +393,7 @@ class HistoryScreen(ModalScreen[None]):
 
 def _address_label(address: str, contact_names: dict[str, str]) -> str:
     name = contact_names.get(address)
-    return f"{name} · {short_address(address)}" if name else short_address(address)
+    return f"👤 {name} · {short_address(address)}" if name else short_address(address)
 
 
 def _operation_label(kind: str) -> str:
