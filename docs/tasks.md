@@ -61,11 +61,11 @@
 - [x] Submit flow
 - [x] User-facing transaction result
 - [x] Result/history refresh after submit
-- [ ] Memo-required account handling
+- [x] Memo-required account handling
 
 ## Quality
 
 - [x] Unit tests for storage, encryption, cache, CLI parsing, availability, runtime, and transfer orchestration
 - [x] GitHub Actions test workflow
-- [ ] Real Horizon integration tests on Testnet
+- [x] Real Horizon integration tests on Testnet
 - [ ] Cross-language test vectors for future Rust Core

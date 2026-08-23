@@ -1,10 +1,10 @@
-name: SDEX Testnet live probe
+name: Testnet live probes
 
 on:
   workflow_dispatch:
 
 jobs:
-  sdex-testnet-live:
+  testnet-live:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -16,7 +16,10 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - name: Run live SDEX probe
+      - name: Run live Testnet probes
         env:
           FRESNICA_LIVE_TESTNET: "1"
-        run: uv run pytest -q -s tests/test_sdex_testnet_live.py
+        run: >-
+          uv run pytest -q -s
+          tests/test_sdex_testnet_live.py
+          tests/test_transfer_testnet_live.py

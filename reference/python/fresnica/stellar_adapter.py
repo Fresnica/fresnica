@@ -3,8 +3,9 @@
 from stellar_sdk import Asset as StellarAsset
 from stellar_sdk import Price, Server, TransactionBuilder
 from stellar_sdk.exceptions import NotFoundError, SdkError
+from stellar_sdk.sep.exceptions import AccountRequiresMemoError
 
-from .errors import NetworkError, TransactionError
+from .errors import MemoRequiredError, NetworkError, TransactionError
 from .models import Asset, PriceRatio
 from .network import Network
 
@@ -344,6 +345,8 @@ class StellarAdapter:
     def submit_transaction(self, transaction) -> dict:
         try:
             return self.server.submit_transaction(transaction)
+        except AccountRequiresMemoError as exc:
+            raise MemoRequiredError(exc.account_id) from exc
         except SdkError as exc:
             raise TransactionError(
                 "Stellar transaction submission failed",
