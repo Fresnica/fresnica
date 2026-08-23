@@ -59,6 +59,7 @@ Core keys:
 
 ```text
 w  wallet management
+d  open Stellar DEX
 s  send (signing wallets only)
 l  lock / unlock
 r  refresh dashboard data
@@ -69,7 +70,7 @@ q  quit
 
 The footer is the canonical shortcut guide. The wallet header only shows
 signing-context actions such as `S Send` and `L Unlock`; it does not duplicate
-`W/R/H/Q`. Refresh progress appears beside dashboard data and ends with an
+`W/D/R/H/Q`. Refresh progress appears beside dashboard data and ends with an
 `Updated HH:MM:SS` timestamp.
 
 Assets are presented as holdings rather than raw Horizon balances. XLM is always
@@ -114,11 +115,11 @@ written into the main status line. Form validation remains next to the field,
 while network/protocol failures use an error dialog that can include `DEV`
 diagnostics.
 
-Unlocking is independent from sending. If a locked wallet starts a write action,
-Fresnica opens an Unlock dialog first. Once unlocked, the wallet stays unlocked
-for the TUI session until the user explicitly locks it, switches wallets, or
-quits. The Send form therefore contains only payment fields; the wallet password
-is not a payment parameter.
+Unlocking is independent from sending or trading. If a locked wallet starts a
+write action, Fresnica opens an Unlock dialog first. Once unlocked, the wallet
+stays unlocked for the TUI session until the user explicitly locks it, switches
+wallets, or quits. Send and DEX forms therefore contain only operation fields;
+the wallet password is not a payment or trading parameter.
 
 A network can be selected for a one-shot CLI invocation. Put the global option
 before the command:
@@ -281,10 +282,19 @@ Offers, trades, account fills, and trade aggregations retain their raw Horizon
 JSON in the local SQLite cache while indexing fields useful for wallet and
 market views.
 
-The SDEX write semantics and CLI are implemented in the Python reference. The
-state-driven TUI trading screen is a separate presentation slice; it will consume
-the same `MarketPair`, `OpenOffer`, `OfferView`, `OfferIntent`, and `OfferService`
-models rather than duplicate protocol logic.
+The TUI opens SDEX with `D` and requires an explicit `BASE/COUNTER` market before
+it labels any canonical offer as BUY or SELL. The pair-scoped screen shows the
+order book, current wallet offers, and wallet fill segments; reverse canonical
+offers and fills are projected through the same `MarketPair` semantics used by
+the CLI and Mobile/Fex. Inside the market, `B` creates BUY, `S` creates SELL,
+`E` edits the selected offer without changing its projected side, `X` cancels,
+and `R` refreshes. Watch-only wallets retain all read views but cannot start a
+write. Locked signing wallets resume the pending DEX action after Unlock. A
+missing receiving trustline gets its own explicit confirmation before the final
+transaction review, and successful writes refresh both market state and the
+wallet dashboard. The TUI uses the same `OpenOffer`, `OfferView`, `OfferIntent`,
+`OfferService`, signer, and submit pipeline rather than duplicating protocol
+logic in presentation code.
 
 Other one-shot commands:
 

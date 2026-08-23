@@ -3,7 +3,11 @@ from decimal import Decimal
 from stellar_sdk import Keypair
 
 from fresnica.models import AccountTrade, Asset, MarketPair, PriceRatio
-from fresnica.trade_segments import account_trade_for_pair, compress_account_trades
+from fresnica.trade_segments import (
+    account_trade_for_pair,
+    account_trade_segment_for_pair,
+    compress_account_trades,
+)
 
 
 ADDRESS = Keypair.random().public_key
@@ -100,3 +104,34 @@ def test_reversed_pair_swaps_amounts_price_accounts_and_offer_ids():
     assert normalized.counter_account == ADDRESS
     assert normalized.base_offer_id == "raw-counter"
     assert normalized.counter_offer_id == "raw-base"
+
+
+def test_aggregated_segment_projects_to_selected_reverse_pair():
+    segments = compress_account_trades(
+        [
+            _trade(
+                trade_id="t1",
+                base_amount=Decimal("474.0405734"),
+                counter_amount=Decimal("2813.2971715"),
+                price_r=PriceRatio(2000, 337),
+            ),
+            _trade(
+                trade_id="t2",
+                base_amount=Decimal("2.7535719"),
+                counter_amount=Decimal("16.3416730"),
+                price_r=PriceRatio(2000, 337),
+            ),
+        ],
+        ADDRESS,
+    )
+    reverse = MarketPair(base=PAIR.counter, counter=PAIR.base)
+
+    projected = account_trade_segment_for_pair(segments[0], reverse)
+    assert projected is not None
+    assert projected.pair == reverse
+    assert projected.side == "buy"
+    assert projected.base_amount == Decimal("2829.6388445")
+    assert projected.counter_amount == Decimal("476.7941453")
+    assert projected.price_r == PriceRatio(337, 2000)
+    assert projected.user_offer_id == "offer-1"
+    assert projected.trade_count == 2

@@ -25,9 +25,9 @@
 - [x] SQLite implementation
 - [x] Network-isolated raw balance cache
 - [x] Raw operation/history cache
-- [ ] Offers cache
-- [ ] Trades cache
-- [ ] Fex-style trade aggregation / market data
+- [x] Offers cache
+- [x] Trades cache
+- [x] Fex-style trade aggregation / market data
 
 ## CLI
 
@@ -50,7 +50,7 @@
 - [ ] Wallet switcher
 - [ ] History screen
 - [ ] Send/unlock/review modal flow
-- [ ] SDEX screen
+- [x] Pair-scoped SDEX screen
 
 ## Transaction
 

@@ -70,6 +70,29 @@ def account_trade_for_pair(
     )
 
 
+def account_trade_segment_for_pair(
+    segment: AccountTradeSegment,
+    pair: MarketPair,
+) -> AccountTradeSegment | None:
+    """Project one aggregated fill segment into an explicit market orientation."""
+    if segment.pair == pair:
+        return segment
+    if segment.pair.base != pair.counter or segment.pair.counter != pair.base:
+        return None
+
+    side = "sell" if segment.side == "buy" else "buy"
+    price_r = PriceRatio(segment.price_r.d, segment.price_r.n)
+    return replace(
+        segment,
+        segment_key=_segment_identity(pair, side, price_r, segment.user_offer_id),
+        pair=pair,
+        side=side,
+        base_amount=segment.counter_amount,
+        counter_amount=segment.base_amount,
+        price_r=price_r,
+    )
+
+
 def compress_account_trades(
     records: list[AccountTrade],
     address: str,
@@ -150,12 +173,21 @@ def user_offer_id(trade: AccountTrade, address: str) -> str | None:
 
 
 def _segment_key(trade: AccountTrade, offer_id: str | None) -> str:
+    return _segment_identity(trade.pair, trade.side, trade.price_r, offer_id)
+
+
+def _segment_identity(
+    pair: MarketPair,
+    side: str,
+    price_r: PriceRatio,
+    offer_id: str | None,
+) -> str:
     return "|".join(
         (
-            _asset_key(trade.pair.base),
-            _asset_key(trade.pair.counter),
-            trade.side,
-            f"{trade.price_r.n}:{trade.price_r.d}",
+            _asset_key(pair.base),
+            _asset_key(pair.counter),
+            side,
+            f"{price_r.n}:{price_r.d}",
             offer_id or "",
         )
     )
