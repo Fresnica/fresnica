@@ -23,6 +23,7 @@ jobs:
             echo 'implementation already applied'
           else
             python tools/sep6_search_patch.py
+            python tools/sep6_search_patch_fixup.py
           fi
       - name: Diff check
         run: git diff --check
