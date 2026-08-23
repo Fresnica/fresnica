@@ -3,6 +3,7 @@
 from .errors import TransactionSubmissionUncertain
 from .models import TransactionResult
 from .offer_result import parse_offer_submission_outcome
+from .review import OfferReview, TrustlineReview
 
 
 class TransactionService:
@@ -38,8 +39,9 @@ class TransactionService:
 
 
 def _pending_kind(review) -> str:
-    action = getattr(review, "action", None)
-    if action:
-        return f"offer:{action}"
+    if isinstance(review, OfferReview):
+        return f"offer:{review.action}"
+    if isinstance(review, TrustlineReview):
+        return f"trustline:{review.action}"
     operation = getattr(review, "operation", None)
     return str(operation or "transaction")
