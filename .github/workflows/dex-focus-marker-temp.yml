@@ -16,7 +16,9 @@ jobs:
         with:
           ref: codex/dex-focus-orderbook-trustline-marker
       - name: Apply patch
-        run: python tools/dex_focus_marker_patch.py
+        run: |
+          python tools/dex_focus_marker_patch.py
+          python tools/dex_focus_marker_patch2.py
       - name: Diff check
         run: git diff --check
       - name: Install uv
