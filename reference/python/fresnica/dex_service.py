@@ -1,6 +1,8 @@
-"""Read-only SDEX market data built on Horizon through the Stellar SDK."""
+"""SDEX market and account data built on Horizon through the Stellar SDK."""
 
 from .models import Asset
+from .offer_service import open_offer_from_horizon
+from .trade_segments import account_trade_from_horizon, compress_account_trades
 
 
 RESOLUTIONS = {
@@ -31,6 +33,19 @@ class DexService:
             self.datastore.save_offers(self.network_name, address, response)
             return _records(response)
         return self.datastore.get_offers(self.network_name, address, limit=limit)
+
+    def get_open_offers(self, wallet, limit: int = 20, refresh: bool = True):
+        return [
+            open_offer_from_horizon(item)
+            for item in self.get_offers(wallet, limit=limit, refresh=refresh)
+        ]
+
+    def get_account_trade_segments(self, wallet, limit: int = 200):
+        """Fetch recent wallet fills and compress consecutive fills per offer."""
+        address = wallet.address()
+        response = self.adapter.get_account_trades(address, limit=limit, desc=True)
+        trades = [account_trade_from_horizon(item, address) for item in _records(response)]
+        return compress_account_trades(trades, address)
 
     def get_trades(
         self,
