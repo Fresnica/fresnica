@@ -8,23 +8,26 @@ def refresh_after_submit(services, wallet, *, include_dex: bool = False) -> None
     actions = []
 
     balance_service = getattr(services, "balance_service", None)
-    if balance_service is not None:
-        actions.append(lambda: balance_service.get_account(wallet, refresh=True))
+    get_account = getattr(balance_service, "get_account", None)
+    if callable(get_account):
+        actions.append(lambda: get_account(wallet, refresh=True))
 
     history_service = getattr(services, "history_service", None)
-    if history_service is not None:
-        actions.append(lambda: history_service.sync_recent(wallet))
+    sync_recent = getattr(history_service, "sync_recent", None)
+    if callable(sync_recent):
+        actions.append(lambda: sync_recent(wallet))
 
     if include_dex:
         dex_service = getattr(services, "dex_service", None)
-        if dex_service is not None:
-            actions.extend(
-                [
-                    lambda: dex_service.get_open_offers(wallet, limit=200, refresh=True),
-                    lambda: dex_service.get_account_trade_segments(
-                        wallet, limit=200, refresh=True
-                    ),
-                ]
+        get_open_offers = getattr(dex_service, "get_open_offers", None)
+        if callable(get_open_offers):
+            actions.append(
+                lambda: get_open_offers(wallet, limit=200, refresh=True)
+            )
+        get_segments = getattr(dex_service, "get_account_trade_segments", None)
+        if callable(get_segments):
+            actions.append(
+                lambda: get_segments(wallet, limit=200, refresh=True)
             )
 
     for action in actions:
