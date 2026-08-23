@@ -15,6 +15,7 @@ def test_runtime_composes_and_caches_network_services(tmp_path):
     assert mainnet is not runtime.services_for("testnet")
     assert runtime.wallet_manager.storage is runtime.wallet_storage
     assert runtime.contact_store.path == tmp_path / "contacts.json"
+    assert runtime.anchor_transfer_service is not None
     assert mainnet.pending_transaction_service.store is runtime.pending_transaction_store
 
 
