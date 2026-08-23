@@ -10,7 +10,7 @@ from .errors import TransactionPendingError
 
 
 PendingStatus = Literal["pending", "confirmed", "expired"]
-DEFAULT_PENDING_TTL_SECONDS = 180
+DEFAULT_PENDING_TTL_SECONDS = 210
 
 
 @dataclass(frozen=True)
@@ -127,6 +127,14 @@ class PendingTransactionService:
         self.store.put(pending)
         return pending
 
+    def has_pending(self, account: str) -> bool:
+        """Local-only check used by event-loop UI paths."""
+        return bool(self.store.list(self.network, account))
+
+    def first_pending(self, account: str) -> PendingTransaction | None:
+        items = self.store.list(self.network, account)
+        return items[0] if items else None
+
     def resolve(self, account: str) -> list[PendingResolution]:
         resolutions = []
         now = datetime.now(timezone.utc)
@@ -146,6 +154,7 @@ class PendingTransactionService:
         return resolutions
 
     def ensure_clear(self, account: str) -> list[PendingResolution]:
+        """Blocking reconciliation for CLI/write orchestration outside a UI event loop."""
         resolutions = self.resolve(account)
         for item in resolutions:
             if item.status == "pending":
