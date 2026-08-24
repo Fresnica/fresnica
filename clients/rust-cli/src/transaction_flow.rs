@@ -57,15 +57,35 @@ pub fn build_single_operation_envelope(
     base_fee: u32,
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
+    build_operation_envelope(source, vec![body], current_sequence, base_fee, memo)
+}
+
+pub fn build_operation_envelope(
+    source: &str,
+    bodies: Vec<OperationBody>,
+    current_sequence: i64,
+    base_fee_per_operation: u32,
+    memo: Option<&str>,
+) -> Result<TransactionEnvelope, String> {
+    if bodies.is_empty() {
+        return Err("transaction must contain at least one operation".to_owned());
+    }
     let source = AccountId::from_str(source)
         .map_err(|_| "wallet source must be a Classic G address".to_owned())?;
-    let operation = Operation {
-        source_account: None,
-        body,
-    };
-    let operations: VecM<Operation, 100> = vec![operation]
+    let operation_count = u32::try_from(bodies.len())
+        .map_err(|_| "too many transaction operations".to_owned())?;
+    let operations: VecM<Operation, 100> = bodies
+        .into_iter()
+        .map(|body| Operation {
+            source_account: None,
+            body,
+        })
+        .collect::<Vec<_>>()
         .try_into()
         .map_err(|_| "too many transaction operations".to_owned())?;
+    let fee = base_fee_per_operation
+        .checked_mul(operation_count)
+        .ok_or_else(|| "transaction fee overflow".to_owned())?;
     let memo = match memo {
         Some(value) if !value.is_empty() => Memo::Text(
             StringM::<28>::try_from(value)
@@ -84,7 +104,7 @@ pub fn build_single_operation_envelope(
         .ok_or_else(|| "transaction timeout overflow".to_owned())?;
     let transaction = Transaction {
         source_account: account_id_to_muxed(&source),
-        fee: base_fee,
+        fee,
         seq_num: SequenceNumber(sequence),
         cond: Preconditions::Time(TimeBounds {
             min_time: TimePoint(0),
@@ -291,10 +311,33 @@ fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    const SOURCE: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
     #[test]
     fn exact_stroop_parser_rejects_rounding() {
         assert_eq!(parse_positive_stroops("1.2345678").unwrap(), 12_345_678);
         assert!(parse_positive_stroops("1.23456789").is_err());
         assert!(parse_positive_stroops("0").is_err());
+    }
+
+    #[test]
+    fn multi_operation_builder_multiplies_base_fee() {
+        let body = OperationBody::BumpSequence(stellar_xdr::BumpSequenceOp {
+            bump_to: SequenceNumber(9),
+        });
+        let envelope = build_operation_envelope(
+            SOURCE,
+            vec![body.clone(), body],
+            7,
+            100,
+            None,
+        )
+        .unwrap();
+        let TransactionEnvelope::Tx(envelope) = envelope else {
+            panic!("expected v1 transaction envelope");
+        };
+        assert_eq!(envelope.tx.fee, 200);
+        assert_eq!(envelope.tx.operations.len(), 2);
+        assert_eq!(envelope.tx.seq_num, SequenceNumber(8));
     }
 }

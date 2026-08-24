@@ -6,8 +6,8 @@ It is the second concrete Core client after the Python reference/TUI bridge.
 ## Current scope
 
 The native client currently covers local wallet lifecycle, read-only Horizon
-queries, reviewed payments, issued-asset trustline lifecycle, and the first
-read-only SDEX slice:
+queries, reviewed payments, issued-asset trustline lifecycle, and Classic SDEX
+read/write operations:
 
 - `info [--wallet NAME]`
 - `account [--wallet NAME] [--json]`
@@ -19,6 +19,10 @@ read-only SDEX slice:
 - `trust remove CODE:GISSUER [--wallet NAME] [-y]`
 - `dex orderbook SELLING BUYING [--json]`
 - `dex offers [--wallet NAME] [--limit N] [--json]`
+- `dex buy BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]`
+- `dex sell BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]`
+- `dex update OFFER_ID BASE COUNTER AMOUNT PRICE [--wallet NAME] [-y]`
+- `dex cancel OFFER_ID [--wallet NAME] [-y]`
 - `wallet list`
 - `wallet use NAME`
 - `wallet create NAME`
@@ -27,7 +31,7 @@ read-only SDEX slice:
 - `wallet import-watch NAME G...`
 - `wallet reveal [NAME]`
 - `wallet backup NAME PATH`
-- `wallet restore PATH`
+- `wallet restore PATH [--name NAME]`
 - `wallet delete NAME`
 
 It reads and writes the same wallet record files, `.default` pointer, and
@@ -45,23 +49,32 @@ and Horizon submission are client responsibilities. The CLI talks directly to
 the matching public or testnet Horizon server; none of that HTTP or product
 policy is moved into `fresnica-core`.
 
-Reviewed write commands share a small client-side transaction flow: build a
-single-operation Classic envelope, present operation-specific review, ask for the
-Fresnica passcode only after confirmation, derive a short-lived verified
-`WalletUnlockKey`, sign through Rust Core, then submit to Horizon. Transport or
-server failures during submission are reported with the locally computed
-transaction hash so the user can check status before retrying.
+Reviewed write commands present operation-specific review and ask for
+confirmation before requesting the Fresnica passcode. A short-lived verified
+`WalletUnlockKey` is then derived and the exact prepared envelope is signed by
+Rust Core before Horizon submission. Transport or server failures during
+submission are reported with the locally computed transaction hash so status can
+be checked before retrying.
+
+The client transaction builder supports multiple operations when product
+semantics require an atomic bundle. SDEX creation uses this only when the user
+explicitly approves a missing receiving trustline with `--allow-trustline`, in
+which case `ChangeTrust + ManageBuyOffer/ManageSellOffer` are reviewed and signed
+as one transaction.
 
 Trustline policy matches the Python reference: add reserves one additional base
 reserve, the default limit is `708269837873.6765`, limit changes cannot go below
 balance plus buying liabilities, and removal requires zero balance and zero
 liabilities.
 
-SDEX order-book presentation follows the existing Fresnica/Fex market
-orientation. BID/BUY is on the left and ASK/SELL is on the right. Horizon BID
-amounts are normalized back to BASE units using exact `price_r`; market prices
-are rendered with Stellar fixed-7-decimal semantics without turning tiny nonzero
-prices into false zero.
+SDEX semantics match the Python reference and Fresnica/Fex presentation:
+BASE/COUNTER is stable, price is COUNTER per BASE, BID/BUY is on the left and
+ASK/SELL is on the right. Horizon BID amounts are normalized back to BASE units
+using exact `price_r`. BUY uses `ManageBuyOffer` with counter as selling asset and
+base as buying asset; SELL uses `ManageSellOffer` with base as selling asset.
+Updates must preserve the current pair and side. Cancellation uses the ledger's
+stored selling/buying orientation and does not depend on remembering the original
+operation type.
 
 ## Build
 
@@ -85,6 +98,7 @@ clients/rust-cli/target/release/fresnica history --limit 20
 clients/rust-cli/target/release/fresnica send 1 XLM to G...
 clients/rust-cli/target/release/fresnica trust add USDC:G...
 clients/rust-cli/target/release/fresnica dex orderbook XLM USDC:G...
+clients/rust-cli/target/release/fresnica dex buy XRP:G... XLM 100 0.325 --allow-trustline
 clients/rust-cli/target/release/fresnica dex offers
 ```
 
@@ -94,9 +108,9 @@ wallet record; use `--network testnet` for a testnet wallet.
 
 ## Deliberate non-goals of this slice
 
-Local chain-data caching, contacts, SDEX write operations and fill/candle
-history, anchor protocols, durable pending-transaction recovery, and TUI
-presentation remain in the Python reference for now.
+Local chain-data caching, contacts, SDEX fill/candle history, anchor protocols,
+durable pending-transaction recovery, and TUI presentation remain in the Python
+reference for now.
 
 The native client does not expose a raw `sign-xdr` shortcut. Routine transaction
 signing stays behind client-side construction and review rather than creating a
