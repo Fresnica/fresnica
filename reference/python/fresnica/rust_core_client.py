@@ -55,7 +55,7 @@ class _RustCoreProtocolError(Exception):
 
 class RustCoreClient:
     def __init__(self, binary: str | os.PathLike[str]):
-        path = Path(binary).expanduser()
+        path = Path(binary).expanduser().resolve()
         if not path.is_file() or not os.access(path, os.X_OK):
             raise RustCoreUnavailableError(f"Rust Core binary is not executable: {path}")
         self.binary = path
@@ -264,7 +264,9 @@ class RustCoreClient:
                 check=False,
             )
         except OSError as exc:
-            raise RustCoreUnavailableError("Unable to execute Rust Core") from exc
+            raise RustCoreUnavailableError(
+                f"Unable to execute Rust Core at {self.binary}: {exc}"
+            ) from exc
         try:
             response = json.loads(completed.stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
