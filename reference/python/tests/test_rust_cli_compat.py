@@ -4,6 +4,7 @@ import subprocess
 
 import pytest
 
+from fresnica.contacts import ContactStore
 from fresnica.manager import WalletManager
 from fresnica.storage import FileWalletStorage
 from fresnica.wallet_backup import read_wallet_backup, write_wallet_backup
@@ -11,6 +12,7 @@ from fresnica.wallet_backup import read_wallet_backup, write_wallet_backup
 
 SECRET = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO"
 PUBLIC = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR"
+SECOND_PUBLIC = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 
 
 @pytest.fixture(scope="module")
@@ -115,3 +117,33 @@ def test_rust_cli_restores_python_backup_without_changing_envelope(rust_cli, tmp
     assert restored.network == original.network
     assert restored.secret == original.secret
     assert destination_storage.get_default() == "restored-by-rust"
+
+
+def test_rust_cli_reads_python_contacts(rust_cli, tmp_path):
+    home = tmp_path / "python-contacts"
+    ContactStore(home / "contacts.json").add("Alice", PUBLIC, memo="default-memo")
+
+    listed = _run(rust_cli, home, "contact", "list")
+
+    assert "Alice" in listed
+    assert PUBLIC in listed
+    assert "default-memo" in listed
+
+
+def test_python_reads_rust_cli_contacts(rust_cli, tmp_path):
+    home = tmp_path / "rust-contacts"
+    _run(
+        rust_cli,
+        home,
+        "contact",
+        "add",
+        "Bob",
+        SECOND_PUBLIC,
+        "--memo",
+        "12345",
+    )
+
+    contact = ContactStore(home / "contacts.json").get("bob")
+    assert contact.name == "Bob"
+    assert contact.address == SECOND_PUBLIC
+    assert contact.memo == "12345"

@@ -5,15 +5,18 @@ It is the second concrete Core client after the Python reference/TUI bridge.
 
 ## Current scope
 
-The native client currently covers local wallet lifecycle, read-only Horizon
-queries, reviewed payments, issued-asset trustline lifecycle, and Classic SDEX
-read/write/history operations:
+The native client currently covers local wallet lifecycle and contacts, read-only
+Horizon queries, reviewed payments, issued-asset trustline lifecycle, and Classic
+SDEX read/write/history operations:
 
 - `info [--wallet NAME]`
 - `account [--wallet NAME] [--json]`
 - `balance [--wallet NAME] [--json]` (`assets` is an alias)
 - `history [--wallet NAME] [--limit N] [--json]`
-- `send AMOUNT ASSET to G... [--wallet NAME] [--memo TEXT] [-y]`
+- `send AMOUNT ASSET to DESTINATION [--wallet NAME] [--memo TEXT] [-y]`
+- `contact list`
+- `contact add NAME G... [--memo TEXT]`
+- `contact remove NAME`
 - `trust add CODE:GISSUER [--limit VALUE] [--wallet NAME] [-y]`
 - `trust limit CODE:GISSUER LIMIT [--wallet NAME] [-y]`
 - `trust remove CODE:GISSUER [--wallet NAME] [-y]`
@@ -37,15 +40,20 @@ read/write/history operations:
 - `wallet restore PATH [--name NAME]`
 - `wallet delete NAME`
 
-It reads and writes the same wallet record files, `.default` pointer, and
-`fresnica-wallet-backup` version-1 format as the Python reference client.
-The default application home is `FRESNICA_HOME` when set, otherwise
-`~/.fresnica`.
+It reads and writes the same wallet record files, `.default` pointer,
+`contacts.json`, and `fresnica-wallet-backup` version-1 format as the Python
+reference client. The default application home is `FRESNICA_HOME` when set,
+otherwise `~/.fresnica`.
 
 Create/import/reveal cryptography is performed by the linked Rust Core. Secret,
 mnemonic, BIP39-passphrase, and Fresnica-passcode prompts are read from the
 controlling terminal with input hidden; they are not accepted as command-line
 arguments.
+
+Contacts are client-local public metadata. Contact names are resolved before
+payment construction, an explicit `--memo` takes precedence over a contact's
+default memo, and transaction review always shows the resolved G address even
+when the user entered an alias.
 
 Account state, balances, recent operations, SDEX reads, transaction preparation
 and Horizon submission are client responsibilities. The CLI talks directly to
@@ -113,7 +121,8 @@ clients/rust-cli/target/release/fresnica wallet list
 clients/rust-cli/target/release/fresnica account
 clients/rust-cli/target/release/fresnica balance
 clients/rust-cli/target/release/fresnica history --limit 20
-clients/rust-cli/target/release/fresnica send 1 XLM to G...
+clients/rust-cli/target/release/fresnica contact add Alice G... --memo 12345
+clients/rust-cli/target/release/fresnica send 1 XLM to Alice
 clients/rust-cli/target/release/fresnica trust add USDC:G...
 clients/rust-cli/target/release/fresnica dex orderbook XLM USDC:G...
 clients/rust-cli/target/release/fresnica dex buy XRP:G... XLM 100 0.325 --allow-trustline
@@ -128,8 +137,8 @@ wallet record; use `--network testnet` for a testnet wallet.
 
 ## Deliberate non-goals of this slice
 
-Local chain-data caching, contacts, anchor protocols, and TUI presentation remain
-in the Python reference for now.
+Local chain-data caching, anchor protocols, and TUI presentation remain in the
+Python reference for now.
 
 The native client does not expose a raw `sign-xdr` shortcut. Routine transaction
 signing stays behind client-side construction and review rather than creating a
