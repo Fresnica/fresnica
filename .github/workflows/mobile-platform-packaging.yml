@@ -1,0 +1,68 @@
+name: Mobile platform packaging
+
+on:
+  push:
+    paths:
+      - "bindings/mobile/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/mobile-platform-packaging.yml"
+  pull_request:
+    paths:
+      - "bindings/mobile/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/mobile-platform-packaging.yml"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "26.1.10909125"
+      FRESNICA_ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build Android package
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
+        run: bash bindings/mobile/scripts/build-android.sh
+      - name: Validate Android package
+        run: |
+          for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
+            test -s "bindings/mobile/build/android/jniLibs/${abi}/libfresnica_mobile_core.so"
+          done
+          find bindings/mobile/build/android/kotlin -type f -name '*.kt' -print -quit | grep -q .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-mobile-android
+          path: bindings/mobile/build/android
+          if-no-files-found: error
+
+  apple:
+    runs-on: macos-14
+    env:
+      FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Apple package
+        run: bash bindings/mobile/scripts/build-apple.sh
+      - name: Validate Apple package
+        run: |
+          test -s bindings/mobile/build/apple/generated-swift/FresnicaCore.swift
+          test -s bindings/mobile/build/apple/headers/FresnicaCoreFFI.h
+          test -s bindings/mobile/build/apple/headers/module.modulemap
+          test -d bindings/mobile/build/apple/FresnicaCoreFFI.xcframework
+          xcodebuild -showdestinations >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-mobile-apple
+          path: bindings/mobile/build/apple
+          if-no-files-found: error
