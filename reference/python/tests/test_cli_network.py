@@ -37,6 +37,9 @@ class Manager:
     def view(self, name=None):
         return SimpleNamespace(record=self.record, wallet="watch-wallet")
 
+    def has_app_passcode(self):
+        return False
+
     def import_mnemonic(self, name, mnemonic, password, **kwargs):
         self.created = kwargs
         return Record(name=name, network=kwargs["network"])
