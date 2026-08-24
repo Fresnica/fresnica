@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::storage::{WalletRecord, WalletStorage};
+use crate::storage::WalletStorage;
 use crate::transaction_flow::{format_stroops, parse_stroops};
 
 use super::{
@@ -101,7 +101,11 @@ fn command_fills(
     for segment in segments {
         println!(
             "{:<24} {:<5} {:<25} {:>14} {:>14} {:>14} {:>5} {:<12}",
-            segment.last_time.as_deref().or(segment.first_time.as_deref()).unwrap_or(""),
+            segment
+                .last_time
+                .as_deref()
+                .or(segment.first_time.as_deref())
+                .unwrap_or(""),
             segment.side.to_ascii_uppercase(),
             format!("{}/{}", segment.base_asset, segment.counter_asset),
             format_stroops(segment.base_amount),
@@ -144,7 +148,7 @@ fn command_candles(network: &str, arguments: &[String]) -> Result<(), String> {
     for item in candles.iter().rev() {
         println!(
             "{:<16} {:>14} {:>14} {:>14} {:>14} {:>16} {:>8}",
-            text(item, "timestamp").unwrap_or("?"),
+            display_integer(item.get("timestamp")),
             text(item, "open").unwrap_or("?"),
             text(item, "high").unwrap_or("?"),
             text(item, "low").unwrap_or("?"),
@@ -553,8 +557,7 @@ fn trade_price(raw: &Value) -> String {
             }
         }
     }
-    let base = text(raw, "base_amount")
-        .and_then(|value| parse_stroops(value, true).ok());
+    let base = text(raw, "base_amount").and_then(|value| parse_stroops(value, true).ok());
     let counter = text(raw, "counter_amount")
         .and_then(|value| parse_stroops(value, false).ok());
     match (base, counter) {
@@ -740,6 +743,14 @@ mod tests {
         assert!(validate_offset(3_600_000, 3_600_000).is_ok());
         assert!(validate_offset(1_000, 86_400_000).is_err());
         assert!(validate_offset(86_400_000, 604_800_000).is_err());
+    }
+
+    #[test]
+    fn numeric_candle_timestamp_is_displayable() {
+        assert_eq!(
+            display_integer(Some(&json!(1_582_156_800_000_u64))),
+            "1582156800000"
+        );
     }
 
     #[test]
