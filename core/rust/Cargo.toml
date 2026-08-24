@@ -7,7 +7,8 @@ license = "MIT"
 publish = false
 
 [dependencies]
-near-slip10 = { version = "=0.4.8", features = ["mnemonic"] }
+bip39 = "2"
+near-slip10 = "=0.4.8"
 stellar-strkey = "=0.0.18"
 thiserror = "2"
 
