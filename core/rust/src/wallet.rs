@@ -29,5 +29,5 @@ pub fn derive_classic_public_key(
         .from_path_index(index, Some(passphrase))
         .map_err(|_| WalletDerivationError::InvalidIndex)?;
 
-    Ok(keypair.public().to_string())
+    Ok(format!("{}", keypair.public()))
 }
