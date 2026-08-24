@@ -21,8 +21,8 @@ pub enum WalletDerivationError {
 fn mnemonic_language(language: &str) -> Result<Language, WalletDerivationError> {
     match language {
         "english" => Ok(Language::English),
-        "chinese-simplified" => Ok(Language::SimplifiedChinese),
-        "chinese-traditional" => Ok(Language::TraditionalChinese),
+        "chinese_simplified" => Ok(Language::SimplifiedChinese),
+        "chinese_traditional" => Ok(Language::TraditionalChinese),
         "french" => Ok(Language::French),
         "italian" => Ok(Language::Italian),
         "japanese" => Ok(Language::Japanese),
