@@ -6,6 +6,7 @@ Current sets:
 
 - `wallet-v1.json`: deterministic SEP-0005 mnemonic/passphrase/account-index derivation to Stellar public keys.
 - `protection-v1.json`: password and system-key wallet-secret encryption compatibility.
+- `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
 
 ## Versioning
@@ -25,6 +26,14 @@ The derivation contract is Stellar SEP-0005, including the account index path an
 Password protection uses Scrypt with `N=32768`, `r=8`, `p=1` to derive a 32-byte key, followed by AES-256-GCM with AAD `fresnica-wallet-secret-v1`. System protection uses an externally stored 32-byte wrapping key with AES-256-GCM and AAD `fresnica-wallet-secret-key-v1`.
 
 The vector freezes compatibility with existing Fresnica records; it does not claim those parameters are immutable for all future wallet formats. A future format upgrade must use a new explicit version rather than silently reinterpreting version 1 ciphertext.
+
+## Classic transaction signing
+
+`transaction-signing-v1.json` uses a public RFC 8032 Ed25519 test key and a minimal Classic V1 Stellar transaction envelope on testnet. The test secret is intentionally public test material and must never be used as a wallet credential.
+
+Implementations must agree on the unsigned envelope XDR, network-specific transaction hash, raw Ed25519 signature, four-byte Stellar signature hint, and final decorated-signature envelope XDR. The transaction hash is the signing payload; raw XDR and network passphrase are review/context inputs for external signers rather than arbitrary bytes to sign.
+
+This vector deliberately covers Classic transaction signing only. SEP-53 arbitrary-message signing and Soroban contract authorization require separate domain-specific vectors.
 
 ## Numeric rules
 

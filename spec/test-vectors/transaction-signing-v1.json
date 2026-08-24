@@ -1,0 +1,17 @@
+{
+  "schema": "fresnica-transaction-signing-v1",
+  "source": "Stellar classic V1 transaction envelope with RFC 8032 Ed25519 test key",
+  "cases": [
+    {
+      "name": "classic-v1-testnet-empty-operations",
+      "network_passphrase": "Test SDF Network ; September 2015",
+      "secret": "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO",
+      "public_key": "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR",
+      "unsigned_xdr_base64": "AAAAAgAAAADXWpgBgrEKt9VL/tPJZAc6DuFy89qmIyWvAhpo9wdRGgAAAGQAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "transaction_hash_hex": "dd8d4e2abf55d45c62805bfaae02baf1143f8c79b457dc0db6e1887902f9e43e",
+      "signature_hex": "99254edb377824d7162192be9a4afc95e1943598051022de0e64fb1e75c75b436e7cf492d41a6f3445728b4afbf640ec3d472f22141b5d1fdf1520c0ed758d09",
+      "signature_hint_hex": "f707511a",
+      "signed_xdr_base64": "AAAAAgAAAADXWpgBgrEKt9VL/tPJZAc6DuFy89qmIyWvAhpo9wdRGgAAAGQAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAB9wdRGgAAAECZJU7bN3gk1xYhkr6aSvyV4ZQ1mAUQIt4OZPsedcdbQ2589JLUGm80RXKLSvv2QOw9Ry8iFBtdH98VIMDtdY0J"
+    }
+  ]
+}
