@@ -2,6 +2,18 @@
 
 This file records design decisions that materially change Fresnica behavior or boundaries. Git history remains the detailed implementation record.
 
+## 2026-08-24 - Account identity is not permanently tied to G addresses
+
+**Decision:** Fresnica distinguishes classic `G...` accounts from contract `C...` accounts at the domain-model boundary.
+
+The Python reference continues to implement classic-account behavior only. It may represent and validate a contract-account identity, but it does not implement Soroban RPC, Stellar Asset Contract behavior, SEP-45, contract authorization, or passkey smart-wallet signing.
+
+**Signer boundary:** the current `Signer.public_key + sign(transaction)` contract remains a classic Ed25519 signer interface. Future contract/passkey authorization must use an appropriate contract signer/auth model rather than pretending a C account has a classic public key.
+
+This keeps current wallet behavior stable while preventing the future Rust Core from encoding `account == G address == Ed25519 public key` as a universal invariant.
+
+See [Signer Architecture](signer.md).
+
 ## 2026-08-24 - Password is a protection provider, not a wallet model
 
 **Decision:** Separate account identity, signing capability, local secret material, and secret protection. Password protection becomes one `ProtectionProvider` implementation rather than a requirement embedded in `WalletManager` semantics.
