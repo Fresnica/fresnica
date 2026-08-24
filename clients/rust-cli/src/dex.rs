@@ -1,3 +1,6 @@
+#[path = "dex_write.rs"]
+mod write;
+
 use fresnica_core::AccountIdentity;
 use serde_json::Value;
 
@@ -19,6 +22,9 @@ pub fn command_dex(
     match command {
         "orderbook" => command_orderbook(network, &arguments[1..]),
         "offers" => command_offers(storage, network, &arguments[1..]),
+        "buy" | "sell" | "update" | "cancel" => {
+            write::command_dex_write(storage, network, arguments)
+        }
         _ => Err(usage().to_owned()),
     }
 }
@@ -427,7 +433,7 @@ fn short_address(value: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  fresnica dex orderbook SELLING BUYING [--json]\n  fresnica dex offers [--wallet NAME] [--limit N] [--json]"
+    "usage:\n  fresnica dex orderbook SELLING BUYING [--json]\n  fresnica dex offers [--wallet NAME] [--limit N] [--json]\n  fresnica dex buy BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]\n  fresnica dex sell BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]\n  fresnica dex update OFFER_ID BASE COUNTER AMOUNT PRICE [--wallet NAME] [-y]\n  fresnica dex cancel OFFER_ID [--wallet NAME] [-y]"
 }
 
 #[cfg(test)]
