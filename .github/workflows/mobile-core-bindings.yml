@@ -22,6 +22,37 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --manifest-path bindings/mobile/Cargo.toml -- --check
-      - run: cargo test --manifest-path core/rust/Cargo.toml
-      - run: cargo test --manifest-path bindings/mobile/Cargo.toml
+      - name: Format mobile facade
+        run: cargo fmt -- --check
+        working-directory: bindings/mobile
+      - name: Test Rust Core
+        run: cargo test --manifest-path core/rust/Cargo.toml
+      - name: Test mobile facade
+        run: cargo test
+        working-directory: bindings/mobile
+      - name: Build UniFFI host library
+        run: cargo build
+        working-directory: bindings/mobile
+      - name: Generate Kotlin bindings
+        run: |
+          rm -rf target/generated/kotlin
+          cargo run --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libfresnica_mobile_core.so \
+            --language kotlin --out-dir target/generated/kotlin
+          grep -R "package com.fresnica.core" target/generated/kotlin
+          grep -R "MobileCoreApi" target/generated/kotlin
+          grep -R "MobileCoreError" target/generated/kotlin
+          grep -R "prepareEd25519Signing" target/generated/kotlin
+          grep -R "applyEd25519Signature" target/generated/kotlin
+        working-directory: bindings/mobile
+      - name: Generate Swift bindings
+        run: |
+          rm -rf target/generated/swift
+          cargo run --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libfresnica_mobile_core.so \
+            --language swift --out-dir target/generated/swift
+          grep -R "MobileCoreApi" target/generated/swift
+          grep -R "MobileCoreError" target/generated/swift
+          grep -R "prepareEd25519Signing" target/generated/swift
+          grep -R "applyEd25519Signature" target/generated/swift
+        working-directory: bindings/mobile
