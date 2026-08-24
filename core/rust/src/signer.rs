@@ -22,7 +22,8 @@ pub struct SoftwareSigner {
 
 impl SoftwareSigner {
     pub fn from_secret(secret: &str) -> Result<Self, SignerError> {
-        let private = PrivateKey::from_string(secret.trim()).map_err(|_| SignerError::InvalidSecret)?;
+        let private =
+            PrivateKey::from_string(secret.trim()).map_err(|_| SignerError::InvalidSecret)?;
         let signing_key = SigningKey::from_bytes(&private.0);
         let public_key = format!("{}", PublicKey(signing_key.verifying_key().to_bytes()));
 
@@ -77,10 +78,10 @@ mod tests {
     #[test]
     fn signs_exact_ed25519_payload() {
         let signer = SoftwareSigner::from_secret(SECRET).unwrap();
-        let expected = decode_hex::<64>(
-            "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
-            "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
-        );
+        let expected = decode_hex::<64>(concat!(
+            "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155",
+            "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+        ));
 
         assert_eq!(signer.sign_payload(b""), expected);
     }
