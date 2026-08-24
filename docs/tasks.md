@@ -90,16 +90,19 @@
 - [x] 32-byte unlock-key boundary validation
 - [x] Shared transaction-vector conformance tests
 - [x] Dedicated mobile binding CI
-- [x] Select stable UniFFI 0.32.x for Swift/Kotlin generation
+- [x] Stable UniFFI 0.32.x Swift/Kotlin generation
 - [x] Export mobile facade with UniFFI proc macros
 - [x] Generate Swift and Kotlin bindings from compiled library metadata in CI
-- [ ] Package Android Rust libraries for supported ABIs
-- [ ] Compile/package generated Kotlin API in Android build
-- [ ] Build Apple simulator/device static libraries
-- [ ] Package generated Swift API + Rust static libraries for Xcode/XCFramework use
+- [x] Package Android Rust libraries for `armeabi-v7a`, `x86`, `x86_64`, `arm64-v8a`
+- [x] Package generated Kotlin source with Android native libraries
+- [x] Build Apple device and arm64/x86_64 simulator static libraries
+- [x] Package generated Swift API + Rust FFI static libraries for XCFramework/Xcode use
+- [x] Native platform packaging CI/artifacts
+- [x] Android auth-per-use AES-GCM WalletUnlockKey storage primitive
+- [x] Apple `ThisDeviceOnly + biometryCurrentSet` WalletUnlockKey storage primitive
+- [ ] Wire Keychain/Keystore enrollment to Core `derive_unlock_key`
 - [ ] Add React Native native-module adapter
-- [ ] Keychain/Keystore unlock-key enrollment
-- [ ] Biometric signer authorization flow
+- [ ] Native-only biometric `sign_transaction_xdr` orchestration
 - [ ] Mobile watch-only upgrade/downgrade lifecycle
 - [ ] Mobile staged/atomic app-passcode rotation
 - [ ] Explicit mobile Reveal / Export flow
@@ -113,3 +116,5 @@
 - [x] Rust Core / Python process conformance coverage
 - [x] Mobile binding conformance workflow
 - [x] Host Swift/Kotlin UniFFI generation gate
+- [x] Android/Apple native package build gate
+- [x] Android/Apple system-auth support compile gate
