@@ -1,5 +1,6 @@
 mod horizon;
 mod read_commands;
+mod send;
 mod storage;
 mod wallet_ops;
 
@@ -20,12 +21,14 @@ Usage:
   fresnica [--home PATH] [--network mainnet|testnet] account [--wallet NAME] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] balance [--wallet NAME] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] history [--wallet NAME] [--limit N] [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] send AMOUNT ASSET to G... [--wallet NAME] [--memo TEXT] [-y]
   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
 
-Read-only network commands:
+Network commands:
   account                       Show current Horizon account state
   balance                       Show current account balances and liabilities
   history                       Show newest Horizon operations (default 20, max 200)
+  send                          Review, sign with Rust Core, and submit a payment
 
 Wallet commands:
   list
@@ -79,6 +82,7 @@ fn run() -> Result<(), String> {
             read_commands::command_balance(&storage, &global.network, &global.command[1..])
         }
         "history" => read_commands::command_history(&storage, &global.network, &global.command[1..]),
+        "send" => send::command_send(&storage, &global.network, &global.command[1..]),
         "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }
