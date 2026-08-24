@@ -4,7 +4,7 @@ use thiserror::Error;
 
 pub trait ClassicSigner {
     fn public_key(&self) -> &str;
-    fn sign_payload(&self, payload: &[u8]) -> [u8; 64];
+    fn sign_transaction_hash(&self, transaction_hash: &[u8; 32]) -> [u8; 64];
 
     fn signature_hint(&self) -> [u8; 4] {
         let public = PublicKey::from_string(self.public_key())
@@ -39,8 +39,8 @@ impl ClassicSigner for SoftwareSigner {
         &self.public_key
     }
 
-    fn sign_payload(&self, payload: &[u8]) -> [u8; 64] {
-        self.signing_key.sign(payload).to_bytes()
+    fn sign_transaction_hash(&self, transaction_hash: &[u8; 32]) -> [u8; 64] {
+        self.signing_key.sign(transaction_hash).to_bytes()
     }
 }
 
@@ -54,7 +54,7 @@ pub enum SignerError {
 mod tests {
     use super::*;
 
-    // RFC 8032 test vector 1 encoded as a Stellar secret/public key pair.
+    // RFC 8032 test-vector keypair encoded as Stellar StrKeys.
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
 
@@ -76,14 +76,15 @@ mod tests {
     }
 
     #[test]
-    fn signs_exact_ed25519_payload() {
+    fn signs_exact_transaction_hash() {
         let signer = SoftwareSigner::from_secret(SECRET).unwrap();
+        let transaction_hash = core::array::from_fn(|index| index as u8);
         let expected = decode_hex::<64>(concat!(
-            "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155",
-            "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+            "00c1db988bb12fd7351a6054ae3fac90fab7e4fc56b1651c7181f5f55f896f66",
+            "3933d3a90605d9058e9d0ac45950ee2d3c9c9b14857415587179fe0ccac35f09"
         ));
 
-        assert_eq!(signer.sign_payload(b""), expected);
+        assert_eq!(signer.sign_transaction_hash(&transaction_hash), expected);
     }
 
     #[test]
