@@ -30,11 +30,19 @@ Arbitrary message signing is reserved as a separate future capability following 
 
 ## Secret-protection boundary
 
-Protection applies only to secret material held locally for software signing. Hardware, device, remote, and future contract-account signers do not route private keys through `ProtectionProvider`.
+Protection applies only to secret material held locally for software signing. Hardware, device, remote, and future contract-account signers do not route private keys through local wallet protection.
 
-Password protection preserves the existing version-1 Scrypt + AES-256-GCM wallet format. System protection generates a random 32-byte wrapping key and delegates only that key to `SystemKeyStore`, which is the platform boundary for Keychain, DPAPI/Hello, Android Keystore, or another OS facility. Fresnica persists the encrypted wallet payload plus an opaque key reference, not the wrapping key itself.
+Password protection preserves the version-1 Scrypt + AES-256-GCM wallet format. Each protected wallet envelope carries independent random KDF salt and AEAD nonce material, so the product may use one Fresnica app passcode while wallets still receive different effective encryption keys.
 
-Password-derived keys, system wrapping keys, loaded system keys, and intermediate decrypted byte buffers use zeroizing containers. `unlock_software_signer` consumes decrypted `secret` or `mnemonic` strings by moving their allocations into zeroizing containers before constructing the signer, then verifies that the resulting Stellar public key matches public wallet metadata. Generic decoded payloads remain live plaintext and should not be cached. No global vault or master key is introduced by this layer.
+The current Rust implementation also contains `SystemProtectionProvider` / `SystemKeyStore`, which generates a separate random wallet protection key and stores it through an injected platform key-store boundary. This remains valid prototype code and test coverage, but it is **not the target mobile product model** after the Mobile/Core vault contract was accepted.
+
+For mobile integration, system authentication is signer authorization rather than a second wallet encryption format. Keychain / Keystore, biometrics, app lock/session state, Realm/database encryption, and persistence belong to the mobile layer. Mobile persists Core-generated protected wallet envelopes as opaque data. A system-auth shortcut for a software signer must authorize unlocking the same canonical Core envelope used by manual app-passcode entry; it must not create a second independently encrypted wallet payload.
+
+Password-derived keys, system prototype keys, and intermediate decrypted byte buffers use zeroizing containers. `unlock_software_signer` consumes decrypted `secret` or `mnemonic` strings by moving their allocations into zeroizing containers before constructing the signer, then verifies that the resulting Stellar public key matches public wallet metadata. Generic decoded payloads remain live plaintext and should not be cached.
+
+Before mobile FFI is frozen, Core should decouple signer/system authorization from the registry's mutually exclusive `ProtectionCredential::System` path and add a one-shot protected signing entry point so routine mobile signing does not return private keys into JavaScript.
+
+See [`docs/mobile-core-contract.md`](../../docs/mobile-core-contract.md) and [`docs/protection.md`](../../docs/protection.md).
 
 ## Agent Access boundary
 
