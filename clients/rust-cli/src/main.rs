@@ -1,5 +1,6 @@
 mod contacts;
 mod dex;
+mod friendbot;
 mod horizon;
 mod read_commands;
 mod send;
@@ -54,6 +55,8 @@ Wallet commands:
   import-secret NAME
   import-mnemonic NAME [--index N] [--language LANGUAGE]
   import-watch NAME G...
+  testnet-fund [--wallet NAME]   Fund a testnet wallet with Friendbot
+  fund [--wallet NAME]           Alias for testnet-fund
   reveal [NAME]
   backup NAME PATH [--force]
   restore PATH [--name NAME]
@@ -208,6 +211,7 @@ fn command_wallet(
         "import-watch" if arguments.len() == 3 => {
             wallet_import_watch(storage, network, &arguments[1], &arguments[2])
         }
+        "testnet-fund" | "fund" => friendbot::command_fund(storage, network, &arguments[1..]),
         "reveal" if arguments.len() <= 2 => {
             wallet_reveal(storage, arguments.get(1).map(String::as_str))
         }
