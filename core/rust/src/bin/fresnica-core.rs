@@ -3,17 +3,12 @@ use std::process;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fresnica_core::{
-    derive_verified_unlock_key, export_signing_material, generate_protected_mnemonic,
-    parse_transaction_envelope_xdr, protect_mnemonic_signing_material,
-    protect_secret_signing_material, sign_protected_transaction_envelope,
-    transaction_envelope_xdr, unlock_software_signer, ExportedSigningMaterial,
-    ProtectedSignerError, ProtectedSigningError, ProtectionError, ProtectionRegistry,
-    SecretStoreError, WalletMaterialError, WalletUnlockKey,
+    ClientApiError, CoreClientApi, ExportedSigningMaterial, WalletUnlockKey, CLIENT_API_VERSION,
 };
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
-const PROTOCOL_VERSION: u64 = 1;
+const PROTOCOL_VERSION: u64 = 2;
 
 fn main() {
     match run() {
@@ -59,43 +54,57 @@ fn run() -> Result<Value, BridgeError> {
         .as_object_mut()
         .ok_or(BridgeError::InvalidRequest("request must be a JSON object"))?;
     let operation = take_string(object, "operation")?;
-    let registry = ProtectionRegistry::new();
+    let api = CoreClientApi::new();
 
     match operation.as_str() {
         "version" => Ok(json!({
             "core_version": env!("CARGO_PKG_VERSION"),
+            "client_api_version": CLIENT_API_VERSION,
             "protocol_version": PROTOCOL_VERSION,
         })),
+        "parse-account" => {
+            let address = take_string(object, "address")?;
+            let identity = api.parse_account(&address)?;
+            Ok(json!({
+                "address": identity.address,
+                "kind": identity.kind.as_str(),
+                "public_key": identity.public_key,
+            }))
+        }
         "protect-secret" => {
             let secret = take_sensitive_string(object, "secret")?;
             let passcode = take_sensitive_string(object, "passcode")?;
-            let protected = protect_secret_signing_material(&registry, &secret, &passcode)
-                .map_err(classify_wallet_material_error)?;
+            let expected_signer_public_key =
+                take_optional_string(object, "expected_signer_public_key")?;
+            let protected = api.protect_secret(
+                &secret,
+                &passcode,
+                expected_signer_public_key.as_deref(),
+            )?;
             Ok(json!({
-                "public_key": protected.public_key,
+                "signer_public_key": protected.signer_public_key,
                 "envelope": protected.envelope,
             }))
         }
         "protect-mnemonic" => {
             let mnemonic = take_sensitive_string(object, "mnemonic")?;
-            let mnemonic_passphrase = take_optional_sensitive_string(
-                object,
-                "mnemonic_passphrase",
-            )?;
+            let mnemonic_passphrase =
+                take_optional_sensitive_string(object, "mnemonic_passphrase")?;
             let index = take_optional_usize(object, "index", 0)?;
             let language = take_optional_string(object, "language")?;
             let passcode = take_sensitive_string(object, "passcode")?;
-            let protected = protect_mnemonic_signing_material(
-                &registry,
+            let expected_signer_public_key =
+                take_optional_string(object, "expected_signer_public_key")?;
+            let protected = api.protect_mnemonic(
                 &mnemonic,
                 &mnemonic_passphrase,
                 index,
                 language.as_deref(),
                 &passcode,
-            )
-            .map_err(classify_wallet_material_error)?;
+                expected_signer_public_key.as_deref(),
+            )?;
             Ok(json!({
-                "public_key": protected.public_key,
+                "signer_public_key": protected.signer_public_key,
                 "envelope": protected.envelope,
             }))
         }
@@ -104,39 +113,49 @@ fn run() -> Result<Value, BridgeError> {
                 .unwrap_or_else(|| "english".to_owned());
             let strength = take_optional_usize(object, "strength", 256)?;
             let index = take_optional_usize(object, "index", 0)?;
-            let mnemonic_passphrase = take_optional_sensitive_string(
-                object,
-                "mnemonic_passphrase",
-            )?;
+            let mnemonic_passphrase =
+                take_optional_sensitive_string(object, "mnemonic_passphrase")?;
             let passcode = take_sensitive_string(object, "passcode")?;
-            let generated = generate_protected_mnemonic(
-                &registry,
+            let generated = api.generate_mnemonic(
                 &language,
                 strength,
                 &mnemonic_passphrase,
                 index,
                 &passcode,
-            )
-            .map_err(classify_wallet_material_error)?;
+            )?;
             Ok(json!({
-                "public_key": generated.wallet.public_key,
-                "envelope": generated.wallet.envelope,
+                "signer_public_key": generated.signer.signer_public_key,
+                "envelope": generated.signer.envelope,
                 "mnemonic": generated.mnemonic.as_str(),
-                "language": language,
-                "index": index,
+                "language": generated.language,
+                "index": generated.index,
+            }))
+        }
+        "reprotect" => {
+            let envelope = take_value(object, "envelope")?;
+            let current_passcode = take_sensitive_string(object, "current_passcode")?;
+            let new_passcode = take_sensitive_string(object, "new_passcode")?;
+            let expected_signer_public_key = take_string(object, "expected_signer_public_key")?;
+            let protected = api.reprotect(
+                &envelope,
+                &current_passcode,
+                &new_passcode,
+                &expected_signer_public_key,
+            )?;
+            Ok(json!({
+                "signer_public_key": protected.signer_public_key,
+                "envelope": protected.envelope,
             }))
         }
         "derive-unlock-key" => {
             let envelope = take_value(object, "envelope")?;
             let passcode = take_sensitive_string(object, "passcode")?;
-            let expected_public_key = take_string(object, "expected_public_key")?;
-            let unlock_key = derive_verified_unlock_key(
-                &registry,
+            let expected_signer_public_key = take_string(object, "expected_signer_public_key")?;
+            let unlock_key = api.derive_unlock_key(
                 &envelope,
                 &passcode,
-                &expected_public_key,
-            )
-            .map_err(classify_protected_signer_error)?;
+                &expected_signer_public_key,
+            )?;
             Ok(json!({
                 "unlock_key": STANDARD.encode(unlock_key.as_bytes()),
             }))
@@ -144,39 +163,28 @@ fn run() -> Result<Value, BridgeError> {
         "validate-unlock-key" => {
             let envelope = take_value(object, "envelope")?;
             let unlock_key = decode_unlock_key(&take_sensitive_string(object, "unlock_key")?)?;
-            let expected_public_key = take_string(object, "expected_public_key")?;
-            let signer = unlock_software_signer(
-                &registry,
+            let expected_signer_public_key = take_string(object, "expected_signer_public_key")?;
+            api.validate_unlock_key(
                 &envelope,
                 &unlock_key,
-                &expected_public_key,
-            )
-            .map_err(classify_protected_signer_error)?;
-            drop(signer);
+                &expected_signer_public_key,
+            )?;
             Ok(json!({}))
         }
         "sign-transaction" => {
             let envelope = take_value(object, "envelope")?;
             let unlock_key = decode_unlock_key(&take_sensitive_string(object, "unlock_key")?)?;
-            let expected_public_key = take_string(object, "expected_public_key")?;
-            let transaction_xdr = take_sensitive_string(object, "transaction_xdr")?;
+            let expected_signer_public_key = take_string(object, "expected_signer_public_key")?;
+            let transaction_xdr = take_string(object, "transaction_xdr")?;
             let network_passphrase = take_string(object, "network_passphrase")?;
-            let raw_xdr = STANDARD
-                .decode(transaction_xdr.as_bytes())
-                .map_err(|_| BridgeError::InvalidRequest("transaction_xdr must be base64 XDR"))?;
-            let mut transaction = parse_transaction_envelope_xdr(&raw_xdr)
-                .map_err(|_| BridgeError::InvalidTransaction)?;
-            sign_protected_transaction_envelope(
-                &registry,
+            let raw_xdr = decode_base64(&transaction_xdr, "transaction_xdr")?;
+            let signed_xdr = api.sign_transaction_xdr(
                 &envelope,
                 &unlock_key,
-                &expected_public_key,
-                &mut transaction,
+                &expected_signer_public_key,
+                &raw_xdr,
                 &network_passphrase,
-            )
-            .map_err(classify_protected_signing_error)?;
-            let signed_xdr = transaction_envelope_xdr(&transaction)
-                .map_err(|_| BridgeError::InvalidTransaction)?;
+            )?;
             Ok(json!({
                 "transaction_xdr": STANDARD.encode(signed_xdr),
             }))
@@ -184,14 +192,12 @@ fn run() -> Result<Value, BridgeError> {
         "reveal" => {
             let envelope = take_value(object, "envelope")?;
             let passcode = take_sensitive_string(object, "passcode")?;
-            let expected_public_key = take_string(object, "expected_public_key")?;
-            let material = export_signing_material(
-                &registry,
+            let expected_signer_public_key = take_string(object, "expected_signer_public_key")?;
+            let material = api.reveal(
                 &envelope,
                 &passcode,
-                &expected_public_key,
-            )
-            .map_err(classify_protected_signer_error)?;
+                &expected_signer_public_key,
+            )?;
             match material {
                 ExportedSigningMaterial::Secret { secret } => Ok(json!({
                     "kind": "secret",
@@ -210,6 +216,34 @@ fn run() -> Result<Value, BridgeError> {
                     "language": language,
                 })),
             }
+        }
+        "prepare-ed25519-signing" => {
+            let transaction_xdr = take_string(object, "transaction_xdr")?;
+            let network_passphrase = take_string(object, "network_passphrase")?;
+            let raw_xdr = decode_base64(&transaction_xdr, "transaction_xdr")?;
+            let prepared = api.prepare_ed25519_signing(&raw_xdr, &network_passphrase)?;
+            Ok(json!({
+                "transaction_hash": STANDARD.encode(prepared.transaction_hash),
+                "transaction_xdr": STANDARD.encode(prepared.transaction_xdr),
+                "network_passphrase": prepared.network_passphrase,
+            }))
+        }
+        "apply-ed25519-signature" => {
+            let transaction_xdr = take_string(object, "transaction_xdr")?;
+            let network_passphrase = take_string(object, "network_passphrase")?;
+            let signer_public_key = take_string(object, "signer_public_key")?;
+            let signature = take_string(object, "signature")?;
+            let raw_xdr = decode_base64(&transaction_xdr, "transaction_xdr")?;
+            let raw_signature = decode_base64(&signature, "signature")?;
+            let signed_xdr = api.apply_ed25519_signature(
+                &raw_xdr,
+                &network_passphrase,
+                &signer_public_key,
+                &raw_signature,
+            )?;
+            Ok(json!({
+                "transaction_xdr": STANDARD.encode(signed_xdr),
+            }))
         }
         _ => Err(BridgeError::InvalidRequest("unsupported operation")),
     }
@@ -272,6 +306,12 @@ fn take_optional_usize(
     }
 }
 
+fn decode_base64(encoded: &str, field: &'static str) -> Result<Vec<u8>, BridgeError> {
+    STANDARD
+        .decode(encoded.as_bytes())
+        .map_err(|_| BridgeError::InvalidField(field))
+}
+
 fn decode_unlock_key(encoded: &str) -> Result<WalletUnlockKey, BridgeError> {
     let bytes = Zeroizing::new(
         STANDARD
@@ -285,63 +325,25 @@ fn decode_unlock_key(encoded: &str) -> Result<WalletUnlockKey, BridgeError> {
     Ok(WalletUnlockKey::from_bytes(bytes))
 }
 
-fn classify_wallet_material_error(error: WalletMaterialError) -> BridgeError {
-    match error {
-        WalletMaterialError::Signer(_) | WalletMaterialError::Derivation(_) => {
-            BridgeError::InvalidWalletMaterial(error.to_string())
-        }
-        WalletMaterialError::Protection(ProtectionError::SecretStore(
-            SecretStoreError::EmptyPassword,
-        )) => BridgeError::InvalidPasscode,
-        other => BridgeError::Core(other.to_string()),
-    }
-}
-
-fn classify_protected_signer_error(error: ProtectedSignerError) -> BridgeError {
-    match error {
-        ProtectedSignerError::Protection(ProtectionError::SecretStore(
-            SecretStoreError::InvalidPassword | SecretStoreError::EmptyPassword,
-        )) => BridgeError::InvalidPasscode,
-        ProtectedSignerError::Protection(ProtectionError::SecretStore(
-            SecretStoreError::InvalidUnlockKey,
-        )) => BridgeError::InvalidUnlockKey,
-        ProtectedSignerError::IdentityMismatch => BridgeError::IdentityMismatch,
-        ProtectedSignerError::InvalidExpectedPublicKey => {
-            BridgeError::InvalidRequest("expected_public_key is invalid")
-        }
-        other => BridgeError::Core(other.to_string()),
-    }
-}
-
-fn classify_protected_signing_error(error: ProtectedSigningError) -> BridgeError {
-    match error {
-        ProtectedSigningError::Unlock(error) => classify_protected_signer_error(error),
-        ProtectedSigningError::Transaction(_) => BridgeError::InvalidTransaction,
-    }
-}
-
 enum BridgeError {
     InvalidRequest(&'static str),
     InvalidField(&'static str),
-    InvalidWalletMaterial(String),
-    InvalidPasscode,
     InvalidUnlockKey,
-    IdentityMismatch,
-    InvalidTransaction,
-    Core(String),
+    Client(ClientApiError),
+}
+
+impl From<ClientApiError> for BridgeError {
+    fn from(error: ClientApiError) -> Self {
+        Self::Client(error)
+    }
 }
 
 impl BridgeError {
     fn code(&self) -> &'static str {
         match self {
-            Self::InvalidRequest(_) | Self::InvalidField(_) | Self::InvalidWalletMaterial(_) => {
-                "invalid-input"
-            }
-            Self::InvalidPasscode => "invalid-passcode",
+            Self::InvalidRequest(_) | Self::InvalidField(_) => "invalid-input",
             Self::InvalidUnlockKey => "invalid-unlock-key",
-            Self::IdentityMismatch => "identity-mismatch",
-            Self::InvalidTransaction => "invalid-transaction",
-            Self::Core(_) => "core-error",
+            Self::Client(error) => error.code().as_str(),
         }
     }
 
@@ -349,12 +351,8 @@ impl BridgeError {
         match self {
             Self::InvalidRequest(message) => (*message).to_owned(),
             Self::InvalidField(field) => format!("invalid or missing field: {field}"),
-            Self::InvalidWalletMaterial(message) => message.clone(),
-            Self::InvalidPasscode => "invalid wallet passcode".to_owned(),
             Self::InvalidUnlockKey => "invalid wallet unlock key".to_owned(),
-            Self::IdentityMismatch => "wallet identity does not match metadata".to_owned(),
-            Self::InvalidTransaction => "invalid Stellar transaction".to_owned(),
-            Self::Core(message) => message.clone(),
+            Self::Client(error) => error.message().to_owned(),
         }
     }
 }
