@@ -1,3 +1,4 @@
+mod dex;
 mod horizon;
 mod read_commands;
 mod send;
@@ -27,6 +28,8 @@ Usage:
   fresnica [--home PATH] [--network mainnet|testnet] trust add CODE:GISSUER [--limit VALUE] [--wallet NAME] [-y]
   fresnica [--home PATH] [--network mainnet|testnet] trust limit CODE:GISSUER LIMIT [--wallet NAME] [-y]
   fresnica [--home PATH] [--network mainnet|testnet] trust remove CODE:GISSUER [--wallet NAME] [-y]
+  fresnica [--home PATH] [--network mainnet|testnet] dex orderbook SELLING BUYING [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] dex offers [--wallet NAME] [--limit N] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
 
 Network commands:
@@ -35,6 +38,7 @@ Network commands:
   history                       Show newest Horizon operations (default 20, max 200)
   send                          Review, sign with Rust Core, and submit a payment
   trust                         Add, change, or remove an issued-asset trustline
+  dex                           Read Stellar DEX order books and account offers
 
 Wallet commands:
   list
@@ -90,6 +94,7 @@ fn run() -> Result<(), String> {
         "history" => read_commands::command_history(&storage, &global.network, &global.command[1..]),
         "send" => send::command_send(&storage, &global.network, &global.command[1..]),
         "trust" => trust::command_trust(&storage, &global.network, &global.command[1..]),
+        "dex" => dex::command_dex(&storage, &global.network, &global.command[1..]),
         "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }
