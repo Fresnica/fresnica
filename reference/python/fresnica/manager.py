@@ -99,6 +99,22 @@ class WalletManager:
             return None
         return self.protection_registry.kind_for(record.secret)
 
+    def has_app_passcode(self) -> bool:
+        return any(
+            not record.watch_only and record.secret is not None
+            for record in self.storage.list()
+        )
+
+    def validate_app_passcode(self, wallet_password: str) -> None:
+        """Require one Fresnica passcode for every local software wallet."""
+        for record in self.storage.list():
+            if record.watch_only or record.secret is None:
+                continue
+            try:
+                self._derive_record_unlock_key(record, wallet_password)
+            except InvalidPasswordError as exc:
+                raise InvalidPasswordError("Invalid Fresnica passcode") from exc
+
     def add_watch(
         self,
         name: str,
@@ -144,11 +160,10 @@ class WalletManager:
         make_default: bool | None = None,
     ) -> WalletRecord:
         get_network(network)
+        password = self._password_from_credential(credential)
+        self.validate_app_passcode(password)
         if self.core_client is not None:
-            protected = self.core_client.protect_secret(
-                secret,
-                self._password_from_credential(credential),
-            )
+            protected = self.core_client.protect_secret(secret, password)
             wallet = Wallet.from_address(protected.public_key)
             envelope = protected.envelope
         else:
@@ -203,13 +218,15 @@ class WalletManager:
         make_default: bool | None = None,
     ) -> WalletRecord:
         get_network(network)
+        password = self._password_from_credential(credential)
+        self.validate_app_passcode(password)
         if language is None:
             language = detect_mnemonic_language(mnemonic)
         language_value = getattr(language, "value", language)
         if self.core_client is not None:
             protected = self.core_client.protect_mnemonic(
                 mnemonic,
-                self._password_from_credential(credential),
+                password,
                 mnemonic_passphrase=mnemonic_passphrase,
                 index=index,
                 language=language_value,
@@ -297,9 +314,11 @@ class WalletManager:
             return record, mnemonic
 
         get_network(network)
+        password = self._password_from_credential(credential)
+        self.validate_app_passcode(password)
         language_value = getattr(language, "value", language)
         generated = self.core_client.generate_mnemonic(
-            self._password_from_credential(credential),
+            password,
             mnemonic_passphrase=mnemonic_passphrase,
             index=index,
             language=language_value,
@@ -334,14 +353,27 @@ class WalletManager:
         path,
         name: str | None = None,
         make_default: bool | None = None,
+        wallet_password: str | None = None,
     ) -> WalletRecord:
-        """Restore an encrypted record; protection validation remains an unlock concern."""
+        """Restore an encrypted record while preserving the app-passcode invariant."""
         record = read_wallet_backup(path)
         if name is not None:
             name = name.strip()
             if not name:
                 raise WalletError("Restored wallet name cannot be empty")
             record = replace(record, name=name)
+        if not record.watch_only and self.has_app_passcode():
+            if not wallet_password:
+                raise InvalidPasswordError(
+                    "Fresnica passcode is required to restore a signing wallet"
+                )
+            self.validate_app_passcode(wallet_password)
+            try:
+                self._derive_record_unlock_key(record, wallet_password)
+            except InvalidPasswordError as exc:
+                raise InvalidPasswordError(
+                    "Backup does not use the current Fresnica passcode"
+                ) from exc
         self.storage.save(record)
         self._maybe_default(record.name, make_default)
         return record
@@ -356,6 +388,13 @@ class WalletManager:
         wallet_password: str,
     ) -> WalletUnlockKey:
         record = self._signing_record(name)
+        return self._derive_record_unlock_key(record, wallet_password)
+
+    def _derive_record_unlock_key(
+        self,
+        record: WalletRecord,
+        wallet_password: str,
+    ) -> WalletUnlockKey:
         if self.core_client is not None:
             return self.core_client.derive_verified_unlock_key(
                 record.secret,
