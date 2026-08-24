@@ -306,9 +306,9 @@ fn validate_transfer(
         .iter()
         .find(|balance| asset.matches_balance(balance));
     let available = match raw {
-        Some(balance) if asset.is_native() => {
-            let balance = balance_stroops(balance, "balance")?;
-            let selling = balance_stroops(balance, "selling_liabilities")?;
+        Some(raw_balance) if asset.is_native() => {
+            let balance = balance_stroops(raw_balance, "balance")?;
+            let selling = balance_stroops(raw_balance, "selling_liabilities")?;
             let minimum = minimum_balance_stroops(account, ledger.base_reserve_in_stroops)?;
             balance
                 .saturating_sub(selling)
@@ -316,9 +316,9 @@ fn validate_transfer(
                 .saturating_sub(i64::from(ledger.base_fee_in_stroops))
                 .max(0)
         }
-        Some(balance) => {
-            let balance = balance_stroops(balance, "balance")?;
-            let selling = balance_stroops(balance, "selling_liabilities")?;
+        Some(raw_balance) => {
+            let balance = balance_stroops(raw_balance, "balance")?;
+            let selling = balance_stroops(raw_balance, "selling_liabilities")?;
             let native = balances
                 .iter()
                 .find(|balance| text(balance, "asset_type") == Some("native"))
