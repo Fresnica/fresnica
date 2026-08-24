@@ -97,9 +97,13 @@ impl ProtectionProvider for PasswordProtectionProvider {
     }
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("system key store operation failed")]
+pub struct SystemKeyStoreError;
+
 pub trait SystemKeyStore {
-    fn store_key(&self, key: &[u8; 32]) -> Result<String, ProtectionError>;
-    fn load_key(&self, reference: &str) -> Result<Zeroizing<[u8; 32]>, ProtectionError>;
+    fn store_key(&self, key: &[u8; 32]) -> Result<String, SystemKeyStoreError>;
+    fn load_key(&self, reference: &str) -> Result<Zeroizing<[u8; 32]>, SystemKeyStoreError>;
 }
 
 pub struct SystemProtectionProvider {
@@ -130,9 +134,13 @@ impl ProtectionProvider for SystemProtectionProvider {
         require_kind(credential, self.kind())?;
         let mut key = Zeroizing::new([0u8; 32]);
         getrandom::fill(&mut key[..]).map_err(|_| ProtectionError::SystemUnavailable(
-            "secure randomness is unavailable".to_owned(),
+            "system protection could not generate a wallet protection key".to_owned(),
         ))?;
-        let reference = self.key_store.store_key(&key)?;
+        let reference = self.key_store.store_key(&key).map_err(|_| {
+            ProtectionError::SystemUnavailable(
+                "system protection could not store a wallet protection key".to_owned(),
+            )
+        })?;
         if reference.is_empty() {
             return Err(ProtectionError::InvalidKeyReference);
         }
@@ -164,7 +172,11 @@ impl ProtectionProvider for SystemProtectionProvider {
                 .ok_or(ProtectionError::CorruptedMetadata)?,
         )
         .map_err(|_| ProtectionError::CorruptedMetadata)?;
-        let key = self.key_store.load_key(reference)?;
+        let key = self.key_store.load_key(reference).map_err(|_| {
+            ProtectionError::SystemUnavailable(
+                "system protection could not access the wallet protection key".to_owned(),
+            )
+        })?;
         decrypt_secret_with_key(&secret, &key).map_err(Into::into)
     }
 }
@@ -352,21 +364,21 @@ mod tests {
     }
 
     impl SystemKeyStore for MemoryKeyStore {
-        fn store_key(&self, key: &[u8; 32]) -> Result<String, ProtectionError> {
+        fn store_key(&self, key: &[u8; 32]) -> Result<String, SystemKeyStoreError> {
             let reference = format!("key-{}", self.state.next_id.get());
             self.state.next_id.set(self.state.next_id.get() + 1);
             self.state.keys.borrow_mut().insert(reference.clone(), *key);
             Ok(reference)
         }
 
-        fn load_key(&self, reference: &str) -> Result<Zeroizing<[u8; 32]>, ProtectionError> {
+        fn load_key(&self, reference: &str) -> Result<Zeroizing<[u8; 32]>, SystemKeyStoreError> {
             self.state
                 .keys
                 .borrow()
                 .get(reference)
                 .copied()
                 .map(Zeroizing::new)
-                .ok_or_else(|| ProtectionError::SystemUnavailable("key not found".to_owned()))
+                .ok_or(SystemKeyStoreError)
         }
     }
 
@@ -426,6 +438,23 @@ mod tests {
         assert!(matches!(
             registry.unprotect(&envelope, &ProtectionCredential::password("irrelevant")),
             Err(ProtectionError::CredentialMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn system_key_store_failure_maps_to_system_unavailable() {
+        let key_store = MemoryKeyStore::default();
+        let mut registry = ProtectionRegistry::new();
+        registry.register(SystemProtectionProvider::new(key_store));
+        let mut envelope = registry
+            .protect(&json!({"secret": "S..."}), &ProtectionCredential::system())
+            .unwrap();
+        envelope["payload"]["key_reference"] = Value::String("missing".to_owned());
+
+        assert!(matches!(
+            registry.unprotect(&envelope, &ProtectionCredential::system()),
+            Err(ProtectionError::SystemUnavailable(message))
+                if message == "system protection could not access the wallet protection key"
         ));
     }
 }
