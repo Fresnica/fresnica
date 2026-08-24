@@ -1,32 +1,15 @@
 import pytest
 from stellar_sdk import Keypair
 
-from fresnica.errors import InvalidPasswordError, ProtectionError
+from fresnica.errors import InvalidPasswordError, InvalidUnlockKeyError
 from fresnica.manager import WalletManager
 from fresnica.protection import (
     PasswordProtectionProvider,
     ProtectionCredential,
     ProtectionRegistry,
-    SystemKeyStore,
-    SystemProtectionProvider,
 )
-from fresnica.secret_store import encrypt_secret
+from fresnica.secret_store import WalletUnlockKey, encrypt_secret
 from fresnica.storage import MemoryWalletStorage, WalletRecord
-
-
-class MemorySystemKeyStore(SystemKeyStore):
-    def __init__(self):
-        self.keys = {}
-        self.next_id = 0
-
-    def store_key(self, key: bytes) -> str:
-        reference = f"key-{self.next_id}"
-        self.next_id += 1
-        self.keys[reference] = key
-        return reference
-
-    def load_key(self, reference: str) -> bytes:
-        return self.keys[reference]
 
 
 def test_password_provider_is_a_registry_implementation():
@@ -39,6 +22,18 @@ def test_password_provider_is_a_registry_implementation():
     assert registry.unprotect(envelope, credential)["secret"] == "S..."
     with pytest.raises(InvalidPasswordError):
         registry.unprotect(envelope, ProtectionCredential.password("wrong"))
+
+
+def test_same_password_envelope_opens_with_unlock_key():
+    registry = ProtectionRegistry()
+    credential = ProtectionCredential.password("correct")
+    envelope = registry.protect({"kind": "secret", "secret": "S..."}, credential)
+    unlock_key = registry.derive_unlock_key(envelope, "correct")
+
+    assert repr(unlock_key) == "WalletUnlockKey(<redacted>)"
+    assert registry.unprotect_with_unlock_key(envelope, unlock_key)["secret"] == "S..."
+    with pytest.raises(InvalidUnlockKeyError):
+        registry.unprotect_with_unlock_key(envelope, WalletUnlockKey(bytes(32)))
 
 
 def test_legacy_password_envelope_is_readable_and_migratable():
@@ -54,36 +49,33 @@ def test_legacy_password_envelope_is_readable_and_migratable():
     assert registry.unprotect(migrated, credential)["secret"] == "S..."
 
 
-def test_system_provider_keeps_secret_encrypted_outside_key_store():
-    key_store = MemorySystemKeyStore()
-    registry = ProtectionRegistry([SystemProtectionProvider(key_store)])
-    credential = ProtectionCredential.system()
-    envelope = registry.protect({"kind": "secret", "secret": "S..."}, credential)
-
-    assert registry.kind_for(envelope) == "system"
-    assert "S..." not in str(envelope)
-    assert len(key_store.keys) == 1
-    assert registry.unprotect(envelope, credential)["secret"] == "S..."
-    with pytest.raises(ProtectionError):
-        registry.unprotect(envelope, ProtectionCredential.password("irrelevant"))
-
-
-def test_wallet_manager_can_use_system_protection_without_password():
-    key_store = MemorySystemKeyStore()
-    registry = ProtectionRegistry([SystemProtectionProvider(key_store)])
-    manager = WalletManager(MemoryWalletStorage(), registry)
+def test_wallet_manager_derives_verified_unlock_key_and_unlocks_with_it():
+    manager = WalletManager(MemoryWalletStorage())
     keypair = Keypair.random()
+    manager.import_secret("wallet", keypair.secret, "correct")
 
-    record = manager.import_secret_with_protection(
-        "system",
-        keypair.secret,
-        ProtectionCredential.system(),
-    )
+    unlock_key = manager.derive_verified_unlock_key("wallet", "correct")
+    session = manager.unlock_with_key("wallet", unlock_key)
 
-    assert manager.protection_kind("system") == "system"
-    assert keypair.secret not in str(record.secret)
-    session = manager.unlock_with("system", ProtectionCredential.system())
     assert session.wallet.address() == keypair.public_key
+
+
+def test_wallet_manager_wrong_passcode_cannot_enroll_unlock_key():
+    manager = WalletManager(MemoryWalletStorage())
+    keypair = Keypair.random()
+    manager.import_secret("wallet", keypair.secret, "correct")
+
+    with pytest.raises(InvalidPasswordError):
+        manager.derive_verified_unlock_key("wallet", "wrong")
+
+
+def test_wallet_manager_wrong_unlock_key_cannot_unlock():
+    manager = WalletManager(MemoryWalletStorage())
+    keypair = Keypair.random()
+    manager.import_secret("wallet", keypair.secret, "correct")
+
+    with pytest.raises(InvalidUnlockKeyError):
+        manager.unlock_with_key("wallet", WalletUnlockKey(bytes(32)))
 
 
 def test_wallet_manager_can_explicitly_upgrade_legacy_password_metadata():

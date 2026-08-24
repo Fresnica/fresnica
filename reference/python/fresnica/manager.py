@@ -4,10 +4,18 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 
-from .errors import WalletError, WalletLockedError, WalletNotFoundError, WatchOnlyError
+from .errors import (
+    InvalidPasswordError,
+    InvalidUnlockKeyError,
+    WalletError,
+    WalletLockedError,
+    WalletNotFoundError,
+    WatchOnlyError,
+)
 from .hdwallet import detect_mnemonic_language, generate_mnemonic_phrase
 from .network import get_network
 from .protection import ProtectionCredential, ProtectionRegistry
+from .secret_store import WalletUnlockKey
 from .storage import WalletRecord, WalletStorage
 from .wallet import Wallet
 from .wallet_backup import read_wallet_backup, write_wallet_backup
@@ -294,41 +302,52 @@ class WalletManager:
         record = self.get_record(name)
         return WalletSession(record, Wallet.from_address(record.address))
 
-    def unlock(self, name: str | None, wallet_password: str) -> WalletSession:
-        return self.unlock_with(
-            name,
-            ProtectionCredential.password(wallet_password),
+    def derive_verified_unlock_key(
+        self,
+        name: str | None,
+        wallet_password: str,
+    ) -> WalletUnlockKey:
+        record = self._signing_record(name)
+        unlock_key = self.protection_registry.derive_unlock_key(
+            record.secret, wallet_password
         )
+        try:
+            payload = self.protection_registry.unprotect_with_unlock_key(
+                record.secret, unlock_key
+            )
+        except InvalidUnlockKeyError as exc:
+            raise InvalidPasswordError("Invalid wallet password") from exc
+        wallet = self._wallet_from_payload(payload)
+        self._verify_identity(record, wallet)
+        return unlock_key
+
+    def unlock(self, name: str | None, wallet_password: str) -> WalletSession:
+        unlock_key = self.derive_verified_unlock_key(name, wallet_password)
+        return self.unlock_with_key(name, unlock_key)
+
+    def unlock_with_key(
+        self,
+        name: str | None,
+        unlock_key: WalletUnlockKey,
+    ) -> WalletSession:
+        record = self._signing_record(name)
+        payload = self.protection_registry.unprotect_with_unlock_key(
+            record.secret, unlock_key
+        )
+        wallet = self._wallet_from_payload(payload)
+        self._verify_identity(record, wallet)
+        self._session = WalletSession(record, wallet)
+        return self._session
 
     def unlock_with(
         self,
         name: str | None,
         credential: ProtectionCredential,
     ) -> WalletSession:
-        record = self.get_record(name)
-        if record.watch_only:
-            raise WatchOnlyError("Watch-only wallet cannot be unlocked for signing")
-        if record.secret is None:
-            raise WalletLockedError("Wallet has no protected signing material")
-
-        payload = self.protection_registry.unprotect(record.secret, credential)
-        kind = payload.get("kind")
-        if kind == "secret":
-            wallet = Wallet.from_secret(payload["secret"])
-        elif kind == "mnemonic":
-            wallet = Wallet.from_mnemonic(
-                payload["mnemonic"],
-                passphrase=payload.get("mnemonic_passphrase", ""),
-                index=int(payload.get("index", 0)),
-                language=payload.get("language"),
-            )
-        else:
-            raise WalletLockedError("Unsupported wallet signing material")
-
-        if wallet.address() != record.address:
-            raise WalletLockedError("Decrypted wallet identity does not match metadata")
-        self._session = WalletSession(record, wallet)
-        return self._session
+        """Compatibility entry point for the password-only reference API."""
+        if credential.kind != "password" or not isinstance(credential.value, str):
+            raise WalletLockedError("Core accepts only password protection credentials")
+        return self.unlock(name, credential.value)
 
     def upgrade_legacy_protection(
         self,
@@ -373,6 +392,33 @@ class WalletManager:
             records = self.storage.list()
             if records:
                 self.storage.set_default(records[0].name)
+
+    def _signing_record(self, name: str | None) -> WalletRecord:
+        record = self.get_record(name)
+        if record.watch_only:
+            raise WatchOnlyError("Watch-only wallet cannot be unlocked for signing")
+        if record.secret is None:
+            raise WalletLockedError("Wallet has no protected signing material")
+        return record
+
+    @staticmethod
+    def _wallet_from_payload(payload: dict) -> Wallet:
+        kind = payload.get("kind")
+        if kind == "secret":
+            return Wallet.from_secret(payload["secret"])
+        if kind == "mnemonic":
+            return Wallet.from_mnemonic(
+                payload["mnemonic"],
+                passphrase=payload.get("mnemonic_passphrase", ""),
+                index=int(payload.get("index", 0)),
+                language=payload.get("language"),
+            )
+        raise WalletLockedError("Unsupported wallet signing material")
+
+    @staticmethod
+    def _verify_identity(record: WalletRecord, wallet: Wallet) -> None:
+        if wallet.address() != record.address:
+            raise WalletLockedError("Decrypted wallet identity does not match metadata")
 
     def _maybe_default(self, name: str, make_default: bool | None) -> None:
         if make_default is True or (
