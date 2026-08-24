@@ -14,4 +14,6 @@ pub use transaction::{
     network_id, parse_transaction_envelope_xdr, sign_transaction_envelope,
     transaction_envelope_xdr, transaction_hash, TransactionSigningError,
 };
-pub use wallet::{derive_classic_public_key, WalletDerivationError};
+pub use wallet::{
+    derive_classic_public_key, derive_classic_signer, WalletDerivationError,
+};

@@ -24,13 +24,15 @@ impl SoftwareSigner {
     pub fn from_secret(secret: &str) -> Result<Self, SignerError> {
         let private =
             PrivateKey::from_string(secret.trim()).map_err(|_| SignerError::InvalidSecret)?;
-        let signing_key = SigningKey::from_bytes(&private.0);
-        let public_key = format!("{}", PublicKey(signing_key.verifying_key().to_bytes()));
+        Ok(Self::from_signing_key(SigningKey::from_bytes(&private.0)))
+    }
 
-        Ok(Self {
+    pub(crate) fn from_signing_key(signing_key: SigningKey) -> Self {
+        let public_key = format!("{}", PublicKey(signing_key.verifying_key().to_bytes()));
+        Self {
             signing_key,
             public_key,
-        })
+        }
     }
 }
 

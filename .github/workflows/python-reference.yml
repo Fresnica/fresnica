@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "reference/python/**"
+      - "spec/test-vectors/**"
       - ".github/workflows/python-reference.yml"
   pull_request:
     paths:
       - "reference/python/**"
+      - "spec/test-vectors/**"
       - ".github/workflows/python-reference.yml"
 
 jobs:

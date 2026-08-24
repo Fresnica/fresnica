@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "core/rust/**"
+      - "spec/test-vectors/**"
       - ".github/workflows/rust-core.yml"
   pull_request:
     paths:
       - "core/rust/**"
+      - "spec/test-vectors/**"
       - ".github/workflows/rust-core.yml"
 
 jobs:

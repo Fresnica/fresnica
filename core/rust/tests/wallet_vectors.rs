@@ -1,4 +1,4 @@
-use fresnica_core::derive_classic_public_key;
+use fresnica_core::{derive_classic_public_key, derive_classic_signer, ClassicSigner};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +33,15 @@ fn wallet_derivation_matches_cross_language_vectors() {
             &vector.language,
         )
         .unwrap_or_else(|error| panic!("{} failed: {error}", vector.name));
+        let signer = derive_classic_signer(
+            &vector.mnemonic,
+            &vector.passphrase,
+            vector.index,
+            &vector.language,
+        )
+        .unwrap_or_else(|error| panic!("{} signer failed: {error}", vector.name));
 
         assert_eq!(public_key, vector.expected_public_key, "{}", vector.name);
+        assert_eq!(signer.public_key(), vector.expected_public_key, "{}", vector.name);
     }
 }

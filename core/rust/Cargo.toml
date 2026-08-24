@@ -7,13 +7,23 @@ license = "MIT"
 publish = false
 
 [dependencies]
-bip39 = "2"
+bip39 = { version = "=2.2.2", features = [
+    "chinese-simplified",
+    "chinese-traditional",
+    "french",
+    "italian",
+    "japanese",
+    "korean",
+    "spanish",
+    "zeroize",
+] }
 ed25519-dalek = { version = "=2.2.0", features = ["zeroize"] }
-near-slip10 = "=0.4.8"
+kobe-primitives = { version = "=2.0.1", default-features = false, features = ["slip10"] }
 sha2 = "=0.10.9"
 stellar-strkey = "=0.0.18"
 stellar-xdr = "=28.0.0"
 thiserror = "2"
+zeroize = "=1.9.0"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
