@@ -52,6 +52,10 @@ jobs:
           for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
             grep -q "jni/${abi}/libfresnica_mobile_core.so" /tmp/fresnica-aar.txt
           done
+          unzip -p "$AAR" classes.jar > /tmp/fresnica-classes.jar
+          jar tf /tmp/fresnica-classes.jar > /tmp/fresnica-classes.txt
+          grep -q 'com/fresnica/core/reactnative/FresnicaCoreModule.class' /tmp/fresnica-classes.txt
+          grep -q 'com/fresnica/core/reactnative/FresnicaCorePackage.class' /tmp/fresnica-classes.txt
       - uses: actions/upload-artifact@v4
         with:
           name: fresnica-mobile-android-aar
@@ -77,4 +81,10 @@ jobs:
             -typecheck \
             bindings/mobile/build/apple/generated-swift/FresnicaCore.swift \
             bindings/mobile/platform/apple/FresnicaWalletUnlockKeyStore.swift \
-            bindings/mobile/platform/apple/FresnicaSignerAuthorization.swift
+            bindings/mobile/platform/apple/FresnicaSignerAuthorization.swift \
+            bindings/mobile/platform/apple/FresnicaCoreModule.swift
+      - name: Validate React Native Objective-C shim
+        run: |
+          grep -q 'RCT_EXTERN_MODULE(FresnicaCoreModule' bindings/mobile/platform/apple/FresnicaCoreModule.m
+          grep -q 'signWithSystemAuth' bindings/mobile/platform/apple/FresnicaCoreModule.m
+          grep -q 'signWithPasscode' bindings/mobile/platform/apple/FresnicaCoreModule.m

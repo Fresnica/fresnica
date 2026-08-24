@@ -21,6 +21,10 @@ public final class FresnicaSignerAuthorization {
         keyStore.canEnrollBiometry()
     }
 
+    public func isSystemAuthEnrolled(expectedSignerPublicKey: String) throws -> Bool {
+        try keyStore.isEnrolled(signerId: expectedSignerPublicKey)
+    }
+
     /// Derives a verified key through Rust Core and immediately moves it into biometric Keychain.
     public func enrollSystemAuth(
         envelopeJson: String,
@@ -43,7 +47,6 @@ public final class FresnicaSignerAuthorization {
         )
     }
 
-    ///
     /// Keychain access performs the real Face ID / Touch ID operation that releases the key.
     /// Only signed XDR leaves this method.
     public func signWithSystemAuth(
