@@ -1,8 +1,9 @@
-//! FFI-neutral mobile facade over `fresnica_core::CoreClientApi`.
+//! Mobile-facing facade over `fresnica_core::CoreClientApi`.
 //!
-//! This crate is intentionally not a UniFFI, JNI, Swift, or React Native binding.
-//! It freezes the mobile-facing data shapes first so platform adapters can stay
-//! thin and cannot accidentally reimplement Core cryptography or identity rules.
+//! The Rust-facing surface remains platform-neutral. UniFFI exports this exact
+//! facade to Swift and Kotlin so native adapters do not reproduce Core crypto,
+//! signer identity checks, transaction hashing, signature verification, or
+//! error classification.
 
 use std::{error::Error, fmt};
 
@@ -14,11 +15,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zeroize::{Zeroize, Zeroizing};
 
+uniffi::setup_scaffolding!();
+
 pub const MOBILE_BINDING_API_VERSION: u64 = 1;
 
-pub struct MobileCoreApi {
-    core: CoreClientApi,
-}
+/// Stateless mobile entry point.
+///
+/// `CoreClientApi` currently carries no client session state; each operation
+/// creates a short-lived Core facade. Keeping the exported object stateless makes
+/// it naturally `Send + Sync`, as required by UniFFI, without imposing foreign
+/// threading requirements on Core protection-provider traits.
+#[derive(uniffi::Object)]
+pub struct MobileCoreApi;
 
 impl Default for MobileCoreApi {
     fn default() -> Self {
@@ -27,10 +35,16 @@ impl Default for MobileCoreApi {
 }
 
 impl MobileCoreApi {
+    fn core(&self) -> CoreClientApi {
+        CoreClientApi::new()
+    }
+}
+
+#[uniffi::export]
+impl MobileCoreApi {
+    #[uniffi::constructor]
     pub fn new() -> Self {
-        Self {
-            core: CoreClientApi::new(),
-        }
+        Self
     }
 
     pub fn version(&self) -> MobileCoreVersion {
@@ -42,7 +56,7 @@ impl MobileCoreApi {
 
     pub fn parse_account(&self, address: String) -> Result<MobileAccountIdentity, MobileCoreError> {
         let identity = self
-            .core
+            .core()
             .parse_account(&address)
             .map_err(MobileCoreError::from)?;
         Ok(MobileAccountIdentity {
@@ -64,7 +78,7 @@ impl MobileCoreApi {
         let secret = Zeroizing::new(secret);
         let passcode = Zeroizing::new(passcode);
         let protected = self
-            .core
+            .core()
             .protect_secret(
                 secret.as_str(),
                 passcode.as_str(),
@@ -87,7 +101,7 @@ impl MobileCoreApi {
         let mnemonic_passphrase = Zeroizing::new(mnemonic_passphrase);
         let passcode = Zeroizing::new(passcode);
         let protected = self
-            .core
+            .core()
             .protect_mnemonic(
                 mnemonic.as_str(),
                 mnemonic_passphrase.as_str(),
@@ -111,7 +125,7 @@ impl MobileCoreApi {
         let mnemonic_passphrase = Zeroizing::new(mnemonic_passphrase);
         let passcode = Zeroizing::new(passcode);
         let generated = self
-            .core
+            .core()
             .generate_mnemonic(
                 &language,
                 binding_usize(strength, "strength")?,
@@ -139,7 +153,7 @@ impl MobileCoreApi {
         let current_passcode = Zeroizing::new(current_passcode);
         let new_passcode = Zeroizing::new(new_passcode);
         let protected = self
-            .core
+            .core()
             .reprotect(
                 &envelope,
                 current_passcode.as_str(),
@@ -159,7 +173,7 @@ impl MobileCoreApi {
         let envelope = parse_envelope(&envelope_json)?;
         let passcode = Zeroizing::new(passcode);
         let key = self
-            .core
+            .core()
             .derive_unlock_key(&envelope, passcode.as_str(), &expected_signer_public_key)
             .map_err(MobileCoreError::from)?;
         Ok(key.as_bytes().to_vec())
@@ -173,7 +187,7 @@ impl MobileCoreApi {
     ) -> Result<(), MobileCoreError> {
         let envelope = parse_envelope(&envelope_json)?;
         let unlock_key = binding_unlock_key(unlock_key)?;
-        self.core
+        self.core()
             .validate_unlock_key(&envelope, &unlock_key, &expected_signer_public_key)
             .map_err(MobileCoreError::from)
     }
@@ -188,7 +202,7 @@ impl MobileCoreApi {
     ) -> Result<Vec<u8>, MobileCoreError> {
         let envelope = parse_envelope(&envelope_json)?;
         let unlock_key = binding_unlock_key(unlock_key)?;
-        self.core
+        self.core()
             .sign_transaction_xdr(
                 &envelope,
                 &unlock_key,
@@ -208,7 +222,7 @@ impl MobileCoreApi {
         let envelope = parse_envelope(&envelope_json)?;
         let fresh_passcode = Zeroizing::new(fresh_passcode);
         let material = self
-            .core
+            .core()
             .reveal(
                 &envelope,
                 fresh_passcode.as_str(),
@@ -246,7 +260,7 @@ impl MobileCoreApi {
         network_passphrase: String,
     ) -> Result<MobileEd25519SigningRequest, MobileCoreError> {
         let request = self
-            .core
+            .core()
             .prepare_ed25519_signing(&transaction_xdr, &network_passphrase)
             .map_err(MobileCoreError::from)?;
         Ok(MobileEd25519SigningRequest {
@@ -263,7 +277,7 @@ impl MobileCoreApi {
         signer_public_key: String,
         signature: Vec<u8>,
     ) -> Result<Vec<u8>, MobileCoreError> {
-        self.core
+        self.core()
             .apply_ed25519_signature(
                 &transaction_xdr,
                 &network_passphrase,
@@ -274,33 +288,33 @@ impl MobileCoreApi {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct MobileCoreVersion {
     pub mobile_binding_api_version: u64,
     pub core_client_api_version: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 #[serde(rename_all = "kebab-case")]
 pub enum MobileAccountKind {
     Classic,
     Contract,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct MobileAccountIdentity {
     pub kind: MobileAccountKind,
     pub address: String,
     pub public_key: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct MobileProtectedSoftwareSigner {
     pub signer_public_key: String,
     pub envelope_json: String,
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct MobileGeneratedMnemonic {
     pub signer: MobileProtectedSoftwareSigner,
     pub mnemonic: String,
@@ -308,21 +322,21 @@ pub struct MobileGeneratedMnemonic {
     pub index: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct MobileEd25519SigningRequest {
     pub transaction_hash: Vec<u8>,
     pub transaction_xdr: Vec<u8>,
     pub network_passphrase: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 #[serde(rename_all = "kebab-case")]
 pub enum MobileSigningMaterialKind {
     Secret,
     Mnemonic,
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct MobileExportedSigningMaterial {
     pub kind: MobileSigningMaterialKind,
     pub secret: Option<String>,
@@ -332,7 +346,7 @@ pub struct MobileExportedSigningMaterial {
     pub language: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 #[serde(rename_all = "kebab-case")]
 pub enum MobileCoreErrorCode {
     InvalidInput,
@@ -358,24 +372,60 @@ impl MobileCoreErrorCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MobileCoreError {
-    pub code: MobileCoreErrorCode,
-    pub message: String,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Error)]
+#[serde(tag = "code", rename_all = "kebab-case")]
+pub enum MobileCoreError {
+    InvalidInput { message: String },
+    InvalidPasscode { message: String },
+    InvalidUnlockKey { message: String },
+    InvalidProtectedData { message: String },
+    IdentityMismatch { message: String },
+    InvalidTransaction { message: String },
+    CoreError { message: String },
 }
 
 impl MobileCoreError {
+    pub fn code(&self) -> MobileCoreErrorCode {
+        match self {
+            Self::InvalidInput { .. } => MobileCoreErrorCode::InvalidInput,
+            Self::InvalidPasscode { .. } => MobileCoreErrorCode::InvalidPasscode,
+            Self::InvalidUnlockKey { .. } => MobileCoreErrorCode::InvalidUnlockKey,
+            Self::InvalidProtectedData { .. } => MobileCoreErrorCode::InvalidProtectedData,
+            Self::IdentityMismatch { .. } => MobileCoreErrorCode::IdentityMismatch,
+            Self::InvalidTransaction { .. } => MobileCoreErrorCode::InvalidTransaction,
+            Self::CoreError { .. } => MobileCoreErrorCode::CoreError,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::InvalidInput { message }
+            | Self::InvalidPasscode { message }
+            | Self::InvalidUnlockKey { message }
+            | Self::InvalidProtectedData { message }
+            | Self::IdentityMismatch { message }
+            | Self::InvalidTransaction { message }
+            | Self::CoreError { message } => message,
+        }
+    }
+
     fn new(code: MobileCoreErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
+        let message = message.into();
+        match code {
+            MobileCoreErrorCode::InvalidInput => Self::InvalidInput { message },
+            MobileCoreErrorCode::InvalidPasscode => Self::InvalidPasscode { message },
+            MobileCoreErrorCode::InvalidUnlockKey => Self::InvalidUnlockKey { message },
+            MobileCoreErrorCode::InvalidProtectedData => Self::InvalidProtectedData { message },
+            MobileCoreErrorCode::IdentityMismatch => Self::IdentityMismatch { message },
+            MobileCoreErrorCode::InvalidTransaction => Self::InvalidTransaction { message },
+            MobileCoreErrorCode::CoreError => Self::CoreError { message },
         }
     }
 }
 
 impl fmt::Display for MobileCoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+        formatter.write_str(self.message())
     }
 }
 
@@ -483,6 +533,13 @@ mod tests {
             .collect()
     }
 
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn mobile_api_is_safe_for_foreign_threading() {
+        assert_send_sync::<MobileCoreApi>();
+    }
+
     #[test]
     fn versions_and_account_identity_are_stable() {
         let api = MobileCoreApi::new();
@@ -582,7 +639,7 @@ mod tests {
                 public_key.to_owned(),
             )
             .unwrap_err();
-        assert_eq!(old_error.code, MobileCoreErrorCode::InvalidPasscode);
+        assert_eq!(old_error.code(), MobileCoreErrorCode::InvalidPasscode);
 
         let new_key = api
             .derive_unlock_key(
@@ -651,7 +708,11 @@ mod tests {
             )
             .err()
             .unwrap();
-        assert_eq!(mismatch.code, MobileCoreErrorCode::IdentityMismatch);
+        assert_eq!(mismatch.code(), MobileCoreErrorCode::IdentityMismatch);
+        assert_eq!(
+            serde_json::to_value(&mismatch).unwrap()["code"],
+            "identity-mismatch"
+        );
 
         let malformed = api
             .derive_unlock_key(
@@ -660,7 +721,7 @@ mod tests {
                 CLASSIC.to_owned(),
             )
             .unwrap_err();
-        assert_eq!(malformed.code, MobileCoreErrorCode::InvalidProtectedData);
+        assert_eq!(malformed.code(), MobileCoreErrorCode::InvalidProtectedData);
 
         let protected = api
             .protect_secret(secret.to_owned(), "passcode".to_owned(), None)
@@ -668,7 +729,7 @@ mod tests {
         let bad_key = api
             .validate_unlock_key(protected.envelope_json, vec![0u8; 31], CLASSIC.to_owned())
             .unwrap_err();
-        assert_eq!(bad_key.code, MobileCoreErrorCode::InvalidUnlockKey);
+        assert_eq!(bad_key.code(), MobileCoreErrorCode::InvalidUnlockKey);
     }
 
     #[test]
