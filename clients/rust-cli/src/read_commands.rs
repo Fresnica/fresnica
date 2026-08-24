@@ -127,6 +127,7 @@ struct OutputOptions {
     json: bool,
 }
 
+#[derive(Debug)]
 struct HistoryOptions {
     wallet: Option<String>,
     json: bool,
