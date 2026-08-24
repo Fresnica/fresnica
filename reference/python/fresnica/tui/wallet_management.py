@@ -17,6 +17,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         Binding("escape", "close", "Close", show=False),
         Binding("a", "add", "Add wallet", show=False),
         Binding("l", "toggle_lock", "Lock / Unlock", show=False),
+        Binding("s", "toggle_system_unlock", "System unlock", show=False),
         Binding("f", "fund", "Fund testnet", show=False),
         Binding("d", "delete", "Remove wallet", show=False),
     ]
@@ -48,6 +49,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         current_name: str | None,
         states: dict[str, WalletState],
         account_exists: dict[str, bool | None] | None = None,
+        system_unlock: dict[str, bool] | None = None,
         on_select: Callable[[str], dict[str, WalletState] | None] | None = None,
     ):
         super().__init__()
@@ -56,6 +58,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         self.current_name = current_name
         self.states = dict(states)
         self.account_exists = dict(account_exists or {})
+        self.system_unlock = None if system_unlock is None else dict(system_unlock)
         self.on_select = on_select
 
     def compose(self) -> ComposeResult:
@@ -71,6 +74,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
             yield Label("Wallet actions", classes="section-label")
             with Horizontal(id="context-actions", classes="action-row"):
                 yield Button("Unlock", id="lock")
+                yield Button("Enable system unlock", id="system-unlock")
                 yield Button("Fund on testnet", id="fund")
 
             with Horizontal(id="secondary-sections"):
@@ -147,6 +151,12 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
             f"{record.network.upper()} · {_detail_access(record, state)}",
             active,
         ]
+        if self.system_unlock is not None and not record.watch_only:
+            lines.append(
+                "System unlock enabled"
+                if self.system_unlock.get(record.name, False)
+                else "System unlock not enabled"
+            )
         if record.network == "testnet":
             exists = self.account_exists.get(record.name)
             if exists is True:
@@ -160,6 +170,17 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
         lock = self.query_one("#lock", Button)
         lock.display = state is not WalletState.WATCH_ONLY
         lock.label = "Lock" if state is WalletState.UNLOCKED else "Unlock"
+
+        system = self.query_one("#system-unlock", Button)
+        system.display = (
+            self.system_unlock is not None and state is not WalletState.WATCH_ONLY
+        )
+        system.label = (
+            "Disable system unlock"
+            if self.system_unlock is not None
+            and self.system_unlock.get(record.name, False)
+            else "Enable system unlock"
+        )
 
         fund = self.query_one("#fund", Button)
         fund.display = (
@@ -185,6 +206,18 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
             WalletAction("lock" if state is WalletState.UNLOCKED else "unlock", record.name)
         )
 
+    def action_toggle_system_unlock(self) -> None:
+        record = self._selected_record()
+        if self.system_unlock is None or record.watch_only:
+            return
+        enabled = self.system_unlock.get(record.name, False)
+        self.dismiss(
+            WalletAction(
+                "disable-system-unlock" if enabled else "enable-system-unlock",
+                record.name,
+            )
+        )
+
     def action_fund(self) -> None:
         record = self._selected_record()
         if (
@@ -201,6 +234,7 @@ class WalletManagerDialog(ModalScreen[WalletAction | None]):
             "close": self.action_close,
             "add": self.action_add,
             "lock": self.action_toggle_lock,
+            "system-unlock": self.action_toggle_system_unlock,
             "fund": self.action_fund,
             "delete": self.action_delete,
         }

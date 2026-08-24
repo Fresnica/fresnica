@@ -8,6 +8,7 @@ from .anchor_cache import AnchorCapabilitiesStore
 from .anchor_transfer_service import AnchorTransferService
 from .asset_catalog import AssetCatalogService
 from .balance_service import BalanceService
+from .client_system_unlock import SystemUnlockController, UnavailableSystemUnlockBackend
 from .contacts import ContactStore
 from .datastore import SQLiteDataStore
 from .dex_service import DexService
@@ -45,7 +46,14 @@ class NetworkServices:
 
 
 class Runtime:
-    def __init__(self, network: str = "mainnet", home: str | Path | None = None, wallet_storage=None, datastore=None):
+    def __init__(
+        self,
+        network: str = "mainnet",
+        home: str | Path | None = None,
+        wallet_storage=None,
+        datastore=None,
+        system_unlock_backend=None,
+    ):
         self.network = get_network(network).name
         if home is None:
             home = os.environ.get("FRESNICA_HOME", "~/.fresnica")
@@ -64,6 +72,10 @@ class Runtime:
         self.anchor_capabilities_store = AnchorCapabilitiesStore(self.home / "anchors.json")
         self.anchor_transfer_service = AnchorTransferService()
         self.wallet_manager = WalletManager(self.wallet_storage)
+        self.system_unlock_backend = (
+            system_unlock_backend or UnavailableSystemUnlockBackend()
+        )
+        self.system_unlock = SystemUnlockController(self.system_unlock_backend)
         self._services: dict[str, NetworkServices] = {}
 
     def services_for(self, network_name: str | None = None) -> NetworkServices:

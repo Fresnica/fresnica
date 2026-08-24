@@ -2,6 +2,6 @@
 
 
 def run(runtime):
-    from ...tui.app import FresnicaApp
+    from ...tui.system_app import FresnicaApp
 
     return FresnicaApp(runtime).run()
