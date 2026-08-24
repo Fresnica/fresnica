@@ -6,6 +6,7 @@ use stellar_xdr::{
     MuxedAccount, OperationBody, PaymentOp, PublicKey,
 };
 
+use crate::contacts::resolve_destination;
 use crate::horizon::LedgerParameters;
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction_flow::{
@@ -23,12 +24,13 @@ pub fn command_send(
     let record = resolve_signing_wallet(storage, network, request.wallet.as_deref())?;
     let asset = PaymentAsset::parse(&request.asset)?;
     let amount = parse_positive_stroops(&request.amount)?;
-    let destination = AccountId::from_str(&request.destination)
-        .map_err(|_| "destination must be a Classic Stellar G address".to_owned())?;
+    let resolved = resolve_destination(storage, &request.destination, request.memo.as_deref())?;
+    let destination = AccountId::from_str(&resolved.address)
+        .map_err(|_| "destination must be a Classic Stellar G address or local contact name".to_owned())?;
 
     let horizon = network_client(network)?;
     let account = horizon.get_account(&record.address)?;
-    let destination_exists = horizon.account_exists(&request.destination)?;
+    let destination_exists = horizon.account_exists(&resolved.address)?;
     if !destination_exists && !asset.is_native() {
         return Err(
             "Destination account does not exist. Only XLM can create a new Stellar account; issued assets require an existing account and trustline."
@@ -56,17 +58,18 @@ pub fn command_send(
         body,
         account_sequence(&account)?,
         ledger.base_fee_in_stroops,
-        request.memo.as_deref(),
+        resolved.memo.as_deref(),
     )?;
 
     render_review(
         &record,
-        &request.destination,
+        &resolved.address,
+        resolved.contact_name.as_deref(),
         &asset,
         amount,
         ledger.base_fee_in_stroops,
         !destination_exists,
-        request.memo.as_deref(),
+        resolved.memo.as_deref(),
     );
     if !request.yes && !confirm_submission()? {
         println!("Transaction cancelled.");
@@ -296,6 +299,7 @@ fn account_id_to_muxed(account: &AccountId) -> MuxedAccount {
 fn render_review(
     record: &WalletRecord,
     destination: &str,
+    contact_name: Option<&str>,
     asset: &PaymentAsset,
     amount: i64,
     base_fee: u32,
@@ -312,7 +316,11 @@ fn render_review(
         }
     );
     println!("From:      {} ({})", record.name, record.address);
-    println!("To:        {destination}");
+    if let Some(name) = contact_name {
+        println!("To:        {name} ({destination})");
+    } else {
+        println!("To:        {destination}");
+    }
     println!("Amount:    {} {}", format_stroops(amount), asset.display());
     println!("Fee:       {} XLM", format_stroops(i64::from(base_fee)));
     println!("Network:   {}", record.network);
