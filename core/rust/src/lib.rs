@@ -4,6 +4,7 @@
 //! invent parallel wallet behavior.
 
 pub mod account;
+pub mod protected_signer;
 pub mod protection;
 pub mod secret_store;
 pub mod signer;
@@ -11,6 +12,7 @@ pub mod transaction;
 pub mod wallet;
 
 pub use account::{AccountError, AccountIdentity, AccountKind};
+pub use protected_signer::{unlock_software_signer, ProtectedSignerError};
 pub use protection::{
     PasswordProtectionProvider, ProtectionCredential, ProtectionError, ProtectionProvider,
     ProtectionRegistry, SystemKeyStore, SystemKeyStoreError, SystemProtectionProvider,
@@ -30,5 +32,6 @@ pub use transaction::{
     transaction_envelope_xdr, transaction_hash, TransactionSigningError,
 };
 pub use wallet::{
-    derive_classic_public_key, derive_classic_signer, WalletDerivationError,
+    derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,
+    WalletDerivationError,
 };
