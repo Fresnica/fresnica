@@ -2,7 +2,7 @@
 
 This directory is the production Rust Core for Fresnica.
 
-The Python reference remains the behavioral authority while stable semantics are ported. Rust code should reuse established Stellar primitives and reproduce existing cross-language test-vector behavior instead of introducing a parallel wallet model.
+The Python reference remains the behavioral authority while stable semantics are ported. Rust code should reuse established Stellar primitives and reproduce stable test-vector behavior instead of introducing a parallel wallet model.
 
 ## Current scope
 
@@ -14,49 +14,68 @@ Implemented production primitives currently include:
 - Classic Ed25519 software signer
 - External Ed25519 transaction signer for hardware, device, or process-backed providers
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
-- Password and system-key protection providers for locally stored wallet signing material
-- Protected signing-material unlock into a Classic `SoftwareSigner` with public-key identity validation
-- One-shot protected transaction signing that keeps secret material inside Core
-- Explicit password-only signing-material export for user-requested reveal/migration flows
+- Canonical password-protected wallet envelopes using Scrypt + AES-256-GCM
+- `WalletUnlockKey`, the 32-byte Scrypt output used to open that same canonical envelope
+- Verified unlock-key derivation with public-key identity validation before client enrollment
+- One-shot protected transaction signing using `WalletUnlockKey`
+- Explicit passcode-only signing-material export for user-requested reveal/migration flows
 - Agent Access capability checks before Classic transaction signing
 
-Transaction building, network submission, storage, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
+Transaction building, network submission, client persistence, OS authentication, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
+
+## Client / Core boundary
+
+Rust Core does not implement OS authentication or secure-storage APIs.
+
+TUI/CLI, desktop, mobile, and other clients own:
+
+- Keychain / Keystore / platform credential storage;
+- Face ID, Touch ID, Windows Hello, Android biometrics, PAM, and equivalent OS policy;
+- application/session authorization;
+- persistence of the opaque Core wallet envelope;
+- persistence/protection and invalidation of client-held unlock keys.
+
+All software-wallet clients converge on one Core input for routine signing: `WalletUnlockKey`.
+
+A client obtains a key for enrollment through `derive_verified_unlock_key`, which derives the Scrypt key from the app passcode and canonical envelope, opens the envelope, reconstructs the signer, and verifies the expected public key before returning the key.
+
+No second wallet ciphertext or independent system wallet key is created.
+
+See [`docs/client-core-security.md`](../../docs/client-core-security.md) and [`docs/protection.md`](../../docs/protection.md).
 
 ## Signing boundary
 
-Classic transaction signing signs an exact 32-byte Stellar transaction hash. `TransactionSigningRequest` also carries the current raw envelope XDR and network passphrase so an external signer can inspect public transaction context before approving a signature; those fields are review context, not an alternate payload to sign.
+Classic transaction signing signs an exact 32-byte Stellar transaction hash. `TransactionSigningRequest` also carries raw envelope XDR and the network passphrase so an external signer can inspect public transaction context before approving a signature; those fields are review context, not an alternate payload to sign.
 
-External signers hold only the declared Stellar public key and a provider callback. Fresnica verifies the provider's returned Ed25519 signature against the exact transaction hash before mutating the envelope. Private signing material remains outside Fresnica for hardware/device/process-backed signers.
+External signers hold only the declared Stellar public key and a provider callback. Fresnica verifies the provider's returned Ed25519 signature against the exact transaction hash before mutating the envelope.
 
-`sign_protected_transaction_envelope` is the preferred foundation for mobile software-wallet signing: it unlocks protected material, verifies the expected public identity, signs the transaction, and drops the secret-bearing signer without returning a private key to the caller.
+For local software wallets, `sign_protected_transaction_envelope` accepts the canonical protected wallet envelope plus `WalletUnlockKey`, verifies the expected public identity, signs, and drops the secret-bearing signer without returning private signing material to the client.
 
-Arbitrary message signing is reserved as a separate future capability following **SEP-53 (Sign and Verify Messages)**. That extension must preserve SEP-53 domain separation (`Stellar Signed Message:\n`) rather than widening the transaction-signing method to accept arbitrary bytes.
+Arbitrary message signing remains a separate future capability following SEP-53 and must preserve SEP-53 domain separation.
 
 ## Secret-protection boundary
 
-Protection applies only to secret material held locally for software signing. Hardware, device, remote, and future contract-account signers do not route private keys through local wallet protection.
+The canonical software-wallet format remains the version-1 Scrypt + AES-256-GCM password envelope. Each wallet has independent random KDF salt and AEAD nonce material, so one Fresnica app passcode still produces a different unlock key for every wallet.
 
-Password protection preserves the version-1 Scrypt + AES-256-GCM wallet format. Each protected wallet envelope carries independent random KDF salt and AEAD nonce material, so the product may use one Fresnica app passcode while wallets still receive different effective encryption keys.
+`SystemProtectionProvider` and `SystemKeyStore` are not part of Core. OS-specific authorization is a client concern.
 
-The current Rust implementation also contains `SystemProtectionProvider` / `SystemKeyStore`, which generates a separate random wallet protection key and stores it through an injected platform key-store boundary. This remains valid prototype code and test coverage, but it is **not the target mobile product model** after the Mobile/Core vault contract was accepted.
+`WalletUnlockKey` uses zeroizing storage and redacted `Debug`. Intermediate decrypted buffers and sensitive signing-material strings also use zeroizing containers where practical.
 
-For mobile integration, system authentication is signer authorization rather than a second wallet encryption format. Keychain / Keystore, biometrics, app lock/session state, Realm/database encryption, and persistence belong to the mobile layer. Mobile persists Core-generated protected wallet envelopes as opaque data. A system-auth shortcut for a software signer must authorize unlocking the same canonical Core envelope used by manual app-passcode entry; it must not create a second independently encrypted wallet payload.
+Changing the app passcode or re-encrypting with a new salt changes the unlock key. Clients must invalidate and re-enroll any system-protected copy of the old key.
 
-Password-derived keys, system prototype keys, and intermediate decrypted byte buffers use zeroizing containers. `unlock_software_signer` consumes decrypted `secret` or `mnemonic` strings by moving their allocations into zeroizing containers before constructing the signer, then verifies that the resulting Stellar public key matches public wallet metadata. Generic decoded payloads remain live plaintext and should not be cached.
+## Reveal / Export boundary
 
-`export_signing_material` is deliberately separate from normal signing. It requires a password credential, reconstructs and validates the signer identity before returning material, and returns either the stored Stellar secret or the stored mnemonic plus passphrase/derivation metadata. System authorization alone cannot use this API. Exported values use zeroizing containers and redact their `Debug` representation, but any caller that intentionally reveals them must still treat the plaintext as declassified secret data.
+`export_signing_material` is deliberately separate from routine signing and accepts a fresh app passcode rather than `WalletUnlockKey`.
 
-Before mobile FFI is frozen, Core still needs to decouple signer/system authorization from the registry's mutually exclusive `ProtectionCredential::System` path and define the native system-auth unlock credential contract with the mobile layer.
+It reconstructs and validates the signer identity before returning either the stored Stellar secret or the stored mnemonic plus passphrase/derivation metadata. A client-held unlock key or system-authenticated session is insufficient to use this API.
 
-See [`docs/mobile-core-contract.md`](../../docs/mobile-core-contract.md), [`docs/protection.md`](../../docs/protection.md), and [`docs/secret-export.md`](../../docs/secret-export.md).
+See [`docs/secret-export.md`](../../docs/secret-export.md).
 
 ## Agent Access boundary
 
-Agent Access authorizes use of an existing signer; it does not give an agent wallet secret material. `AgentCapability` is public policy data binding a Classic G account to one network, an explicit Stellar `OperationType` allowlist, maximum operation count, total transaction-fee ceiling, and optional expiry.
+Agent Access authorizes use of an existing signer; it does not give an agent wallet secret material. `AgentCapability` binds a Classic G account to one network, an explicit Stellar `OperationType` allowlist, maximum operation count, total transaction-fee ceiling, and optional expiry.
 
-The first policy slice is deliberately fail-closed: only unsigned Classic V1 envelopes are accepted; the transaction source and every effective operation source must resolve to the capability's G account; V0 and fee-bump envelopes are rejected; unlisted operations, excessive fees/counts, expired capabilities, and signer/account mismatches are rejected before signing. `sign_agent_transaction` runs authorization and signing in the same call so callers cannot authorize one envelope and then substitute another before the signer is invoked.
-
-This is an **operation-level foundation**, not the finished autonomous-spending policy. Allowing `PAYMENT`, SDEX, trustline, sponsorship, or Soroban operation types currently grants that operation type without destination, asset, amount, market, contract, or argument constraints. Those constraints must be added before product adapters expose corresponding broad capabilities. Token issuance/storage, MCP, CLI, local RPC/daemon, and OWS-compatible transports remain adapter-layer work and must not duplicate the authorization path.
+The current slice is deliberately fail-closed and operation-level. Destination, asset, amount, market, contract, and argument constraints must be added before broad autonomous capabilities are exposed.
 
 ## Validation
 

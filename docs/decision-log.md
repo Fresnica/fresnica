@@ -2,6 +2,24 @@
 
 This file records design decisions that materially change Fresnica behavior or boundaries. Git history remains the detailed implementation record.
 
+## 2026-08-24 - OS authorization belongs to clients; Core accepts WalletUnlockKey
+
+**Decision:** Rust Core does not implement, abstract, or store operating-system authentication state. TUI/CLI, desktop, mobile, and future clients own Keychain/Keystore/platform credentials, biometrics, Windows Hello, PAM, session policy, and other OS-specific authorization behavior.
+
+**Software-wallet credential:** the standard Core credential for routine software signing is `WalletUnlockKey`, the exact 32-byte Scrypt output for the canonical password-protected wallet envelope. A client may protect this value with any suitable OS mechanism, but Core only receives the resulting 32-byte key.
+
+**Enrollment:** clients obtain an unlock key through a verified Core path: app passcode + canonical envelope -> Scrypt key -> decrypt -> reconstruct signer -> verify expected public key -> return `WalletUnlockKey`. This prevents enrollment of an unlock key for substituted or mismatched wallet material.
+
+**Signing:** clients submit the canonical encrypted envelope plus `WalletUnlockKey`; Core decrypts the same envelope, re-validates wallet identity, signs, and drops secret-bearing state. No second wallet ciphertext and no independent system wallet key are created.
+
+**Disclosure:** `WalletUnlockKey` cannot authorize Reveal / Export. Explicit secret disclosure continues to require a fresh Fresnica app passcode and the dedicated export path.
+
+**Re-keying:** changing the app passcode or re-encrypting with a new salt changes the unlock key. Clients must invalidate and re-enroll any OS-protected copy of the previous key.
+
+**Supersedes:** the Rust `SystemProtectionProvider` / `SystemKeyStore` prototype and the earlier idea that Core should model a peer `system` protection kind. Those OS concerns now live exclusively in clients.
+
+See [Client / Rust Core Security Contract](client-core-security.md), [Wallet Protection Model](protection.md), and [Signing Material Reveal and Export](secret-export.md).
+
 ## 2026-08-24 - Signing-material export is an explicit declassification boundary
 
 **Decision:** normal signing must keep mnemonic/private signing material inside Rust Core. User-requested Reveal / Export is a separate high-risk operation that may return the original recoverable signing material only after fresh Fresnica app-passcode authentication and Core identity verification.
@@ -10,25 +28,25 @@ This file records design decisions that materially change Fresnica behavior or b
 
 **Material semantics:** mnemonic-backed wallets may reveal the stored mnemonic plus any mnemonic passphrase and derivation metadata required to reconstruct the account. Secret-key-backed wallets may reveal the stored Stellar `S...` secret. A secret key must never be presented as if its original mnemonic can be reconstructed. External/hardware/remote signers cannot export private material that Fresnica never possessed.
 
-**Mobile handling:** revealed plaintext must not be persisted, logged, sent to analytics, automatically copied to the clipboard, or retained after the export flow. Normal transaction signing must not reuse the export API.
+**Client handling:** revealed plaintext must not be persisted, logged, sent to analytics, automatically copied to the clipboard, or retained after the export flow. Normal transaction signing must not reuse the export API.
 
-See [Signing Material Reveal and Export](secret-export.md) and [Mobile / Rust Core Vault Contract](mobile-core-contract.md).
+See [Signing Material Reveal and Export](secret-export.md) and [Client / Rust Core Security Contract](client-core-security.md).
 
 ## 2026-08-24 - One app passcode; system authentication authorizes signers
 
 **Decision:** ordinary local software wallets use one Fresnica app passcode at the product level. Each wallet remains independently protected by Core using its own random salt and nonce, so the same app passcode does not imply one shared wallet AES key.
 
-**Core boundary:** Rust Core is authoritative for secret payloads, KDF/cipher semantics, wallet identity validation, signer construction, and transaction signing. Mobile persists Core-generated encrypted envelopes as opaque data and must not duplicate wallet cryptography.
+**Core boundary:** Rust Core is authoritative for secret payloads, KDF/cipher semantics, wallet identity validation, signer construction, and transaction signing. Clients persist Core-generated encrypted envelopes as opaque data and must not duplicate wallet cryptography.
 
-**Mobile boundary:** Keychain / Keystore, biometric UI, app lock/session state, Realm/database encryption, and platform lifecycle stay in the mobile layer. Xaman platform infrastructure may be reused for these responsibilities.
+**Client boundary:** secure storage, biometric UI, app lock/session state, database encryption, and platform lifecycle stay in the client layer.
 
-**System authentication:** Face ID, Touch ID, Android biometrics, Windows Hello, device passcode, and similar facilities are signer-authorization mechanisms. They must not create a second independently encrypted copy of a software wallet. For local software signers, system authentication may authorize access to Core-compatible unlock material for the same canonical wallet envelope. For hardware/external/future signers, it may authorize invocation without any local private key.
+**System authentication:** OS authentication is a signer-authorization mechanism. For software wallets it may authorize release of a client-protected Core `WalletUnlockKey`; for hardware/external/future signers it may authorize invocation without any local private key.
 
-**Supersedes part of the earlier protection-provider decision:** `SystemProtectionProvider` / `SystemKeyStore` remains current prototype code, but a mutually exclusive `system` wallet protection kind is no longer the target mobile product model. Password protection remains the canonical local software-wallet envelope; system authentication moves to the signer-authorization/platform boundary.
+**Later refinement:** the concrete cross-client contract is now fixed by the newer decision above: Core accepts `WalletUnlockKey` and no longer contains a `SystemProtectionProvider` product path.
 
 **Pre-release migration:** Fresnica has not had a public wallet release, so current internal test wallet files do not require compatibility migration code. After public release, every persisted-format change must ship with an explicit versioned, recoverable migration path.
 
-See [Mobile / Rust Core Vault Contract](mobile-core-contract.md) and [Wallet Protection Model](protection.md).
+See [Client / Rust Core Security Contract](client-core-security.md) and [Wallet Protection Model](protection.md).
 
 ## 2026-08-24 - Account identity is not permanently tied to G addresses
 
@@ -44,17 +62,11 @@ See [Signer Architecture](signer.md).
 
 ## 2026-08-24 - Password is a protection provider, not a wallet model
 
-**Decision:** Separate account identity, signing capability, local secret material, and secret protection. Password protection becomes one `ProtectionProvider` implementation rather than a requirement embedded in `WalletManager` semantics.
+**Decision:** Separate account identity, signing capability, local secret material, and secret protection. Password protection is a Core protection mechanism rather than a requirement embedded in `WalletManager` semantics.
 
-The Python reference keeps password protection compatible with the existing Scrypt + AES-256-GCM envelope and adds a generic `SystemProtectionProvider` boundary backed by an injected `SystemKeyStore`. The reference intentionally does not bind this interface to platform biometric APIs.
+The password envelope remains Scrypt + AES-256-GCM. Hardware/external signers remain independent of local secret protection, and future Stellar contract-account/passkey wallets should use their own account/signer implementation rather than being forced into classic-account password semantics.
 
-**System authentication model:** biometrics or OS login authorize access to an OS-protected key; biometric data is never used as encryption key material.
-
-**Signer boundary:** hardware/external signers remain independent of local secret protection. Future Stellar contract-account/passkey wallets should use their own account/signer implementation rather than being forced into classic-account password semantics.
-
-Existing password envelopes remain readable. Explicit migration only adds provider metadata around the existing encrypted envelope and does not re-encrypt secret material.
-
-**Later refinement:** the accepted Mobile/Core vault contract keeps the separation principle but moves system authentication out of the user-facing wallet `ProtectionProvider` choice and into signer authorization. See the newer decision above.
+**Historical note:** an early Python/Rust prototype modeled system protection as another `ProtectionProvider`. The later Client/Core decisions supersede that product direction: OS authorization is client-owned and the canonical software-wallet envelope remains password-protected.
 
 See [Wallet Protection Model](protection.md).
 
