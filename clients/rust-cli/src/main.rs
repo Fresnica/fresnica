@@ -2,6 +2,8 @@ mod horizon;
 mod read_commands;
 mod send;
 mod storage;
+mod transaction_flow;
+mod trust;
 mod wallet_ops;
 
 use std::env;
@@ -22,6 +24,9 @@ Usage:
   fresnica [--home PATH] [--network mainnet|testnet] balance [--wallet NAME] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] history [--wallet NAME] [--limit N] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] send AMOUNT ASSET to G... [--wallet NAME] [--memo TEXT] [-y]
+  fresnica [--home PATH] [--network mainnet|testnet] trust add CODE:GISSUER [--limit VALUE] [--wallet NAME] [-y]
+  fresnica [--home PATH] [--network mainnet|testnet] trust limit CODE:GISSUER LIMIT [--wallet NAME] [-y]
+  fresnica [--home PATH] [--network mainnet|testnet] trust remove CODE:GISSUER [--wallet NAME] [-y]
   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
 
 Network commands:
@@ -29,6 +34,7 @@ Network commands:
   balance                       Show current account balances and liabilities
   history                       Show newest Horizon operations (default 20, max 200)
   send                          Review, sign with Rust Core, and submit a payment
+  trust                         Add, change, or remove an issued-asset trustline
 
 Wallet commands:
   list
@@ -83,6 +89,7 @@ fn run() -> Result<(), String> {
         }
         "history" => read_commands::command_history(&storage, &global.network, &global.command[1..]),
         "send" => send::command_send(&storage, &global.network, &global.command[1..]),
+        "trust" => trust::command_trust(&storage, &global.network, &global.command[1..]),
         "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }
