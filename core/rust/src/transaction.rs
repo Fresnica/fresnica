@@ -1,14 +1,13 @@
 use sha2::{Digest, Sha256};
 use stellar_xdr::{
-    DecoratedSignature, Hash, Limits, ReadXdr, Signature, SignatureHint, TransactionEnvelope,
-    WriteXdr,
+    DecoratedSignature, Limits, ReadXdr, Signature, SignatureHint, TransactionEnvelope, WriteXdr,
 };
 use thiserror::Error;
 
 use crate::signer::ClassicSigner;
 
-pub fn network_id(network_passphrase: &str) -> Hash {
-    Hash(Sha256::digest(network_passphrase.as_bytes()).into())
+pub fn network_id(network_passphrase: &str) -> [u8; 32] {
+    Sha256::digest(network_passphrase.as_bytes()).into()
 }
 
 pub fn transaction_hash(
@@ -107,24 +106,25 @@ mod tests {
 
     #[test]
     fn derives_stellar_testnet_network_id() {
-        assert_eq!(
-            network_id(TESTNET).0,
-            decode_hex("cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472")
-                .try_into()
-                .unwrap()
-        );
+        let expected: [u8; 32] = decode_hex(
+            "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472",
+        )
+        .try_into()
+        .unwrap();
+
+        assert_eq!(network_id(TESTNET), expected);
     }
 
     #[test]
     fn hashes_classic_transaction_with_official_xdr_semantics() {
         let envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
+        let expected: [u8; 32] = decode_hex(
+            "dd8d4e2abf55d45c62805bfaae02baf1143f8c79b457dc0db6e1887902f9e43e",
+        )
+        .try_into()
+        .unwrap();
 
-        assert_eq!(
-            transaction_hash(&envelope, TESTNET).unwrap(),
-            decode_hex("dd8d4e2abf55d45c62805bfaae02baf1143f8c79b457dc0db6e1887902f9e43e")
-                .try_into()
-                .unwrap()
-        );
+        assert_eq!(transaction_hash(&envelope, TESTNET).unwrap(), expected);
     }
 
     #[test]
