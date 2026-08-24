@@ -52,23 +52,7 @@ pub fn encrypt_secret(
 
     let salt = random_array::<16>()?;
     let nonce = random_array::<12>()?;
-    let key = derive_key(password, &salt)?;
-    let plaintext = encode_payload(payload)?;
-    let ciphertext = encrypt_aead(&key, &nonce, AAD, &plaintext)?;
-
-    Ok(PasswordSecretEnvelope {
-        version: 1,
-        cipher: "aes-256-gcm".to_owned(),
-        kdf: ScryptEnvelope {
-            name: "scrypt".to_owned(),
-            n: SCRYPT_N,
-            r: SCRYPT_R,
-            p: SCRYPT_P,
-            salt: STANDARD.encode(salt),
-        },
-        nonce: STANDARD.encode(nonce),
-        ciphertext: STANDARD.encode(ciphertext),
-    })
+    encrypt_secret_with_material(payload, password, &salt, &nonce)
 }
 
 pub fn decrypt_secret(
@@ -94,15 +78,7 @@ pub fn encrypt_secret_with_key(
     key: &[u8; 32],
 ) -> Result<KeySecretEnvelope, SecretStoreError> {
     let nonce = random_array::<12>()?;
-    let plaintext = encode_payload(payload)?;
-    let ciphertext = encrypt_aead(key, &nonce, KEY_AAD, &plaintext)?;
-
-    Ok(KeySecretEnvelope {
-        version: 1,
-        cipher: "aes-256-gcm".to_owned(),
-        nonce: STANDARD.encode(nonce),
-        ciphertext: STANDARD.encode(ciphertext),
-    })
+    encrypt_secret_with_key_and_nonce(payload, key, &nonce)
 }
 
 pub fn decrypt_secret_with_key(
@@ -115,6 +91,51 @@ pub fn decrypt_secret_with_key(
     let plaintext = decrypt_aead(key, &nonce, KEY_AAD, &ciphertext)
         .map_err(|_| SecretStoreError::AuthenticationFailed)?;
     decode_payload(plaintext)
+}
+
+fn encrypt_secret_with_material(
+    payload: &Value,
+    password: &str,
+    salt: &[u8; 16],
+    nonce: &[u8; 12],
+) -> Result<PasswordSecretEnvelope, SecretStoreError> {
+    if password.is_empty() {
+        return Err(SecretStoreError::EmptyPassword);
+    }
+
+    let key = derive_key(password, salt)?;
+    let plaintext = encode_payload(payload)?;
+    let ciphertext = encrypt_aead(&key, nonce, AAD, &plaintext)?;
+
+    Ok(PasswordSecretEnvelope {
+        version: 1,
+        cipher: "aes-256-gcm".to_owned(),
+        kdf: ScryptEnvelope {
+            name: "scrypt".to_owned(),
+            n: SCRYPT_N,
+            r: SCRYPT_R,
+            p: SCRYPT_P,
+            salt: STANDARD.encode(salt),
+        },
+        nonce: STANDARD.encode(nonce),
+        ciphertext: STANDARD.encode(ciphertext),
+    })
+}
+
+fn encrypt_secret_with_key_and_nonce(
+    payload: &Value,
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+) -> Result<KeySecretEnvelope, SecretStoreError> {
+    let plaintext = encode_payload(payload)?;
+    let ciphertext = encrypt_aead(key, nonce, KEY_AAD, &plaintext)?;
+
+    Ok(KeySecretEnvelope {
+        version: 1,
+        cipher: "aes-256-gcm".to_owned(),
+        nonce: STANDARD.encode(nonce),
+        ciphertext: STANDARD.encode(ciphertext),
+    })
 }
 
 fn validate_password_envelope(
@@ -232,7 +253,40 @@ pub enum SecretStoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::json;
+
+    #[derive(Debug, Deserialize)]
+    struct ProtectionVectors {
+        payload: Value,
+        password: PasswordVector,
+        system: SystemVector,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PasswordVector {
+        password: String,
+        envelope: PasswordSecretEnvelope,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SystemVector {
+        key_hex: String,
+        envelope: KeySecretEnvelope,
+    }
+
+    fn shared_vectors() -> ProtectionVectors {
+        serde_json::from_str(include_str!("../../../spec/test-vectors/protection-v1.json")).unwrap()
+    }
+
+    fn decode_hex_array<const N: usize>(hex: &str) -> [u8; N] {
+        assert_eq!(hex.len(), N * 2);
+        let mut out = [0u8; N];
+        for (index, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).unwrap();
+        }
+        out
+    }
 
     #[test]
     fn password_roundtrip_rejects_wrong_password() {
@@ -256,6 +310,36 @@ mod tests {
         assert_eq!(
             decrypt_secret_with_key(&envelope, &[8u8; 32]).unwrap_err(),
             SecretStoreError::AuthenticationFailed
+        );
+    }
+
+    #[test]
+    fn password_encryption_matches_shared_python_vector_byte_for_byte() {
+        let vectors = shared_vectors();
+        let salt = decode_array::<16>(&vectors.password.envelope.kdf.salt).unwrap();
+        let nonce = decode_array::<12>(&vectors.password.envelope.nonce).unwrap();
+
+        assert_eq!(
+            encrypt_secret_with_material(
+                &vectors.payload,
+                &vectors.password.password,
+                &salt,
+                &nonce,
+            )
+            .unwrap(),
+            vectors.password.envelope
+        );
+    }
+
+    #[test]
+    fn system_key_encryption_matches_shared_python_vector_byte_for_byte() {
+        let vectors = shared_vectors();
+        let key = decode_hex_array::<32>(&vectors.system.key_hex);
+        let nonce = decode_array::<12>(&vectors.system.envelope.nonce).unwrap();
+
+        assert_eq!(
+            encrypt_secret_with_key_and_nonce(&vectors.payload, &key, &nonce).unwrap(),
+            vectors.system.envelope
         );
     }
 }
