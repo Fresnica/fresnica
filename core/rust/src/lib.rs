@@ -4,6 +4,7 @@
 //! invent parallel wallet behavior.
 
 pub mod account;
+pub mod agent_access;
 pub mod protected_signer;
 pub mod protection;
 pub mod secret_store;
@@ -12,6 +13,10 @@ pub mod transaction;
 pub mod wallet;
 
 pub use account::{AccountError, AccountIdentity, AccountKind};
+pub use agent_access::{
+    authorize_agent_transaction, sign_agent_transaction, AgentAccessError, AgentAuthorization,
+    AgentCapability,
+};
 pub use protected_signer::{unlock_software_signer, ProtectedSignerError};
 pub use protection::{
     PasswordProtectionProvider, ProtectionCredential, ProtectionError, ProtectionProvider,
