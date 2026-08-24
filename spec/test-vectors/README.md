@@ -5,6 +5,7 @@ These files define language-neutral behavior that future Fresnica cores and clie
 Current sets:
 
 - `wallet-v1.json`: deterministic SEP-0005 mnemonic/passphrase/account-index derivation to Stellar public keys.
+- `protection-v1.json`: password and system-key wallet-secret encryption compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
 
 ## Versioning
@@ -16,6 +17,14 @@ Existing vector meaning must not be changed silently. If a later implementation 
 `wallet-v1.json` uses public SEP-0005 / stellar-sdk reference cases. Fresnica stores only the mnemonic/passphrase/index inputs and expected **public key** outputs; upstream test secret seeds are intentionally not copied into this repository.
 
 The derivation contract is Stellar SEP-0005, including the account index path and BIP39 passphrase. A future Rust Core must produce the same public key for every vector before it can be considered wallet-compatible.
+
+## Secret protection
+
+`protection-v1.json` fixes public test-only payloads, salt, nonce, password, and wrapping-key bytes so implementations can prove they agree on the existing encrypted-wallet format. The values are not wallet credentials and must never be reused as production key material.
+
+Password protection uses Scrypt with `N=32768`, `r=8`, `p=1` to derive a 32-byte key, followed by AES-256-GCM with AAD `fresnica-wallet-secret-v1`. System protection uses an externally stored 32-byte wrapping key with AES-256-GCM and AAD `fresnica-wallet-secret-key-v1`.
+
+The vector freezes compatibility with existing Fresnica records; it does not claim those parameters are immutable for all future wallet formats. A future format upgrade must use a new explicit version rather than silently reinterpreting version 1 ciphertext.
 
 ## Numeric rules
 

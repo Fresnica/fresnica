@@ -14,6 +14,7 @@ Implemented production primitives currently include:
 - Classic Ed25519 software signer
 - External Ed25519 transaction signer for hardware, device, or process-backed providers
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
+- Password and system-key protection providers for locally stored wallet signing material
 
 Transaction building, network submission, storage, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
 
@@ -24,6 +25,14 @@ Classic transaction signing signs an exact 32-byte Stellar transaction hash. `Tr
 External signers hold only the declared Stellar public key and a provider callback. Fresnica verifies the provider's returned Ed25519 signature against the exact transaction hash before mutating the envelope. Private signing material remains outside Fresnica for hardware/device/process-backed signers.
 
 Arbitrary message signing is reserved as a separate future capability following **SEP-53 (Sign and Verify Messages)**. That extension must preserve SEP-53 domain separation (`Stellar Signed Message:\n`) rather than widening the transaction-signing method to accept arbitrary bytes.
+
+## Secret-protection boundary
+
+Protection applies only to secret material held locally for software signing. Hardware, device, remote, and future contract-account signers do not route private keys through `ProtectionProvider`.
+
+Password protection preserves the existing version-1 Scrypt + AES-256-GCM wallet format. System protection generates a random 32-byte wrapping key and delegates only that key to `SystemKeyStore`, which is the platform boundary for Keychain, DPAPI/Hello, Android Keystore, or another OS facility. Fresnica persists the encrypted wallet payload plus an opaque key reference, not the wrapping key itself.
+
+Password-derived keys, system wrapping keys, loaded system keys, and intermediate decrypted byte buffers use zeroizing containers. The decoded payload returned to its caller is live plaintext and should be consumed immediately rather than cached. No global vault or master key is introduced by this layer.
 
 ## Validation
 

@@ -1,0 +1,33 @@
+{
+  "schema": "fresnica-protection-v1",
+  "source": "Python reference encryption semantics with deterministic test salt, nonce, and wrapping key",
+  "payload": {
+    "kind": "secret",
+    "secret": "SAMPLE-SECRET"
+  },
+  "password": {
+    "password": "correct horse battery staple",
+    "envelope": {
+      "version": 1,
+      "cipher": "aes-256-gcm",
+      "kdf": {
+        "name": "scrypt",
+        "n": 32768,
+        "r": 8,
+        "p": 1,
+        "salt": "AAECAwQFBgcICQoLDA0ODw=="
+      },
+      "nonce": "EBESExQVFhcYGRob",
+      "ciphertext": "7seaw6r8jLVCBsyMBmrmzeEB1yz+zVw2wbSqSOs5EqmQD8F6dF0mPOgxqi9G4XcVUsGwrTtcFiCAQA=="
+    }
+  },
+  "system": {
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "envelope": {
+      "version": 1,
+      "cipher": "aes-256-gcm",
+      "nonce": "ICEiIyQlJicoKSor",
+      "ciphertext": "qRjNGQL8ODQ4Dyets32A2/xrn/nk8gaaTsxOQQjHDkUwo7ZBzXdwjjaA/aa1bEmCkW8Ihj6Gt+YcuA=="
+    }
+  }
+}

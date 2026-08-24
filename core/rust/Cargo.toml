@@ -7,6 +7,8 @@ license = "MIT"
 publish = false
 
 [dependencies]
+aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc", "zeroize"] }
+base64 = "=0.23.1"
 bip39 = { version = "=2.2.2", features = [
     "chinese-simplified",
     "chinese-traditional",
@@ -18,13 +20,13 @@ bip39 = { version = "=2.2.2", features = [
     "zeroize",
 ] }
 ed25519-dalek = { version = "=2.2.0", features = ["zeroize"] }
+getrandom = "=0.4.3"
 kobe-primitives = { version = "=2.0.1", default-features = false, features = ["slip10"] }
+scrypt = { version = "=0.12.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "=0.10.9"
 stellar-strkey = "=0.0.18"
 stellar-xdr = "=28.0.0"
 thiserror = "2"
 zeroize = "=1.9.0"
-
-[dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"

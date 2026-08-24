@@ -4,11 +4,23 @@
 //! invent parallel wallet behavior.
 
 pub mod account;
+pub mod protection;
+pub mod secret_store;
 pub mod signer;
 pub mod transaction;
 pub mod wallet;
 
 pub use account::{AccountError, AccountIdentity, AccountKind};
+pub use protection::{
+    PasswordProtectionProvider, ProtectionCredential, ProtectionError, ProtectionProvider,
+    ProtectionRegistry, SystemKeyStore, SystemKeyStoreError, SystemProtectionProvider,
+    PROTECTED_SECRET_FORMAT, PROTECTED_SECRET_VERSION,
+};
+pub use secret_store::{
+    decrypt_secret, decrypt_secret_with_key, encrypt_secret, encrypt_secret_with_key,
+    KeySecretEnvelope, PasswordSecretEnvelope, ScryptEnvelope, SecretStoreError, SCRYPT_N,
+    SCRYPT_P, SCRYPT_R,
+};
 pub use signer::{
     ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner,
     TransactionSigningRequest,
