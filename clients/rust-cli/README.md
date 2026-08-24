@@ -7,7 +7,7 @@ It is the second concrete Core client after the Python reference/TUI bridge.
 
 The native client currently covers local wallet lifecycle, read-only Horizon
 queries, reviewed payments, issued-asset trustline lifecycle, and Classic SDEX
-read/write operations:
+read/write/history operations:
 
 - `info [--wallet NAME]`
 - `account [--wallet NAME] [--json]`
@@ -23,6 +23,9 @@ read/write operations:
 - `dex sell BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]`
 - `dex update OFFER_ID BASE COUNTER AMOUNT PRICE [--wallet NAME] [-y]`
 - `dex cancel OFFER_ID [--wallet NAME] [-y]`
+- `dex trades BASE COUNTER [--limit N] [--json]`
+- `dex fills [--wallet NAME] [--limit N] [--json]`
+- `dex candles BASE COUNTER [--resolution 1m|5m|15m|1h|1d|1w] [--start MS] [--end MS] [--offset MS] [--limit N] [--json]`
 - `wallet list`
 - `wallet use NAME`
 - `wallet create NAME`
@@ -76,6 +79,13 @@ Updates must preserve the current pair and side. Cancellation uses the ledger's
 stored selling/buying orientation and does not depend on remembering the original
 operation type.
 
+Pair `trades` and `candles` are direct online Horizon projections. Wallet `fills`
+use the same offer-level aggregation rule as the Python reference: only
+consecutive trades with the same identified user offer, pair, side, and exact
+rational price merge. Trades without a user offer ID, including non-orderbook
+activity, remain separate segments. The native client deliberately does not add a
+second cache implementation in this slice.
+
 ## Build
 
 ```sh
@@ -99,7 +109,9 @@ clients/rust-cli/target/release/fresnica send 1 XLM to G...
 clients/rust-cli/target/release/fresnica trust add USDC:G...
 clients/rust-cli/target/release/fresnica dex orderbook XLM USDC:G...
 clients/rust-cli/target/release/fresnica dex buy XRP:G... XLM 100 0.325 --allow-trustline
-clients/rust-cli/target/release/fresnica dex offers
+clients/rust-cli/target/release/fresnica dex trades XRP:G... XLM --limit 20
+clients/rust-cli/target/release/fresnica dex fills
+clients/rust-cli/target/release/fresnica dex candles XRP:G... XLM --resolution 1h
 ```
 
 A wallet record is bound to its configured Stellar network. Network commands
@@ -108,9 +120,8 @@ wallet record; use `--network testnet` for a testnet wallet.
 
 ## Deliberate non-goals of this slice
 
-Local chain-data caching, contacts, SDEX fill/candle history, anchor protocols,
-durable pending-transaction recovery, and TUI presentation remain in the Python
-reference for now.
+Local chain-data caching, contacts, anchor protocols, durable pending-transaction
+recovery, and TUI presentation remain in the Python reference for now.
 
 The native client does not expose a raw `sign-xdr` shortcut. Routine transaction
 signing stays behind client-side construction and review rather than creating a
