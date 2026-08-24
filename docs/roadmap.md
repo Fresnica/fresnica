@@ -58,35 +58,36 @@ Implemented in the Python reference and increasingly ported to the native Rust C
 - FFI-neutral `fresnica-mobile-core` facade
 - Fixed-width/string/byte mobile DTO and error boundary
 - Mobile binding conformance tests
-- Stable UniFFI 0.32.x selected for Swift/Kotlin generation
-- Proc-macro UniFFI export of the same mobile facade
-- Host Swift/Kotlin binding generation gate in CI
+- Stable UniFFI 0.32.x Swift/Kotlin generation
+- Android four-ABI Rust package + generated Kotlin package
+- Apple device/simulator Rust package + generated Swift/FFI XCFramework
+- Native platform packaging CI/artifacts
 
 ### Current
 
-- Android Rust ABI packaging + generated Kotlin integration
-- Apple Rust static libraries / XCFramework + generated Swift integration
+- Per-signer user-auth-bound `WalletUnlockKey` storage on Android and Apple
 - Thin React Native native modules over generated Swift/Kotlin APIs
+- Native-only routine signing orchestration so unlock-key bytes never reach JavaScript
 
 ### Next
 
-1. Cross-compile `fresnica-mobile-core` for the supported Android ABIs and package generated Kotlin + native libraries.
-2. Build Apple static libraries for simulator/device architectures and package the generated Swift FFI layer as an XCFramework-compatible dependency.
-3. Add thin `FresnicaCoreModule` React Native adapters to the Xaman-derived application.
+1. Finish Android/Apple system-auth storage and compile it in native CI.
+2. Add thin `FresnicaCoreModule` React Native adapters to the Xaman-derived application shape.
+3. Wire `derive_unlock_key -> native secure storage -> biometric sign_transaction_xdr` without exposing unlock-key bytes to React Native.
 4. Integrate Xaman-derived account/signer persistence without reusing Xaman secret cryptography.
-5. Implement Keychain/Keystore `WalletUnlockKey` enrollment and biometric release.
-6. Add watch-only upgrade/downgrade and passcode-rotation mobile flows.
+5. Add watch-only upgrade/downgrade and staged app-passcode rotation mobile flows.
+6. Add explicit mobile Reveal / Export handling.
 7. Add a first real hardware signer transport using the existing external Ed25519 prepare/apply API.
 8. Continue desktop client work against the same Core/mobile-neutral facade where applicable.
 
 ## Phase 4 - Mobile Product Integration
 
-Target product work after native binding packaging:
+Target product work after native security/module integration:
 
 - Fresnica account/signer Realm schema
 - Xaman-derived navigation and account management adaptation
 - system-auth enrollment and recovery fallback
-- software signing with no private key crossing React Native for routine use
+- software signing with no private key or unlock key crossing React Native for routine use
 - explicit Reveal / Export flow
 - passcode rotation with staged/atomic re-protection
 - hardware/external signer UX
@@ -94,4 +95,4 @@ Target product work after native binding packaging:
 
 The mobile application must preserve the boundary in `mobile-core-contract.md`: platform code owns persistence and authorization policy; Rust Core owns cryptographic and signer semantics.
 
-See `mobile-bindings.md` for the accepted UniFFI and React Native integration direction.
+See `mobile-bindings.md` for the UniFFI/React Native layering and `mobile-system-auth.md` for the native WalletUnlockKey policy.
