@@ -1,0 +1,488 @@
+name: Patch Rust pending recovery
+
+on:
+  push:
+    branches:
+      - feat/rust-cli-pending-recovery
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/rust-cli-pending-recovery
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply focused patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=None):
+              p = Path(path)
+              text = p.read_text()
+              found = text.count(old)
+              expected = 1 if count is None else count
+              if found != expected:
+                  raise SystemExit(f"{path}: expected {expected} matches, found {found}")
+              text = text.replace(old, new, expected)
+              p.write_text(text)
+
+          replace(
+              "clients/rust-cli/Cargo.toml",
+              'stellar-xdr = "=28.0.0"\nureq = { version = "=3.4.0", features = ["json"] }',
+              'stellar-xdr = "=28.0.0"\ntime = { version = "=0.3.55", features = ["formatting", "parsing"] }\nureq = { version = "=3.4.0", features = ["json"] }',
+          )
+
+          replace(
+              "clients/rust-cli/src/storage.rs",
+              'pub struct WalletStorage {\n    directory: PathBuf,\n    default_path: PathBuf,\n}',
+              'pub struct WalletStorage {\n    home: PathBuf,\n    directory: PathBuf,\n    default_path: PathBuf,\n}',
+          )
+          replace(
+              "clients/rust-cli/src/storage.rs",
+              '        Ok(Self {\n            directory,\n            default_path,\n        })',
+              '        Ok(Self {\n            home: home.to_path_buf(),\n            directory,\n            default_path,\n        })',
+          )
+          replace(
+              "clients/rust-cli/src/storage.rs",
+              '    pub fn wallet_path(&self, name: &str) -> PathBuf {',
+              '    pub fn home(&self) -> &Path {\n        &self.home\n    }\n\n    pub fn wallet_path(&self, name: &str) -> PathBuf {',
+          )
+
+          replace(
+              "clients/rust-cli/src/main.rs",
+              'mod horizon;\nmod read_commands;',
+              'mod horizon;\nmod pending;\nmod read_commands;',
+          )
+
+          replace(
+              "clients/rust-cli/src/horizon.rs",
+              '    pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {',
+              '''    pub fn lookup_transaction(&self, tx_hash: &str) -> Result<Option<Value>, String> {
+        let url = format!("{}/transactions/{tx_hash}", self.base_url);
+        let mut response = match ureq::get(&url).call() {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return Ok(None),
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(format!("Horizon returned HTTP {code} for {url}"))
+            }
+            Err(error) => return Err(format!("Unable to contact Horizon at {url}: {error}")),
+        };
+        response
+            .body_mut()
+            .read_json::<Value>()
+            .map(Some)
+            .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
+    }
+
+    pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {''',
+          )
+
+          replace(
+              "clients/rust-cli/src/transaction_flow.rs",
+              'use crate::horizon::{\n    HorizonClient, SubmissionError, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,\n};\nuse crate::storage::{WalletRecord, WalletStorage};',
+              'use crate::horizon::{\n    HorizonClient, SubmissionError, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,\n};\nuse crate::pending::PendingTransactionStore;\nuse crate::storage::{WalletRecord, WalletStorage};',
+          )
+          replace(
+              "clients/rust-cli/src/transaction_flow.rs",
+              '    if record.watch_only() || record.secret.is_none() {\n        return Err(format!("wallet \\\"{}\\\" is watch-only", record.name));\n    }\n    Ok(record)',
+              '    if record.watch_only() || record.secret.is_none() {\n        return Err(format!("wallet \\\"{}\\\" is watch-only", record.name));\n    }\n    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(\n        &network_client(network)?,\n        network,\n        &record.address,\n    )?;\n    Ok(record)',
+          )
+          replace(
+              "clients/rust-cli/src/transaction_flow.rs",
+              'pub fn sign_and_submit(\n    record: &WalletRecord,\n    network: &str,\n    envelope: &mut TransactionEnvelope,\n    horizon: &HorizonClient,\n) -> Result<(), String> {',
+              'pub fn sign_and_submit(\n    storage: &WalletStorage,\n    record: &WalletRecord,\n    network: &str,\n    kind: &str,\n    envelope: &mut TransactionEnvelope,\n    horizon: &HorizonClient,\n) -> Result<(), String> {',
+          )
+          replace(
+              "clients/rust-cli/src/transaction_flow.rs",
+              '''        Err(SubmissionError::Uncertain(message)) => Err(format!(
+            "Transaction submission status is uncertain for {tx_hash_hex}: {message}. Check this transaction hash before retrying."
+        )),''',
+              '''        Err(SubmissionError::Uncertain(message)) => {
+            let store = PendingTransactionStore::for_home(storage.home());
+            if let Err(persist_error) =
+                store.remember(network, &record.address, &tx_hash_hex, kind)
+            {
+                return Err(format!(
+                    "Transaction submission status is uncertain for {tx_hash_hex}: {message}. Fresnica could not persist pending-transaction protection: {persist_error}. Do not retry until you verify the transaction hash manually."
+                ));
+            }
+            Err(format!(
+                "Transaction submission status is uncertain for {tx_hash_hex}: {message}. A pending record was saved; Fresnica will check this hash before allowing another write from the account."
+            ))
+        }''',
+          )
+
+          replace(
+              "clients/rust-cli/src/send.rs",
+              '    sign_and_submit(&record, network, &mut envelope, &horizon)',
+              '    sign_and_submit(\n        storage,\n        &record,\n        network,\n        if destination_exists { "payment" } else { "create_account" },\n        &mut envelope,\n        &horizon,\n    )',
+          )
+          replace(
+              "clients/rust-cli/src/trust.rs",
+              '    sign_and_submit(&record, network, &mut envelope, &horizon)',
+              '    let kind = format!("trustline:{action}");\n    sign_and_submit(storage, &record, network, &kind, &mut envelope, &horizon)',
+          )
+
+          p = Path("clients/rust-cli/src/dex_write.rs")
+          text = p.read_text()
+          old = '    sign_and_submit(&record, network, &mut envelope, &horizon)'
+          if text.count(old) != 3:
+              raise SystemExit(f"dex_write.rs: expected 3 submit calls, found {text.count(old)}")
+          text = text.replace(
+              old,
+              '    sign_and_submit(storage, &record, network, "offer:create", &mut envelope, &horizon)',
+              1,
+          )
+          text = text.replace(
+              old,
+              '    sign_and_submit(storage, &record, network, "offer:update", &mut envelope, &horizon)',
+              1,
+          )
+          text = text.replace(
+              old,
+              '    sign_and_submit(storage, &record, network, "offer:cancel", &mut envelope, &horizon)',
+              1,
+          )
+          p.write_text(text)
+
+          pending = r'''use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+use crate::horizon::HorizonClient;
+
+pub const DEFAULT_PENDING_TTL_SECONDS: i64 = 210;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingTransaction {
+    pub network: String,
+    pub account: String,
+    pub tx_hash: String,
+    pub kind: String,
+    pub submitted_at: String,
+}
+
+pub struct PendingTransactionStore {
+    path: PathBuf,
+    ttl_seconds: i64,
+}
+
+impl PendingTransactionStore {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            ttl_seconds: DEFAULT_PENDING_TTL_SECONDS,
+        }
+    }
+
+    pub fn for_home(home: &Path) -> Self {
+        Self::new(home.join("pending-transactions.json"))
+    }
+
+    pub fn remember(
+        &self,
+        network: &str,
+        account: &str,
+        tx_hash: &str,
+        kind: &str,
+    ) -> Result<(), String> {
+        let submitted_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .map_err(|error| format!("unable to format pending transaction time: {error}"))?;
+        self.put(PendingTransaction {
+            network: network.to_owned(),
+            account: account.to_owned(),
+            tx_hash: tx_hash.to_owned(),
+            kind: kind.to_owned(),
+            submitted_at,
+        })
+    }
+
+    pub fn reconcile_and_ensure_clear(
+        &self,
+        horizon: &HorizonClient,
+        network: &str,
+        account: &str,
+    ) -> Result<(), String> {
+        self.reconcile_with(network, account, |tx_hash| {
+            horizon.lookup_transaction(tx_hash)
+        })
+    }
+
+    fn reconcile_with<F>(
+        &self,
+        network: &str,
+        account: &str,
+        mut lookup: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(&str) -> Result<Option<Value>, String>,
+    {
+        let items = self.load()?;
+        if !items
+            .iter()
+            .any(|item| item.network == network && item.account == account)
+        {
+            return Ok(());
+        }
+
+        let now = OffsetDateTime::now_utc();
+        let mut retained = Vec::with_capacity(items.len());
+        let mut pending_hash = None;
+        let mut changed = false;
+
+        for item in items {
+            if item.network != network || item.account != account {
+                retained.push(item);
+                continue;
+            }
+
+            match lookup(&item.tx_hash)? {
+                Some(_) => changed = true,
+                None if age_seconds(&item, now) >= self.ttl_seconds => changed = true,
+                None => {
+                    if pending_hash.is_none() {
+                        pending_hash = Some(item.tx_hash.clone());
+                    }
+                    retained.push(item);
+                }
+            }
+        }
+
+        if changed {
+            self.save(&retained)?;
+        }
+        if let Some(tx_hash) = pending_hash {
+            return Err(format!(
+                "A previous transaction is still pending confirmation: {tx_hash}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn put(&self, pending: PendingTransaction) -> Result<(), String> {
+        validate_pending(&pending)?;
+        let mut items = self.load()?;
+        items.retain(|item| {
+            !(item.network == pending.network
+                && item.account == pending.account
+                && item.tx_hash == pending.tx_hash)
+        });
+        items.push(pending);
+        self.save(&items)
+    }
+
+    fn load(&self) -> Result<Vec<PendingTransaction>, String> {
+        if !self.path.exists() {
+            return Ok(Vec::new());
+        }
+        let text = fs::read_to_string(&self.path).map_err(|error| {
+            format!(
+                "Unable to read pending transaction state {}: {error}",
+                self.path.display()
+            )
+        })?;
+        let items: Vec<PendingTransaction> = serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "Pending transaction state is malformed {}: {error}",
+                self.path.display()
+            )
+        })?;
+        for item in &items {
+            validate_pending(item)?;
+        }
+        Ok(items)
+    }
+
+    fn save(&self, items: &[PendingTransaction]) -> Result<(), String> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Unable to create pending transaction directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        let text = serde_json::to_string_pretty(items)
+            .map_err(|error| format!("Unable to encode pending transaction state: {error}"))?
+            + "\n";
+        let mut temporary: OsString = self.path.as_os_str().to_owned();
+        temporary.push(".tmp");
+        let temporary = PathBuf::from(temporary);
+        let result = (|| {
+            fs::write(&temporary, text).map_err(|error| {
+                format!(
+                    "Unable to persist pending transaction state {}: {error}",
+                    temporary.display()
+                )
+            })?;
+            #[cfg(windows)]
+            if self.path.exists() {
+                fs::remove_file(&self.path).map_err(|error| {
+                    format!(
+                        "Unable to replace pending transaction state {}: {error}",
+                        self.path.display()
+                    )
+                })?;
+            }
+            fs::rename(&temporary, &self.path).map_err(|error| {
+                format!(
+                    "Unable to replace pending transaction state {}: {error}",
+                    self.path.display()
+                )
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+}
+
+fn validate_pending(item: &PendingTransaction) -> Result<(), String> {
+    if [
+        item.network.as_str(),
+        item.account.as_str(),
+        item.tx_hash.as_str(),
+        item.kind.as_str(),
+        item.submitted_at.as_str(),
+    ]
+    .iter()
+    .any(|value| value.trim().is_empty())
+    {
+        return Err("Pending transaction state is malformed: fields must be non-empty strings".to_owned());
+    }
+    Ok(())
+}
+
+fn age_seconds(pending: &PendingTransaction, now: OffsetDateTime) -> i64 {
+    let Ok(submitted) = OffsetDateTime::parse(&pending.submitted_at, &Rfc3339) else {
+        return i64::MAX;
+    };
+    (now - submitted).whole_seconds().max(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::Duration;
+
+    fn test_store(name: &str) -> PendingTransactionStore {
+        let unique = OffsetDateTime::now_utc().unix_timestamp_nanos();
+        let path = std::env::temp_dir()
+            .join(format!("fresnica-pending-{}-{name}-{unique}", std::process::id()))
+            .join("pending-transactions.json");
+        PendingTransactionStore::new(path)
+    }
+
+    #[test]
+    fn persists_public_metadata_only() {
+        let store = test_store("metadata");
+        store
+            .remember("testnet", "GACCOUNT", "abc123", "offer:create")
+            .unwrap();
+        let text = fs::read_to_string(&store.path).unwrap();
+        let raw: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(raw[0]["network"], "testnet");
+        assert_eq!(raw[0]["account"], "GACCOUNT");
+        assert_eq!(raw[0]["tx_hash"], "abc123");
+        assert_eq!(raw[0]["kind"], "offer:create");
+        assert!(!text.to_ascii_lowercase().contains("secret"));
+        assert!(!text.to_ascii_lowercase().contains("xdr"));
+    }
+
+    #[test]
+    fn recent_not_found_transaction_blocks_retry() {
+        let store = test_store("pending");
+        store.remember("testnet", "GACCOUNT", "abc123", "payment").unwrap();
+        let error = store
+            .reconcile_with("testnet", "GACCOUNT", |_| Ok(None))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "A previous transaction is still pending confirmation: abc123"
+        );
+        assert_eq!(store.load().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn confirmed_transaction_is_removed() {
+        let store = test_store("confirmed");
+        store.remember("testnet", "GACCOUNT", "abc123", "payment").unwrap();
+        store
+            .reconcile_with("testnet", "GACCOUNT", |tx_hash| {
+                Ok(Some(serde_json::json!({"hash": tx_hash})))
+            })
+            .unwrap();
+        assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn old_not_found_transaction_expires() {
+        let store = test_store("expired");
+        let submitted_at = (OffsetDateTime::now_utc() - Duration::minutes(10))
+            .format(&Rfc3339)
+            .unwrap();
+        store
+            .put(PendingTransaction {
+                network: "testnet".to_owned(),
+                account: "GACCOUNT".to_owned(),
+                tx_hash: "abc123".to_owned(),
+                kind: "payment".to_owned(),
+                submitted_at,
+            })
+            .unwrap();
+        store
+            .reconcile_with("testnet", "GACCOUNT", |_| Ok(None))
+            .unwrap();
+        assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn lookup_failure_keeps_pending_record() {
+        let store = test_store("network-error");
+        store.remember("testnet", "GACCOUNT", "abc123", "payment").unwrap();
+        assert_eq!(
+            store
+                .reconcile_with("testnet", "GACCOUNT", |_| Err("offline".to_owned()))
+                .unwrap_err(),
+            "offline"
+        );
+        assert_eq!(store.load().unwrap().len(), 1);
+    }
+}
+'''
+          Path("clients/rust-cli/src/pending.rs").write_text(pending)
+
+          replace(
+              "clients/rust-cli/README.md",
+              'Local chain-data caching, contacts, anchor protocols, durable pending-transaction\nrecovery, and TUI presentation remain in the Python reference for now.',
+              'Local chain-data caching, contacts, anchor protocols, and TUI presentation remain in\nthe Python reference for now.',
+          )
+          replace(
+              "clients/rust-cli/README.md",
+              'The native client does not expose a raw `sign-xdr` shortcut.',
+              'Uncertain HTTP submissions are persisted as public metadata in\n`pending-transactions.json`, shared with the Python reference. Before any later\nsame-account write, the CLI reconciles the saved hash with Horizon and blocks\nunsafe retries while the transaction is still within the 210-second recovery\nwindow. No signed XDR, secret, passcode, or unlock key is written to this file.\n\nThe native client does not expose a raw `sign-xdr` shortcut.',
+          )
+          PY
+      - name: Test native Rust CLI
+        run: cargo test --manifest-path clients/rust-cli/Cargo.toml
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add clients/rust-cli
+          git commit -m "Add durable pending transaction recovery"
+          git push origin HEAD:feat/rust-cli-pending-recovery
