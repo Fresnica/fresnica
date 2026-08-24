@@ -36,4 +36,9 @@ android {
 dependencies {
     implementation 'net.java.dev.jna:jna:5.12.1@aar'
     implementation 'androidx.annotation:annotation:1.7.1'
+    implementation 'androidx.biometric:biometric:1.1.0'
+
+    // Xaman currently hosts Fresnica in React Native 0.74.x. React itself stays a host
+    // dependency and must not be embedded into the Fresnica AAR.
+    compileOnly 'com.facebook.react:react-android:0.74.2'
 }

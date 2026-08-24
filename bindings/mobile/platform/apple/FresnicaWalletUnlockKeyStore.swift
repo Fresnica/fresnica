@@ -25,6 +25,26 @@ public final class FresnicaWalletUnlockKeyStore {
         return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
     }
 
+    /// Best-effort enrollment status without releasing the protected WalletUnlockKey bytes.
+    public func isEnrolled(signerId: String) throws -> Bool {
+        try validateSignerId(signerId)
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: signerId,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        switch status {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
+            return false
+        default:
+            throw StoreError.keychain(status)
+        }
+    }
+
     /// Stores a new per-signer unlock key.
     ///
     /// Re-enrollment replaces the previous convenience credential. If replacement fails, the
