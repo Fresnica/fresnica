@@ -61,4 +61,4 @@ See [Wallet Protection Model](protection.md).
 
 **Why 2,000:** it is large for ordinary wallet activity but still gives the default cache a clear storage bound. A numeric user-configurable limit was rejected as unnecessary UI complexity.
 
-See [history-cache.md](history-cache.md) and the [Architecture Decision Log](decision-log.md).
+See [history-cache.md](history-cache.md).
