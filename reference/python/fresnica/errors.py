@@ -29,6 +29,10 @@ class InvalidPasswordError(WalletError):
     pass
 
 
+class InvalidUnlockKeyError(WalletError):
+    pass
+
+
 class ProtectionError(WalletError):
     pass
 
