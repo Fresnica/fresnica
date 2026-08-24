@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import fresnica.cli.commands.tui as tui_command
 import fresnica.cli.main as cli_main
+import fresnica.tui.system_app as system_app
 
 
 def test_network_only_invocation_enters_tui_with_requested_context(monkeypatch):
@@ -33,3 +34,22 @@ def test_default_invocation_uses_core_labelled_tui_launcher(monkeypatch):
         tui_command.core_subtitle(SimpleNamespace(core_client=None))
         == "Stellar Wallet · Python Reference"
     )
+
+
+def test_tui_launcher_applies_backend_subtitle_to_app(monkeypatch):
+    created = []
+
+    class FakeApp:
+        def __init__(self, runtime):
+            self.runtime = runtime
+            self.sub_title = "Stellar Wallet"
+            created.append(self)
+
+        def run(self):
+            return "ran"
+
+    monkeypatch.setattr(system_app, "FresnicaApp", FakeApp)
+    runtime = SimpleNamespace(core_client=object())
+
+    assert tui_command.run(runtime) == "ran"
+    assert created[0].sub_title == "Stellar Wallet · Rust Core"
