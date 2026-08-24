@@ -6,13 +6,16 @@ It is the second concrete Core client after the Python reference/TUI bridge.
 ## Current scope
 
 The native client currently covers local wallet lifecycle, read-only Horizon
-queries, and the first reviewed transaction write path:
+queries, reviewed payments, and issued-asset trustline lifecycle:
 
 - `info [--wallet NAME]`
 - `account [--wallet NAME] [--json]`
 - `balance [--wallet NAME] [--json]` (`assets` is an alias)
 - `history [--wallet NAME] [--limit N] [--json]`
 - `send AMOUNT ASSET to G... [--wallet NAME] [--memo TEXT] [-y]`
+- `trust add CODE:GISSUER [--limit VALUE] [--wallet NAME] [-y]`
+- `trust limit CODE:GISSUER LIMIT [--wallet NAME] [-y]`
+- `trust remove CODE:GISSUER [--wallet NAME] [-y]`
 - `wallet list`
 - `wallet use NAME`
 - `wallet create NAME`
@@ -39,13 +42,17 @@ submission are client responsibilities. The CLI talks directly to the matching
 public or testnet Horizon server; none of that HTTP or product policy is moved
 into `fresnica-core`.
 
-For `send`, the client fetches current source account state and ledger fee/reserve
-parameters, checks available balance, constructs a Classic transaction, and
-shows the complete payment review before asking for the Fresnica passcode. Only
-after confirmation does it derive a short-lived verified `WalletUnlockKey` and
-invoke the existing Core protected-signing path. Transport or server failures
-during submission are reported with the locally computed transaction hash so the
-user can check status before retrying.
+Reviewed write commands share a small client-side transaction flow: build a
+single-operation Classic envelope, present operation-specific review, ask for the
+Fresnica passcode only after confirmation, derive a short-lived verified
+`WalletUnlockKey`, sign through Rust Core, then submit to Horizon. Transport or
+server failures during submission are reported with the locally computed
+transaction hash so the user can check status before retrying.
+
+Trustline policy matches the Python reference: add reserves one additional base
+reserve, the default limit is `708269837873.6765`, limit changes cannot go below
+balance plus buying liabilities, and removal requires zero balance and zero
+liabilities.
 
 ## Build
 
@@ -59,16 +66,15 @@ The executable is then:
 clients/rust-cli/target/release/fresnica
 ```
 
-For example, it can inspect the same local wallet library used by the Python
-client, query its network account, and send after review:
+For example:
 
 ```sh
 clients/rust-cli/target/release/fresnica wallet list
-clients/rust-cli/target/release/fresnica info
 clients/rust-cli/target/release/fresnica account
 clients/rust-cli/target/release/fresnica balance
 clients/rust-cli/target/release/fresnica history --limit 20
 clients/rust-cli/target/release/fresnica send 1 XLM to G...
+clients/rust-cli/target/release/fresnica trust add USDC:G...
 ```
 
 A wallet record is bound to its configured Stellar network. Network commands
