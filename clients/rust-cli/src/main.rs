@@ -1,3 +1,4 @@
+mod contacts;
 mod dex;
 mod horizon;
 mod read_commands;
@@ -24,7 +25,8 @@ Usage:
   fresnica [--home PATH] [--network mainnet|testnet] account [--wallet NAME] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] balance [--wallet NAME] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] history [--wallet NAME] [--limit N] [--json]
-  fresnica [--home PATH] [--network mainnet|testnet] send AMOUNT ASSET to G... [--wallet NAME] [--memo TEXT] [-y]
+  fresnica [--home PATH] [--network mainnet|testnet] send AMOUNT ASSET to DESTINATION [--wallet NAME] [--memo TEXT] [-y]
+  fresnica [--home PATH] contact COMMAND ...
   fresnica [--home PATH] [--network mainnet|testnet] trust add CODE:GISSUER [--limit VALUE] [--wallet NAME] [-y]
   fresnica [--home PATH] [--network mainnet|testnet] trust limit CODE:GISSUER LIMIT [--wallet NAME] [-y]
   fresnica [--home PATH] [--network mainnet|testnet] trust remove CODE:GISSUER [--wallet NAME] [-y]
@@ -38,7 +40,12 @@ Network commands:
   history                       Show newest Horizon operations (default 20, max 200)
   send                          Review, sign with Rust Core, and submit a payment
   trust                         Add, change, or remove an issued-asset trustline
-  dex                           Read Stellar DEX order books and account offers
+  dex                           Read and trade on the Stellar DEX
+
+Contact commands:
+  list
+  add NAME G... [--memo TEXT]
+  remove NAME
 
 Wallet commands:
   list
@@ -93,6 +100,7 @@ fn run() -> Result<(), String> {
         }
         "history" => read_commands::command_history(&storage, &global.network, &global.command[1..]),
         "send" => send::command_send(&storage, &global.network, &global.command[1..]),
+        "contact" => contacts::command_contact(&storage, &global.command[1..]),
         "trust" => trust::command_trust(&storage, &global.network, &global.command[1..]),
         "dex" => dex::command_dex(&storage, &global.network, &global.command[1..]),
         "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
