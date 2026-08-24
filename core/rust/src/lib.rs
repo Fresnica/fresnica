@@ -13,8 +13,8 @@ pub mod wallet;
 pub use account::{AccountError, AccountIdentity, AccountKind};
 pub use protection::{
     PasswordProtectionProvider, ProtectionCredential, ProtectionError, ProtectionProvider,
-    ProtectionRegistry, SystemKeyStore, SystemProtectionProvider, PROTECTED_SECRET_FORMAT,
-    PROTECTED_SECRET_VERSION,
+    ProtectionRegistry, SystemKeyStore, SystemKeyStoreError, SystemProtectionProvider,
+    PROTECTED_SECRET_FORMAT, PROTECTED_SECRET_VERSION,
 };
 pub use secret_store::{
     decrypt_secret, decrypt_secret_with_key, encrypt_secret, encrypt_secret_with_key,
