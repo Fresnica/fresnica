@@ -11,6 +11,7 @@ use crate::storage::WalletStorage;
 pub struct Contact {
     pub name: String,
     pub address: String,
+    #[serde(default)]
     pub memo: Option<String>,
 }
 
@@ -289,6 +290,20 @@ mod tests {
         assert_eq!(raw[0]["name"], "Alice");
         assert_eq!(raw[0]["address"], ALICE);
         assert_eq!(raw[0]["memo"], "12345");
+    }
+
+    #[test]
+    fn accepts_python_contact_without_memo_field() {
+        let store = store("missing-memo");
+        fs::create_dir_all(store.path.parent().unwrap()).unwrap();
+        fs::write(
+            &store.path,
+            format!(r#"[{{"name":"Alice","address":"{ALICE}"}}]"#),
+        )
+        .unwrap();
+        let contact = store.find("alice").unwrap().unwrap();
+        assert_eq!(contact.address, ALICE);
+        assert_eq!(contact.memo, None);
     }
 
     #[test]
