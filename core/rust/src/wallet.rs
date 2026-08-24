@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use bip39::{Language, Mnemonic};
-use near_slip10::{derive_key_from_path, BIP32Path, Curve};
+use kobe_primitives::slip10::DerivedEd25519Key;
 use stellar_strkey::ed25519::PublicKey;
 use thiserror::Error;
 
@@ -19,34 +19,68 @@ pub enum WalletDerivationError {
     InvalidIndex,
 }
 
+fn mnemonic_language(language: &str) -> Result<Language, WalletDerivationError> {
+    match language {
+        "english" => Ok(Language::English),
+        "chinese-simplified" => Ok(Language::SimplifiedChinese),
+        "chinese-traditional" => Ok(Language::TraditionalChinese),
+        "french" => Ok(Language::French),
+        "italian" => Ok(Language::Italian),
+        "japanese" => Ok(Language::Japanese),
+        "korean" => Ok(Language::Korean),
+        "spanish" => Ok(Language::Spanish),
+        other => Err(WalletDerivationError::UnsupportedLanguage(other.to_owned())),
+    }
+}
+
 pub fn derive_classic_public_key(
     mnemonic: &str,
     passphrase: &str,
     index: usize,
     language: &str,
 ) -> Result<String, WalletDerivationError> {
-    if language != "english" {
-        return Err(WalletDerivationError::UnsupportedLanguage(
-            language.to_owned(),
-        ));
-    }
     if index > MAX_ACCOUNT_INDEX {
         return Err(WalletDerivationError::InvalidIndex);
     }
 
-    let mnemonic = Mnemonic::parse_in(Language::English, mnemonic.trim())
+    let language = mnemonic_language(language)?;
+    let mnemonic = Mnemonic::parse_in(language, mnemonic.trim())
         .map_err(|_| WalletDerivationError::InvalidMnemonic)?;
     let seed = mnemonic.to_seed(passphrase);
-    let path = BIP32Path::from_str(&format!(
-        "m/{STELLAR_PURPOSE}'/{STELLAR_COIN_TYPE}'/{index}'"
-    ))
+    let key = DerivedEd25519Key::derive_path(
+        &seed,
+        &format!("m/{STELLAR_PURPOSE}'/{STELLAR_COIN_TYPE}'/{index}'"),
+    )
     .map_err(|_| WalletDerivationError::InvalidIndex)?;
-    let key = derive_key_from_path(&seed, Curve::Ed25519, &path)
-        .map_err(|_| WalletDerivationError::InvalidIndex)?;
 
-    let public = key.public_key();
-    let public_bytes: [u8; 32] = public[1..]
-        .try_into()
-        .expect("SLIP-10 Ed25519 public keys are 33 bytes with a one-byte prefix");
-    Ok(format!("{}", PublicKey(public_bytes)))
+    Ok(format!("{}", PublicKey(key.public_key_bytes())))
+}
+
+pub fn derive_classic_signer(
+    mnemonic: &str,
+    passphrase: &str,
+    index: usize,
+    language: &str,
+) -> Result<crate::SoftwareSigner, WalletDerivationError> {
+    let language = mnemonic_language(language)?;
+    if index > MAX_ACCOUNT_INDEX {
+        return Err(WalletDerivationError::InvalidIndex);
+    }
+
+    let mnemonic = Mnemonic::parse_in(language, mnemonic.trim())
+        .map_err(|_| WalletDerivationError::InvalidMnemonic)?;
+    let seed = mnemonic.to_seed(passphrase);
+    let key = DerivedEd25519Key::derive_path(
+        &seed,
+        &format!("m/{STELLAR_PURPOSE}'/{STELLAR_COIN_TYPE}'/{index}'"),
+    )
+    .map_err(|_| WalletDerivationError::InvalidIndex)?;
+
+    crate::SoftwareSigner::from_signing_key(key.to_signing_key())
+        .map_err(|_| WalletDerivationError::InvalidIndex)
+}
+
+#[allow(dead_code)]
+fn _validate_path() {
+    let _ = FromStr::from_str;
 }
