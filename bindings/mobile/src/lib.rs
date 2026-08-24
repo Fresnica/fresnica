@@ -41,7 +41,10 @@ impl MobileCoreApi {
     }
 
     pub fn parse_account(&self, address: String) -> Result<MobileAccountIdentity, MobileCoreError> {
-        let identity = self.core.parse_account(&address).map_err(MobileCoreError::from)?;
+        let identity = self
+            .core
+            .parse_account(&address)
+            .map_err(MobileCoreError::from)?;
         Ok(MobileAccountIdentity {
             kind: match identity.kind {
                 ClientAccountKind::Classic => MobileAccountKind::Classic,
@@ -461,7 +464,8 @@ mod tests {
     const CLASSIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
     const OTHER_CLASSIC: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
     const CONTRACT: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
-    const MNEMONIC: &str = "illness spike retreat truth genius clock brain pass fit cave bargain toe";
+    const MNEMONIC: &str =
+        "illness spike retreat truth genius clock brain pass fit cave bargain toe";
     const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
 
     fn signing_vector() -> Value {
@@ -483,7 +487,10 @@ mod tests {
     fn versions_and_account_identity_are_stable() {
         let api = MobileCoreApi::new();
         let version = api.version();
-        assert_eq!(version.mobile_binding_api_version, MOBILE_BINDING_API_VERSION);
+        assert_eq!(
+            version.mobile_binding_api_version,
+            MOBILE_BINDING_API_VERSION
+        );
         assert_eq!(version.core_client_api_version, CLIENT_API_VERSION);
 
         let classic = api.parse_account(CLASSIC.to_owned()).unwrap();
@@ -622,7 +629,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(revealed.kind, MobileSigningMaterialKind::Mnemonic);
-        assert_eq!(revealed.mnemonic.as_deref(), Some(generated.mnemonic.as_str()));
+        assert_eq!(
+            revealed.mnemonic.as_deref(),
+            Some(generated.mnemonic.as_str())
+        );
         assert_eq!(revealed.index, Some(0));
         assert_eq!(revealed.language.as_deref(), Some("english"));
     }
@@ -639,7 +649,8 @@ mod tests {
                 "passcode".to_owned(),
                 Some(OTHER_CLASSIC.to_owned()),
             )
-            .unwrap_err();
+            .err()
+            .unwrap();
         assert_eq!(mismatch.code, MobileCoreErrorCode::IdentityMismatch);
 
         let malformed = api
@@ -655,11 +666,7 @@ mod tests {
             .protect_secret(secret.to_owned(), "passcode".to_owned(), None)
             .unwrap();
         let bad_key = api
-            .validate_unlock_key(
-                protected.envelope_json,
-                vec![0u8; 31],
-                CLASSIC.to_owned(),
-            )
+            .validate_unlock_key(protected.envelope_json, vec![0u8; 31], CLASSIC.to_owned())
             .unwrap_err();
         assert_eq!(bad_key.code, MobileCoreErrorCode::InvalidUnlockKey);
     }
