@@ -159,13 +159,32 @@ Rust Core is authoritative for:
 
 Core MUST NOT implement a `SystemProtectionProvider`, Keychain abstraction, biometric abstraction, or OS key-store abstraction.
 
-## 9. TUI/CLI as first native client
+## 9. TUI/CLI as first real Core client
 
-The first practical system-auth integration should be a native Fresnica TUI/CLI client because it can validate this boundary without mobile FFI or JavaScript concerns.
+The Python implementation remains the behavioral reference for product semantics, but it can now also act as a real Rust Core client.
 
-The TUI/CLI implementation should be split by platform adapters rather than pushing OS branches into Core. All adapters must produce the same Core input: a 32-byte `WalletUnlockKey` for routine software signing.
+When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is available on `PATH`, the Python TUI delegates software-wallet cryptographic operations to Rust Core:
 
-The current Python reference CLI is not the production Rust client boundary. OS-specific system-auth work should be implemented in the client that actually consumes Rust Core rather than duplicated in the Python behavioral reference.
+```text
+Python TUI
+  - UI / Horizon / DB / contacts / product orchestration
+        |
+        | stdin/stdout protocol v1
+        v
+fresnica-core Rust process
+  - protect/import/generate
+  - derive + validate WalletUnlockKey
+  - sign transaction
+  - reveal signing material
+```
+
+An unlocked Rust-backed Python wallet contains a Rust Core protected-signer adapter, not a Python private-key `Keypair`.
+
+The process protocol is the first verification transport, not a requirement for every future client. A native Rust CLI should link the Core crate directly. Mobile and desktop clients may use another native binding mechanism while preserving exactly the same Core operations and credential boundaries.
+
+OS-specific system-auth work still belongs to the client that releases a `WalletUnlockKey`; it is not implemented in Core or in the machine protocol.
+
+See [`docs/core-client-protocol.md`](core-client-protocol.md).
 
 ## 10. External and future signers
 
