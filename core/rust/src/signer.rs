@@ -24,9 +24,11 @@ impl SoftwareSigner {
     pub fn from_secret(secret: &str) -> Result<Self, SignerError> {
         let private =
             PrivateKey::from_string(secret.trim()).map_err(|_| SignerError::InvalidSecret)?;
-        let signing_key = SigningKey::from_bytes(&private.0);
-        let public_key = format!("{}", PublicKey(signing_key.verifying_key().to_bytes()));
+        Ok(Self::from_signing_key(SigningKey::from_bytes(&private.0)))
+    }
 
+    pub fn from_signing_key(signing_key: SigningKey) -> Result<Self, SignerError> {
+        let public_key = format!("{}", PublicKey(signing_key.verifying_key().to_bytes()));
         Ok(Self {
             signing_key,
             public_key,
@@ -54,7 +56,6 @@ pub enum SignerError {
 mod tests {
     use super::*;
 
-    // RFC 8032 test-vector keypair encoded as Stellar StrKeys.
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
 
@@ -70,7 +71,6 @@ mod tests {
     #[test]
     fn parses_stellar_secret_and_exposes_matching_public_key() {
         let signer = SoftwareSigner::from_secret(SECRET).unwrap();
-
         assert_eq!(signer.public_key(), PUBLIC);
         assert_eq!(signer.signature_hint(), [0xf7, 0x07, 0x51, 0x1a]);
     }
@@ -83,7 +83,6 @@ mod tests {
             "00c1db988bb12fd7351a6054ae3fac90fab7e4fc56b1651c7181f5f55f896f66",
             "3933d3a90605d9058e9d0ac45950ee2d3c9c9b14857415587179fe0ccac35f09"
         ));
-
         assert_eq!(signer.sign_transaction_hash(&transaction_hash), expected);
     }
 
