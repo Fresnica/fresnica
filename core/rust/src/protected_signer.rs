@@ -31,27 +31,36 @@ fn software_signer_from_payload(payload: Value) -> Result<SoftwareSigner, Protec
         Value::Object(object) => object,
         _ => return Err(ProtectedSignerError::InvalidSigningMaterial),
     };
+
+    // Move all known sensitive string allocations into zeroizing containers before
+    // inspecting the discriminator. Corrupted or future payload kinds therefore do
+    // not make these fields fall back to an ordinary String drop path.
+    let secret = take_optional_sensitive_string(&mut object, "secret")?;
+    let mnemonic = take_optional_sensitive_string(&mut object, "mnemonic")?;
+    let passphrase = take_optional_sensitive_string(&mut object, "mnemonic_passphrase")?;
     let kind = take_string(&mut object, "kind")?;
 
     match kind.as_str() {
-        "secret" => signer_from_secret_payload(&mut object),
-        "mnemonic" => signer_from_mnemonic_payload(&mut object),
+        "secret" => signer_from_secret(secret),
+        "mnemonic" => signer_from_mnemonic(&mut object, mnemonic, passphrase),
         _ => Err(ProtectedSignerError::UnsupportedSigningMaterial),
     }
 }
 
-fn signer_from_secret_payload(
-    object: &mut Map<String, Value>,
+fn signer_from_secret(
+    secret: Option<Zeroizing<String>>,
 ) -> Result<SoftwareSigner, ProtectedSignerError> {
-    let secret = Zeroizing::new(take_string(object, "secret")?);
+    let secret = secret.ok_or(ProtectedSignerError::InvalidSigningMaterial)?;
     SoftwareSigner::from_secret(&secret).map_err(Into::into)
 }
 
-fn signer_from_mnemonic_payload(
+fn signer_from_mnemonic(
     object: &mut Map<String, Value>,
+    mnemonic: Option<Zeroizing<String>>,
+    passphrase: Option<Zeroizing<String>>,
 ) -> Result<SoftwareSigner, ProtectedSignerError> {
-    let mnemonic = Zeroizing::new(take_string(object, "mnemonic")?);
-    let passphrase = Zeroizing::new(take_optional_string(object, "mnemonic_passphrase")?);
+    let mnemonic = mnemonic.ok_or(ProtectedSignerError::InvalidSigningMaterial)?;
+    let passphrase = passphrase.unwrap_or_else(|| Zeroizing::new(String::new()));
     let index = take_optional_index(object, "index")?;
     let language = take_optional_language(object, "language", &mnemonic)?;
 
@@ -68,13 +77,13 @@ fn take_string(
     }
 }
 
-fn take_optional_string(
+fn take_optional_sensitive_string(
     object: &mut Map<String, Value>,
     key: &str,
-) -> Result<String, ProtectedSignerError> {
+) -> Result<Option<Zeroizing<String>>, ProtectedSignerError> {
     match object.remove(key) {
-        None | Some(Value::Null) => Ok(String::new()),
-        Some(Value::String(value)) => Ok(value),
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(Zeroizing::new(value))),
         _ => Err(ProtectedSignerError::InvalidSigningMaterial),
     }
 }
@@ -188,9 +197,14 @@ mod tests {
 
     #[test]
     fn rejects_unknown_signing_material_kind() {
-        let error = software_signer_from_payload(json!({"kind": "future"}))
-            .err()
-            .unwrap();
+        let error = software_signer_from_payload(json!({
+            "kind": "future",
+            "secret": SECRET,
+            "mnemonic": CHINESE_MNEMONIC,
+            "mnemonic_passphrase": "sensitive"
+        }))
+        .err()
+        .unwrap();
 
         assert_eq!(error, ProtectedSignerError::UnsupportedSigningMaterial);
     }
