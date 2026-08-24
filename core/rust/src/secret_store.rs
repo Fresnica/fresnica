@@ -1,3 +1,5 @@
+use std::fmt;
+
 use aes_gcm::{
     aead::{Aead, KeyInit, Nonce, Payload},
     Aes256Gcm,
@@ -15,6 +17,28 @@ const SCRYPT_LOG_N: u8 = 15;
 pub const SCRYPT_N: u64 = 1 << SCRYPT_LOG_N;
 pub const SCRYPT_R: u32 = 8;
 pub const SCRYPT_P: u32 = 1;
+
+pub struct WalletUnlockKey {
+    bytes: Zeroizing<[u8; 32]>,
+}
+
+impl WalletUnlockKey {
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self {
+            bytes: Zeroizing::new(bytes),
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
+}
+
+impl fmt::Debug for WalletUnlockKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("WalletUnlockKey(<redacted>)")
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScryptEnvelope {
@@ -64,12 +88,41 @@ pub fn decrypt_secret(
         return Err(SecretStoreError::EmptyPassword);
     }
 
+    let key = derive_unlock_key(envelope, password)?;
+    decrypt_secret_with_unlock_key(envelope, &key)
+        .map_err(|error| match error {
+            SecretStoreError::InvalidUnlockKey => SecretStoreError::InvalidPassword,
+            other => other,
+        })
+}
+
+pub fn derive_unlock_key(
+    envelope: &PasswordSecretEnvelope,
+    password: &str,
+) -> Result<WalletUnlockKey, SecretStoreError> {
+    validate_password_envelope(envelope)?;
+    if password.is_empty() {
+        return Err(SecretStoreError::EmptyPassword);
+    }
+
     let salt = decode_array::<16>(&envelope.kdf.salt)?;
+    Ok(WalletUnlockKey {
+        bytes: derive_key(password, &salt)?,
+    })
+}
+
+pub fn decrypt_secret_with_unlock_key(
+    envelope: &PasswordSecretEnvelope,
+    unlock_key: &WalletUnlockKey,
+) -> Result<Value, SecretStoreError> {
+    validate_password_envelope(envelope)?;
     let nonce = decode_array::<12>(&envelope.nonce)?;
     let ciphertext = decode_base64(&envelope.ciphertext)?;
-    let key = derive_key(password, &salt)?;
-    let plaintext = decrypt_aead(&key, &nonce, AAD, &ciphertext)
-        .map_err(|_| SecretStoreError::InvalidPassword)?;
+    let plaintext = decrypt_aead(unlock_key.as_bytes(), &nonce, AAD, &ciphertext)
+        .map_err(|error| match error {
+            SecretStoreError::AuthenticationFailed => SecretStoreError::InvalidUnlockKey,
+            other => other,
+        })?;
     decode_payload(plaintext)
 }
 
@@ -234,6 +287,8 @@ pub enum SecretStoreError {
     EmptyPassword,
     #[error("invalid wallet password")]
     InvalidPassword,
+    #[error("invalid wallet unlock key")]
+    InvalidUnlockKey,
     #[error("unsupported wallet encryption format")]
     UnsupportedEncryptionFormat,
     #[error("unsupported wallet key derivation format")]
@@ -297,6 +352,31 @@ mod tests {
         assert_eq!(
             decrypt_secret(&envelope, "wrong").unwrap_err(),
             SecretStoreError::InvalidPassword
+        );
+    }
+
+    #[test]
+    fn derived_unlock_key_opens_same_password_envelope() {
+        let payload = json!({"kind": "secret", "secret": "S..."});
+        let envelope = encrypt_secret(&payload, "correct").unwrap();
+        let unlock_key = derive_unlock_key(&envelope, "correct").unwrap();
+
+        assert_eq!(
+            decrypt_secret_with_unlock_key(&envelope, &unlock_key).unwrap(),
+            payload
+        );
+        assert_eq!(format!("{unlock_key:?}"), "WalletUnlockKey(<redacted>)");
+    }
+
+    #[test]
+    fn wrong_unlock_key_cannot_open_password_envelope() {
+        let payload = json!({"kind": "secret", "secret": "S..."});
+        let envelope = encrypt_secret(&payload, "correct").unwrap();
+        let wrong = WalletUnlockKey::from_bytes([0u8; 32]);
+
+        assert_eq!(
+            decrypt_secret_with_unlock_key(&envelope, &wrong).unwrap_err(),
+            SecretStoreError::InvalidUnlockKey
         );
     }
 
