@@ -11,6 +11,7 @@ pub mod secret_store;
 pub mod signer;
 pub mod transaction;
 pub mod wallet;
+pub mod wallet_material;
 
 pub use account::{AccountError, AccountIdentity, AccountKind};
 pub use agent_access::{
@@ -40,5 +41,10 @@ pub use transaction::{
 };
 pub use wallet::{
     derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,
-    WalletDerivationError,
+    generate_mnemonic_phrase, WalletDerivationError,
+};
+pub use wallet_material::{
+    generate_protected_mnemonic, protect_mnemonic_signing_material,
+    protect_secret_signing_material, GeneratedProtectedMnemonic, ProtectedWalletMaterial,
+    WalletMaterialError,
 };

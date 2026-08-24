@@ -10,16 +10,19 @@ Implemented production primitives currently include:
 
 - Classic Stellar account identities (`G...`)
 - Contract account identities (`C...`) without contract runtime assumptions
-- SEP-0005 deterministic Classic public-key derivation and supported-language detection
+- SEP-0005 deterministic Classic public-key derivation, mnemonic generation, and supported-language detection
 - Classic Ed25519 software signer
 - External Ed25519 transaction signer for hardware, device, or process-backed providers
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
 - Canonical password-protected wallet envelopes using Scrypt + AES-256-GCM
+- protected wallet initialization from Stellar secret or mnemonic material
+- protected mnemonic generation for new software wallets
 - `WalletUnlockKey`, the 32-byte Scrypt output used to open that same canonical envelope
 - Verified unlock-key derivation with public-key identity validation before client enrollment
 - One-shot protected transaction signing using `WalletUnlockKey`
 - Explicit passcode-only signing-material export for user-requested reveal/migration flows
 - Agent Access capability checks before Classic transaction signing
+- a versioned stdin/stdout machine bridge (`fresnica-core`) used by the Python TUI as the first real Rust Core client
 
 Transaction building, network submission, client persistence, OS authentication, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
 
@@ -41,7 +44,21 @@ A client obtains a key for enrollment through `derive_verified_unlock_key`, whic
 
 No second wallet ciphertext or independent system wallet key is created.
 
-See [`docs/client-core-security.md`](../../docs/client-core-security.md) and [`docs/protection.md`](../../docs/protection.md).
+See [`docs/client-core-security.md`](../../docs/client-core-security.md), [`docs/core-client-protocol.md`](../../docs/core-client-protocol.md), and [`docs/protection.md`](../../docs/protection.md).
+
+## First real client: Python TUI
+
+The Python implementation still owns product orchestration, Horizon/network access, local databases, caches, contacts, and Textual UI. When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is available on `PATH`, software-wallet cryptographic operations are delegated to this Rust Core:
+
+- create/import and protected-envelope construction;
+- Passcode -> verified `WalletUnlockKey` derivation;
+- unlock-key validation before a client session is established;
+- transaction signing;
+- explicit passcode-only Reveal / Export.
+
+An unlocked Rust-backed Python wallet uses a protected-signer adapter and does not hold a Python private-key `Keypair`.
+
+The stdin/stdout protocol is a verification transport, not a requirement for future clients. A native Rust CLI can link this crate directly; mobile or desktop clients may use UniFFI, C ABI, JNI, Swift, or another native binding while preserving the same operations and security contract.
 
 ## Signing boundary
 
@@ -79,8 +96,18 @@ The current slice is deliberately fail-closed and operation-level. Destination, 
 
 ## Validation
 
+Run the Rust Core test suite:
+
 ```sh
 cargo test --manifest-path core/rust/Cargo.toml
 ```
+
+Build the machine bridge / standalone executable:
+
+```sh
+cargo build --release --manifest-path core/rust/Cargo.toml --bin fresnica-core
+```
+
+CI also builds that binary and runs the Python-to-Rust integration suite against shared wallet/protection/transaction vectors.
 
 Future slices should consume `spec/test-vectors` where a stable language-neutral contract already exists.

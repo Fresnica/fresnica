@@ -18,6 +18,7 @@ from .market_preferences import MarketPreferencesStore
 from .network import get_network
 from .offer_service import OfferService
 from .pending_transactions import PendingTransactionService, PendingTransactionStore
+from .rust_core_client import RustCoreClient
 from .settings import SettingsStore
 from .stellar_adapter import StellarAdapter
 from .storage import FileWalletStorage
@@ -53,6 +54,7 @@ class Runtime:
         wallet_storage=None,
         datastore=None,
         system_unlock_backend=None,
+        core_client=None,
     ):
         self.network = get_network(network).name
         if home is None:
@@ -71,7 +73,11 @@ class Runtime:
         self.asset_catalog = AssetCatalogService(self.home / "assets.json")
         self.anchor_capabilities_store = AnchorCapabilitiesStore(self.home / "anchors.json")
         self.anchor_transfer_service = AnchorTransferService()
-        self.wallet_manager = WalletManager(self.wallet_storage)
+        self.core_client = core_client if core_client is not None else RustCoreClient.discover()
+        self.wallet_manager = WalletManager(
+            self.wallet_storage,
+            core_client=self.core_client,
+        )
         self.system_unlock_backend = (
             system_unlock_backend or UnavailableSystemUnlockBackend()
         )
