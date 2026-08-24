@@ -4,7 +4,9 @@
 //! invent parallel wallet behavior.
 
 pub mod account;
+pub mod signer;
 pub mod wallet;
 
 pub use account::{AccountError, AccountIdentity, AccountKind};
+pub use signer::{ClassicSigner, SignerError, SoftwareSigner};
 pub use wallet::{derive_classic_public_key, WalletDerivationError};
