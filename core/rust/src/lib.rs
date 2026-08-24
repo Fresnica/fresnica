@@ -18,18 +18,17 @@ pub use agent_access::{
     AgentCapability,
 };
 pub use protected_signer::{
-    export_signing_material, sign_protected_transaction_envelope, unlock_software_signer,
-    ExportedSigningMaterial, ProtectedSignerError, ProtectedSigningError,
+    derive_verified_unlock_key, export_signing_material, sign_protected_transaction_envelope,
+    unlock_software_signer, ExportedSigningMaterial, ProtectedSignerError, ProtectedSigningError,
 };
 pub use protection::{
     PasswordProtectionProvider, ProtectionCredential, ProtectionError, ProtectionProvider,
-    ProtectionRegistry, SystemKeyStore, SystemKeyStoreError, SystemProtectionProvider,
-    PROTECTED_SECRET_FORMAT, PROTECTED_SECRET_VERSION,
+    ProtectionRegistry, PROTECTED_SECRET_FORMAT, PROTECTED_SECRET_VERSION,
 };
 pub use secret_store::{
-    decrypt_secret, decrypt_secret_with_key, encrypt_secret, encrypt_secret_with_key,
-    KeySecretEnvelope, PasswordSecretEnvelope, ScryptEnvelope, SecretStoreError, SCRYPT_N,
-    SCRYPT_P, SCRYPT_R,
+    decrypt_secret, decrypt_secret_with_unlock_key, derive_unlock_key, encrypt_secret,
+    PasswordSecretEnvelope, ScryptEnvelope, SecretStoreError, WalletUnlockKey, SCRYPT_N, SCRYPT_P,
+    SCRYPT_R,
 };
 pub use signer::{
     ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner,
