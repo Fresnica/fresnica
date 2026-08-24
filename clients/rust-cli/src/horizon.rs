@@ -105,28 +105,28 @@ pub fn operation_summary(operation: &Value, account: &str) -> String {
         }
         "manage_sell_offer" | "create_passive_sell_offer" => {
             let offer_id = text(operation, "offer_id").unwrap_or("0");
-            let amount = amount(operation, "amount");
-            if amount == "0" {
+            let offer_amount = amount(operation, "amount");
+            if offer_amount == "0" {
                 return format!("Cancelled offer #{offer_id}");
             }
             let selling = operation_asset(operation, "selling_");
             let buying = operation_asset(operation, "buying_");
             let price = amount(operation, "price");
             if text(operation, "type") == Some("create_passive_sell_offer") {
-                format!("Placed passive SELL {amount} {selling} @ {price} {buying}/{selling}")
+                format!("Placed passive SELL {offer_amount} {selling} @ {price} {buying}/{selling}")
             } else {
                 let verb = if offer_id == "0" {
                     "Placed".to_owned()
                 } else {
                     format!("Updated #{offer_id}")
                 };
-                format!("{verb} SELL {amount} {selling} @ {price} {buying}/{selling}")
+                format!("{verb} SELL {offer_amount} {selling} @ {price} {buying}/{selling}")
             }
         }
         "manage_buy_offer" => {
             let offer_id = text(operation, "offer_id").unwrap_or("0");
-            let amount = amount(operation, "amount");
-            if amount == "0" {
+            let offer_amount = amount(operation, "amount");
+            if offer_amount == "0" {
                 return format!("Cancelled offer #{offer_id}");
             }
             let selling = operation_asset(operation, "selling_");
@@ -137,7 +137,7 @@ pub fn operation_summary(operation: &Value, account: &str) -> String {
             } else {
                 format!("Updated #{offer_id}")
             };
-            format!("{verb} BUY {amount} {buying} @ {price} {selling}/{buying}")
+            format!("{verb} BUY {offer_amount} {buying} @ {price} {selling}/{buying}")
         }
         "change_trust" => {
             let asset = if text(operation, "asset_type") == Some("liquidity_pool_shares") {
