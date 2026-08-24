@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use near_slip10::{derive_key_from_mnemonic, BIP32Path};
+use bip39::{Language, Mnemonic};
+use near_slip10::{derive_key_from_path, BIP32Path, Curve};
 use stellar_strkey::ed25519::PublicKey;
 use thiserror::Error;
 
@@ -33,18 +34,15 @@ pub fn derive_classic_public_key(
         return Err(WalletDerivationError::InvalidIndex);
     }
 
+    let mnemonic = Mnemonic::parse_in(Language::English, mnemonic.trim())
+        .map_err(|_| WalletDerivationError::InvalidMnemonic)?;
+    let seed = mnemonic.to_seed(passphrase);
     let path = BIP32Path::from_str(&format!(
         "m/{STELLAR_PURPOSE}'/{STELLAR_COIN_TYPE}'/{index}'"
     ))
     .map_err(|_| WalletDerivationError::InvalidIndex)?;
-    let key = derive_key_from_mnemonic(mnemonic.trim(), passphrase, &path).map_err(|error| {
-        match error {
-            near_slip10::MnemonicError::InvalidMnemonic(_) => {
-                WalletDerivationError::InvalidMnemonic
-            }
-            near_slip10::MnemonicError::Derivation(_) => WalletDerivationError::InvalidIndex,
-        }
-    })?;
+    let key = derive_key_from_path(&seed, Curve::Ed25519, &path)
+        .map_err(|_| WalletDerivationError::InvalidIndex)?;
 
     let public = key.public_key();
     let public_bytes: [u8; 32] = public[1..]
