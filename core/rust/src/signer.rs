@@ -2,16 +2,26 @@ use ed25519_dalek::{Signer as _, SigningKey};
 use stellar_strkey::ed25519::{PrivateKey, PublicKey};
 use thiserror::Error;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransactionSigningRequest {
+    pub transaction_hash: [u8; 32],
+    pub transaction_xdr: Vec<u8>,
+    pub network_passphrase: String,
+}
+
 pub trait ClassicSigner {
     fn public_key(&self) -> &str;
-    fn sign_transaction_hash(&self, transaction_hash: &[u8; 32]) -> [u8; 64];
+    fn sign_transaction(
+        &self,
+        request: &TransactionSigningRequest,
+    ) -> Result<[u8; 64], SignerError>;
 
-    fn signature_hint(&self) -> [u8; 4] {
+    fn signature_hint(&self) -> Result<[u8; 4], SignerError> {
         let public = PublicKey::from_string(self.public_key())
-            .expect("ClassicSigner public keys must be valid Stellar Ed25519 keys");
-        public.0[28..32]
+            .map_err(|_| SignerError::InvalidPublicKey)?;
+        Ok(public.0[28..32]
             .try_into()
-            .expect("Stellar Ed25519 public keys are 32 bytes")
+            .expect("Stellar Ed25519 public keys are 32 bytes"))
     }
 }
 
@@ -41,8 +51,50 @@ impl ClassicSigner for SoftwareSigner {
         &self.public_key
     }
 
-    fn sign_transaction_hash(&self, transaction_hash: &[u8; 32]) -> [u8; 64] {
-        self.signing_key.sign(transaction_hash).to_bytes()
+    fn sign_transaction(
+        &self,
+        request: &TransactionSigningRequest,
+    ) -> Result<[u8; 64], SignerError> {
+        Ok(self.signing_key.sign(&request.transaction_hash).to_bytes())
+    }
+}
+
+type ExternalSigningProvider = dyn Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>
+    + Send
+    + Sync;
+
+pub struct ExternalEd25519Signer {
+    public_key: String,
+    sign_request: Box<ExternalSigningProvider>,
+}
+
+impl ExternalEd25519Signer {
+    pub fn new<F>(public_key: &str, sign_request: F) -> Result<Self, SignerError>
+    where
+        F: Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let public = PublicKey::from_string(public_key.trim())
+            .map_err(|_| SignerError::InvalidPublicKey)?;
+        Ok(Self {
+            public_key: format!("{public}"),
+            sign_request: Box::new(sign_request),
+        })
+    }
+}
+
+impl ClassicSigner for ExternalEd25519Signer {
+    fn public_key(&self) -> &str {
+        &self.public_key
+    }
+
+    fn sign_transaction(
+        &self,
+        request: &TransactionSigningRequest,
+    ) -> Result<[u8; 64], SignerError> {
+        (self.sign_request)(request)
     }
 }
 
@@ -50,6 +102,10 @@ impl ClassicSigner for SoftwareSigner {
 pub enum SignerError {
     #[error("invalid Stellar secret key")]
     InvalidSecret,
+    #[error("invalid Stellar public key")]
+    InvalidPublicKey,
+    #[error("external signer failed: {0}")]
+    ExternalProvider(String),
 }
 
 #[cfg(test)]
@@ -69,12 +125,20 @@ mod tests {
         out
     }
 
+    fn request(transaction_hash: [u8; 32]) -> TransactionSigningRequest {
+        TransactionSigningRequest {
+            transaction_hash,
+            transaction_xdr: Vec::new(),
+            network_passphrase: String::new(),
+        }
+    }
+
     #[test]
     fn parses_stellar_secret_and_exposes_matching_public_key() {
         let signer = SoftwareSigner::from_secret(SECRET).unwrap();
 
         assert_eq!(signer.public_key(), PUBLIC);
-        assert_eq!(signer.signature_hint(), [0xf7, 0x07, 0x51, 0x1a]);
+        assert_eq!(signer.signature_hint().unwrap(), [0xf7, 0x07, 0x51, 0x1a]);
     }
 
     #[test]
@@ -86,7 +150,10 @@ mod tests {
             "3933d3a90605d9058e9d0ac45950ee2d3c9c9b14857415587179fe0ccac35f09"
         ));
 
-        assert_eq!(signer.sign_transaction_hash(&transaction_hash), expected);
+        assert_eq!(
+            signer.sign_transaction(&request(transaction_hash)).unwrap(),
+            expected
+        );
     }
 
     #[test]
@@ -95,5 +162,12 @@ mod tests {
             SoftwareSigner::from_secret(PUBLIC).err(),
             Some(SignerError::InvalidSecret)
         );
+    }
+
+    #[test]
+    fn external_signer_rejects_invalid_public_key() {
+        let signer = ExternalEd25519Signer::new("not-a-stellar-key", |_| Ok([0u8; 64]));
+
+        assert_eq!(signer.err(), Some(SignerError::InvalidPublicKey));
     }
 }
