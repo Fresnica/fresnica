@@ -16,6 +16,7 @@ Implemented production primitives currently include:
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
 - Password and system-key protection providers for locally stored wallet signing material
 - Protected signing-material unlock into a Classic `SoftwareSigner` with public-key identity validation
+- Agent Access capability checks before Classic transaction signing
 
 Transaction building, network submission, storage, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
 
@@ -34,6 +35,14 @@ Protection applies only to secret material held locally for software signing. Ha
 Password protection preserves the existing version-1 Scrypt + AES-256-GCM wallet format. System protection generates a random 32-byte wrapping key and delegates only that key to `SystemKeyStore`, which is the platform boundary for Keychain, DPAPI/Hello, Android Keystore, or another OS facility. Fresnica persists the encrypted wallet payload plus an opaque key reference, not the wrapping key itself.
 
 Password-derived keys, system wrapping keys, loaded system keys, and intermediate decrypted byte buffers use zeroizing containers. `unlock_software_signer` consumes decrypted `secret` or `mnemonic` strings by moving their allocations into zeroizing containers before constructing the signer, then verifies that the resulting Stellar public key matches public wallet metadata. Generic decoded payloads remain live plaintext and should not be cached. No global vault or master key is introduced by this layer.
+
+## Agent Access boundary
+
+Agent Access authorizes use of an existing signer; it does not give an agent wallet secret material. `AgentCapability` is public policy data binding a Classic G account to one network, an explicit Stellar `OperationType` allowlist, maximum operation count, total transaction-fee ceiling, and optional expiry.
+
+The first policy slice is deliberately fail-closed: only unsigned Classic V1 envelopes are accepted; the transaction source and every effective operation source must resolve to the capability's G account; V0 and fee-bump envelopes are rejected; unlisted operations, excessive fees/counts, expired capabilities, and signer/account mismatches are rejected before signing. `sign_agent_transaction` runs authorization and signing in the same call so callers cannot authorize one envelope and then substitute another before the signer is invoked.
+
+This is an **operation-level foundation**, not the finished autonomous-spending policy. Allowing `PAYMENT`, SDEX, trustline, sponsorship, or Soroban operation types currently grants that operation type without destination, asset, amount, market, contract, or argument constraints. Those constraints must be added before product adapters expose corresponding broad capabilities. Token issuance/storage, MCP, CLI, local RPC/daemon, and OWS-compatible transports remain adapter-layer work and must not duplicate the authorization path.
 
 ## Validation
 
