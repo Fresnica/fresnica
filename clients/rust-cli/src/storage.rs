@@ -36,6 +36,7 @@ struct WalletBackup {
 }
 
 pub struct WalletStorage {
+    home: PathBuf,
     directory: PathBuf,
     default_path: PathBuf,
 }
@@ -48,9 +49,14 @@ impl WalletStorage {
         restrict_directory(&directory)?;
         let default_path = directory.join(".default");
         Ok(Self {
+            home: home.to_path_buf(),
             directory,
             default_path,
         })
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.home
     }
 
     pub fn wallet_path(&self, name: &str) -> PathBuf {
