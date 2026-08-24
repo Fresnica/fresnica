@@ -16,6 +16,7 @@ from .hdwallet import detect_mnemonic_language, generate_mnemonic_phrase
 from .network import get_network
 from .protection import ProtectionCredential, ProtectionRegistry
 from .secret_store import WalletUnlockKey
+from .signer import RustCoreProtectedSigner
 from .storage import WalletRecord, WalletStorage
 from .wallet import Wallet
 from .wallet_backup import read_wallet_backup, write_wallet_backup
@@ -47,9 +48,11 @@ class WalletManager:
         self,
         storage: WalletStorage,
         protection_registry: ProtectionRegistry | None = None,
+        core_client=None,
     ):
         self.storage = storage
         self.protection_registry = protection_registry or ProtectionRegistry()
+        self.core_client = core_client
         self._session: WalletSession | None = None
 
     def list_wallets(self) -> list[WalletRecord]:
@@ -141,11 +144,19 @@ class WalletManager:
         make_default: bool | None = None,
     ) -> WalletRecord:
         get_network(network)
-        wallet = Wallet.from_secret(secret)
-        envelope = self.protection_registry.protect(
-            {"kind": "secret", "secret": secret.strip()},
-            credential,
-        )
+        if self.core_client is not None:
+            protected = self.core_client.protect_secret(
+                secret,
+                self._password_from_credential(credential),
+            )
+            wallet = Wallet.from_address(protected.public_key)
+            envelope = protected.envelope
+        else:
+            wallet = Wallet.from_secret(secret)
+            envelope = self.protection_registry.protect(
+                {"kind": "secret", "secret": secret.strip()},
+                credential,
+            )
         record = WalletRecord(
             name=name,
             address=wallet.address(),
@@ -195,22 +206,33 @@ class WalletManager:
         if language is None:
             language = detect_mnemonic_language(mnemonic)
         language_value = getattr(language, "value", language)
-        wallet = Wallet.from_mnemonic(
-            mnemonic,
-            passphrase=mnemonic_passphrase,
-            index=index,
-            language=language,
-        )
-        envelope = self.protection_registry.protect(
-            {
-                "kind": "mnemonic",
-                "mnemonic": mnemonic.strip(),
-                "mnemonic_passphrase": mnemonic_passphrase,
-                "index": index,
-                "language": language_value,
-            },
-            credential,
-        )
+        if self.core_client is not None:
+            protected = self.core_client.protect_mnemonic(
+                mnemonic,
+                self._password_from_credential(credential),
+                mnemonic_passphrase=mnemonic_passphrase,
+                index=index,
+                language=language_value,
+            )
+            wallet = Wallet.from_address(protected.public_key)
+            envelope = protected.envelope
+        else:
+            wallet = Wallet.from_mnemonic(
+                mnemonic,
+                passphrase=mnemonic_passphrase,
+                index=index,
+                language=language,
+            )
+            envelope = self.protection_registry.protect(
+                {
+                    "kind": "mnemonic",
+                    "mnemonic": mnemonic.strip(),
+                    "mnemonic_passphrase": mnemonic_passphrase,
+                    "index": index,
+                    "language": language_value,
+                },
+                credential,
+            )
         record = WalletRecord(
             name=name,
             address=wallet.address(),
@@ -260,18 +282,44 @@ class WalletManager:
         network: str = "mainnet",
         make_default: bool | None = None,
     ) -> tuple[WalletRecord, str]:
-        mnemonic = generate_mnemonic_phrase(language=language, strength=strength)
-        record = self.import_mnemonic_with_protection(
-            name,
-            mnemonic,
-            credential,
+        if self.core_client is None:
+            mnemonic = generate_mnemonic_phrase(language=language, strength=strength)
+            record = self.import_mnemonic_with_protection(
+                name,
+                mnemonic,
+                credential,
+                mnemonic_passphrase=mnemonic_passphrase,
+                index=index,
+                language=language,
+                network=network,
+                make_default=make_default,
+            )
+            return record, mnemonic
+
+        get_network(network)
+        language_value = getattr(language, "value", language)
+        generated = self.core_client.generate_mnemonic(
+            self._password_from_credential(credential),
             mnemonic_passphrase=mnemonic_passphrase,
             index=index,
-            language=language,
-            network=network,
-            make_default=make_default,
+            language=language_value,
+            strength=strength,
         )
-        return record, mnemonic
+        record = WalletRecord(
+            name=name,
+            address=generated.public_key,
+            wallet_type="mnemonic",
+            network=network,
+            secret=generated.envelope,
+            metadata={
+                "created_at": _now(),
+                "index": generated.index,
+                "language": generated.language,
+            },
+        )
+        self.storage.save(record)
+        self._maybe_default(record.name, make_default)
+        return record, generated.mnemonic
 
     def backup(self, name: str, path, overwrite: bool = False):
         """Back up the stored encrypted record without unlocking the wallet."""
@@ -308,6 +356,13 @@ class WalletManager:
         wallet_password: str,
     ) -> WalletUnlockKey:
         record = self._signing_record(name)
+        if self.core_client is not None:
+            return self.core_client.derive_verified_unlock_key(
+                record.secret,
+                wallet_password,
+                record.address,
+            )
+
         unlock_key = self.protection_registry.derive_unlock_key(
             record.secret, wallet_password
         )
@@ -331,11 +386,28 @@ class WalletManager:
         unlock_key: WalletUnlockKey,
     ) -> WalletSession:
         record = self._signing_record(name)
-        payload = self.protection_registry.unprotect_with_unlock_key(
-            record.secret, unlock_key
-        )
-        wallet = self._wallet_from_payload(payload)
-        self._verify_identity(record, wallet)
+        if self.core_client is not None:
+            self.core_client.validate_unlock_key(
+                record.secret,
+                unlock_key,
+                record.address,
+            )
+            signer = RustCoreProtectedSigner(
+                record.address,
+                self.core_client,
+                record.secret,
+                unlock_key,
+            )
+            wallet = Wallet.from_signer(
+                signer,
+                index=int(record.metadata.get("index", 0)),
+            )
+        else:
+            payload = self.protection_registry.unprotect_with_unlock_key(
+                record.secret, unlock_key
+            )
+            wallet = self._wallet_from_payload(payload)
+            self._verify_identity(record, wallet)
         self._session = WalletSession(record, wallet)
         return self._session
 
@@ -348,6 +420,22 @@ class WalletManager:
         if credential.kind != "password" or not isinstance(credential.value, str):
             raise WalletLockedError("Core accepts only password protection credentials")
         return self.unlock(name, credential.value)
+
+    def export_signing_material(self, name: str | None, wallet_password: str) -> dict:
+        record = self._signing_record(name)
+        if self.core_client is not None:
+            return self.core_client.reveal(
+                record.secret,
+                wallet_password,
+                record.address,
+            )
+        payload = self.protection_registry.unprotect(
+            record.secret,
+            ProtectionCredential.password(wallet_password),
+        )
+        wallet = self._wallet_from_payload(payload)
+        self._verify_identity(record, wallet)
+        return payload
 
     def upgrade_legacy_protection(
         self,
@@ -365,7 +453,15 @@ class WalletManager:
         if not self.protection_registry.is_legacy_password(record.secret):
             return record
 
-        self.protection_registry.unprotect(record.secret, credential)
+        password = self._password_from_credential(credential)
+        if self.core_client is not None:
+            self.core_client.derive_verified_unlock_key(
+                record.secret,
+                password,
+                record.address,
+            )
+        else:
+            self.protection_registry.unprotect(record.secret, credential)
         upgraded = replace(
             record,
             secret=self.protection_registry.migrate_legacy_password(record.secret),
@@ -419,6 +515,12 @@ class WalletManager:
     def _verify_identity(record: WalletRecord, wallet: Wallet) -> None:
         if wallet.address() != record.address:
             raise WalletLockedError("Decrypted wallet identity does not match metadata")
+
+    @staticmethod
+    def _password_from_credential(credential: ProtectionCredential) -> str:
+        if credential.kind != "password" or not isinstance(credential.value, str):
+            raise WalletLockedError("Core accepts only password protection credentials")
+        return credential.value
 
     def _maybe_default(self, name: str, make_default: bool | None) -> None:
         if make_default is True or (
