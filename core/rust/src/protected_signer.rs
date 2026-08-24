@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 use crate::{
     derive_classic_signer, detect_mnemonic_language, sign_transaction_envelope, ClassicSigner,
     ProtectionCredential, ProtectionError, ProtectionRegistry, SignerError, SoftwareSigner,
-    TransactionSigningError, WalletDerivationError,
+    TransactionSigningError, WalletDerivationError, WalletUnlockKey,
 };
 
 pub enum ExportedSigningMaterial {
@@ -59,13 +59,27 @@ impl ExportedSigningMaterial {
     }
 }
 
+pub fn derive_verified_unlock_key(
+    registry: &ProtectionRegistry,
+    envelope: &Value,
+    passcode: &str,
+    expected_public_key: &str,
+) -> Result<WalletUnlockKey, ProtectedSignerError> {
+    let unlock_key = registry.derive_unlock_key(envelope, passcode)?;
+    let payload = registry.unprotect_with_unlock_key(envelope, &unlock_key)?;
+    let signer = software_signer_from_payload(payload)?;
+    ensure_expected_identity(&signer, expected_public_key)?;
+    drop(signer);
+    Ok(unlock_key)
+}
+
 pub fn unlock_software_signer(
     registry: &ProtectionRegistry,
     envelope: &Value,
-    credential: &ProtectionCredential,
+    unlock_key: &WalletUnlockKey,
     expected_public_key: &str,
 ) -> Result<SoftwareSigner, ProtectedSignerError> {
-    let payload = registry.unprotect(envelope, credential)?;
+    let payload = registry.unprotect_with_unlock_key(envelope, unlock_key)?;
     let signer = software_signer_from_payload(payload)?;
     ensure_expected_identity(&signer, expected_public_key)?;
     Ok(signer)
@@ -74,7 +88,7 @@ pub fn unlock_software_signer(
 pub fn sign_protected_transaction_envelope(
     registry: &ProtectionRegistry,
     protected_envelope: &Value,
-    credential: &ProtectionCredential,
+    unlock_key: &WalletUnlockKey,
     expected_public_key: &str,
     transaction_envelope: &mut TransactionEnvelope,
     network_passphrase: &str,
@@ -82,7 +96,7 @@ pub fn sign_protected_transaction_envelope(
     let signer = unlock_software_signer(
         registry,
         protected_envelope,
-        credential,
+        unlock_key,
         expected_public_key,
     )?;
     sign_transaction_envelope(transaction_envelope, network_passphrase, &signer)?;
@@ -92,14 +106,11 @@ pub fn sign_protected_transaction_envelope(
 pub fn export_signing_material(
     registry: &ProtectionRegistry,
     envelope: &Value,
-    credential: &ProtectionCredential,
+    passcode: &str,
     expected_public_key: &str,
 ) -> Result<ExportedSigningMaterial, ProtectedSignerError> {
-    if credential.kind() != "password" {
-        return Err(ProtectedSignerError::ExportRequiresPassword);
-    }
-
-    let payload = registry.unprotect(envelope, credential)?;
+    let credential = ProtectionCredential::password(passcode);
+    let payload = registry.unprotect(envelope, &credential)?;
     let material = signing_material_from_payload(payload)?;
     let signer = material.signer()?;
     ensure_expected_identity(&signer, expected_public_key)?;
@@ -119,9 +130,6 @@ fn signing_material_from_payload(
         _ => return Err(ProtectedSignerError::InvalidSigningMaterial),
     };
 
-    // Extract every known sensitive string before propagating any field-format
-    // error. This keeps later sensitive fields on a zeroizing drop path even if
-    // an earlier sensitive field is malformed.
     let secret = take_optional_sensitive_string(&mut object, "secret");
     let mnemonic = take_optional_sensitive_string(&mut object, "mnemonic");
     let passphrase = take_optional_sensitive_string(&mut object, "mnemonic_passphrase");
@@ -227,8 +235,6 @@ pub enum ProtectedSignerError {
     InvalidExpectedPublicKey,
     #[error("decrypted wallet identity does not match metadata")]
     IdentityMismatch,
-    #[error("signing material export requires fresh app-passcode authentication")]
-    ExportRequiresPassword,
 }
 
 #[derive(Debug, Error)]
@@ -244,6 +250,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::SecretStoreError;
 
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
@@ -271,39 +278,54 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn unlocks_protected_secret_and_checks_identity() {
-        let registry = ProtectionRegistry::new();
-        let credential = ProtectionCredential::password("correct");
-        let envelope = registry
+    fn protected_secret(registry: &ProtectionRegistry, passcode: &str) -> Value {
+        registry
             .protect(
                 &json!({"kind": "secret", "secret": SECRET}),
-                &credential,
+                &ProtectionCredential::password(passcode),
             )
-            .unwrap();
+            .unwrap()
+    }
 
-        let signer = unlock_software_signer(&registry, &envelope, &credential, PUBLIC).unwrap();
+    #[test]
+    fn derives_verified_unlock_key_and_unlocks_signer() {
+        let registry = ProtectionRegistry::new();
+        let envelope = protected_secret(&registry, "correct");
+        let key = derive_verified_unlock_key(&registry, &envelope, "correct", PUBLIC).unwrap();
+        let signer = unlock_software_signer(&registry, &envelope, &key, PUBLIC).unwrap();
 
         assert_eq!(signer.public_key(), PUBLIC);
     }
 
     #[test]
-    fn signs_protected_transaction_without_exporting_secret() {
+    fn derived_unlock_key_is_bound_to_expected_identity() {
         let registry = ProtectionRegistry::new();
-        let credential = ProtectionCredential::password("correct");
-        let protected = registry
-            .protect(
-                &json!({"kind": "secret", "secret": SECRET}),
-                &credential,
-            )
-            .unwrap();
+        let envelope = protected_secret(&registry, "correct");
+
+        let error = derive_verified_unlock_key(
+            &registry,
+            &envelope,
+            "correct",
+            "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY",
+        )
+        .unwrap_err();
+
+        assert_eq!(error, ProtectedSignerError::IdentityMismatch);
+    }
+
+    #[test]
+    fn signs_protected_transaction_with_unlock_key() {
+        let registry = ProtectionRegistry::new();
+        let protected = protected_secret(&registry, "correct");
+        let unlock_key =
+            derive_verified_unlock_key(&registry, &protected, "correct", PUBLIC).unwrap();
         let mut transaction =
             crate::parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
 
         sign_protected_transaction_envelope(
             &registry,
             &protected,
-            &credential,
+            &unlock_key,
             PUBLIC,
             &mut transaction,
             TESTNET,
@@ -317,17 +339,37 @@ mod tests {
     }
 
     #[test]
-    fn exports_secret_only_after_password_authentication() {
+    fn wrong_unlock_key_cannot_sign() {
         let registry = ProtectionRegistry::new();
-        let credential = ProtectionCredential::password("correct");
-        let envelope = registry
-            .protect(
-                &json!({"kind": "secret", "secret": SECRET}),
-                &credential,
-            )
-            .unwrap();
+        let protected = protected_secret(&registry, "correct");
+        let wrong = WalletUnlockKey::from_bytes([0u8; 32]);
+        let mut transaction =
+            crate::parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
 
-        let material = export_signing_material(&registry, &envelope, &credential, PUBLIC).unwrap();
+        let error = sign_protected_transaction_envelope(
+            &registry,
+            &protected,
+            &wrong,
+            PUBLIC,
+            &mut transaction,
+            TESTNET,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ProtectedSigningError::Unlock(ProtectedSignerError::Protection(
+                ProtectionError::SecretStore(SecretStoreError::InvalidUnlockKey)
+            ))
+        ));
+    }
+
+    #[test]
+    fn exports_secret_with_fresh_passcode() {
+        let registry = ProtectionRegistry::new();
+        let envelope = protected_secret(&registry, "correct");
+
+        let material = export_signing_material(&registry, &envelope, "correct", PUBLIC).unwrap();
 
         match material {
             ExportedSigningMaterial::Secret { secret } => assert_eq!(secret.as_str(), SECRET),
@@ -336,9 +378,23 @@ mod tests {
     }
 
     #[test]
+    fn wrong_passcode_cannot_export() {
+        let registry = ProtectionRegistry::new();
+        let envelope = protected_secret(&registry, "correct");
+
+        let error = export_signing_material(&registry, &envelope, "wrong", PUBLIC).unwrap_err();
+
+        assert_eq!(
+            error,
+            ProtectedSignerError::Protection(ProtectionError::SecretStore(
+                SecretStoreError::InvalidPassword
+            ))
+        );
+    }
+
+    #[test]
     fn exports_mnemonic_with_reconstruction_metadata() {
         let registry = ProtectionRegistry::new();
-        let credential = ProtectionCredential::password("correct");
         let envelope = registry
             .protect(
                 &json!({
@@ -347,12 +403,12 @@ mod tests {
                     "mnemonic_passphrase": "",
                     "index": 0
                 }),
-                &credential,
+                &ProtectionCredential::password("correct"),
             )
             .unwrap();
 
         let material =
-            export_signing_material(&registry, &envelope, &credential, CHINESE_PUBLIC).unwrap();
+            export_signing_material(&registry, &envelope, "correct", CHINESE_PUBLIC).unwrap();
 
         match material {
             ExportedSigningMaterial::Mnemonic {
@@ -368,28 +424,6 @@ mod tests {
             }
             ExportedSigningMaterial::Secret { .. } => panic!("expected mnemonic export"),
         }
-    }
-
-    #[test]
-    fn system_authorization_alone_cannot_export_signing_material() {
-        let registry = ProtectionRegistry::new();
-        let password = ProtectionCredential::password("correct");
-        let envelope = registry
-            .protect(
-                &json!({"kind": "secret", "secret": SECRET}),
-                &password,
-            )
-            .unwrap();
-
-        let error = export_signing_material(
-            &registry,
-            &envelope,
-            &ProtectionCredential::system(),
-            PUBLIC,
-        )
-        .unwrap_err();
-
-        assert_eq!(error, ProtectedSignerError::ExportRequiresPassword);
     }
 
     #[test]
@@ -414,29 +448,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(signer.public_key(), CHINESE_PUBLIC);
-    }
-
-    #[test]
-    fn rejects_decrypted_identity_that_does_not_match_metadata() {
-        let registry = ProtectionRegistry::new();
-        let credential = ProtectionCredential::password("correct");
-        let envelope = registry
-            .protect(
-                &json!({"kind": "secret", "secret": SECRET}),
-                &credential,
-            )
-            .unwrap();
-
-        let error = unlock_software_signer(
-            &registry,
-            &envelope,
-            &credential,
-            "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY",
-        )
-        .err()
-        .unwrap();
-
-        assert_eq!(error, ProtectedSignerError::IdentityMismatch);
     }
 
     #[test]
