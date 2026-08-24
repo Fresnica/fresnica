@@ -112,22 +112,6 @@ pub fn reveal_record(
     .map_err(|error| error.to_string())
 }
 
-pub fn verify_passcode(record: &WalletRecord, passcode: &str) -> Result<(), String> {
-    let envelope = record
-        .secret
-        .as_ref()
-        .ok_or_else(|| "watch-only wallet has no signing material".to_owned())?;
-    let key = fresnica_core::derive_verified_unlock_key(
-        &ProtectionRegistry::new(),
-        envelope,
-        passcode,
-        &record.address,
-    )
-    .map_err(|error| error.to_string())?;
-    drop(key);
-    Ok(())
-}
-
 fn validate_name_and_network(name: &str, network: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("wallet name cannot be empty".to_owned());
@@ -162,7 +146,6 @@ mod tests {
         assert_eq!(record.address, PUBLIC);
         assert_eq!(record.wallet_type, "secret");
         assert!(!record.secret.as_ref().unwrap().to_string().contains(SECRET));
-        verify_passcode(&record, "passcode").unwrap();
 
         match reveal_record(&record, "passcode").unwrap() {
             ExportedSigningMaterial::Secret { secret } => assert_eq!(secret.as_str(), SECRET),
@@ -189,6 +172,13 @@ mod tests {
             record.metadata.get("language").and_then(Value::as_str),
             Some("english")
         );
-        verify_passcode(&record, "passcode").unwrap();
+        match reveal_record(&record, "passcode").unwrap() {
+            ExportedSigningMaterial::Mnemonic { mnemonic: revealed, index, language, .. } => {
+                assert_eq!(revealed.as_str(), mnemonic.as_str());
+                assert_eq!(index, 3);
+                assert_eq!(language, "english");
+            }
+            _ => panic!("mnemonic wallet revealed the wrong material kind"),
+        }
     }
 }
