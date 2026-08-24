@@ -7,29 +7,52 @@ use zeroize::Zeroizing;
 const STELLAR_PURPOSE: u32 = 44;
 const STELLAR_COIN_TYPE: u32 = 148;
 const MAX_ACCOUNT_INDEX: usize = (1 << 31) - 1;
+const SUPPORTED_MNEMONIC_LANGUAGES: &[(&str, Language)] = &[
+    ("english", Language::English),
+    ("chinese_simplified", Language::SimplifiedChinese),
+    ("chinese_traditional", Language::TraditionalChinese),
+    ("french", Language::French),
+    ("italian", Language::Italian),
+    ("japanese", Language::Japanese),
+    ("korean", Language::Korean),
+    ("spanish", Language::Spanish),
+];
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum WalletDerivationError {
     #[error("unsupported mnemonic language: {0}")]
     UnsupportedLanguage(String),
     #[error("invalid Stellar mnemonic phrase")]
     InvalidMnemonic,
+    #[error("mnemonic language is ambiguous; specify it explicitly")]
+    AmbiguousLanguage,
     #[error("invalid Stellar account index")]
     InvalidIndex,
 }
 
 fn mnemonic_language(language: &str) -> Result<Language, WalletDerivationError> {
-    match language {
-        "english" => Ok(Language::English),
-        "chinese_simplified" => Ok(Language::SimplifiedChinese),
-        "chinese_traditional" => Ok(Language::TraditionalChinese),
-        "french" => Ok(Language::French),
-        "italian" => Ok(Language::Italian),
-        "japanese" => Ok(Language::Japanese),
-        "korean" => Ok(Language::Korean),
-        "spanish" => Ok(Language::Spanish),
-        other => Err(WalletDerivationError::UnsupportedLanguage(other.to_owned())),
+    SUPPORTED_MNEMONIC_LANGUAGES
+        .iter()
+        .find_map(|(name, value)| (*name == language).then_some(*value))
+        .ok_or_else(|| WalletDerivationError::UnsupportedLanguage(language.to_owned()))
+}
+
+pub fn detect_mnemonic_language(
+    mnemonic: &str,
+) -> Result<&'static str, WalletDerivationError> {
+    let mnemonic = mnemonic.trim();
+    let mut detected = None;
+
+    for &(name, language) in SUPPORTED_MNEMONIC_LANGUAGES {
+        if Mnemonic::parse_in(language, mnemonic).is_ok() {
+            if detected.is_some() {
+                return Err(WalletDerivationError::AmbiguousLanguage);
+            }
+            detected = Some(name);
+        }
     }
+
+    detected.ok_or(WalletDerivationError::InvalidMnemonic)
 }
 
 fn derive_key(

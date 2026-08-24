@@ -10,11 +10,12 @@ Implemented production primitives currently include:
 
 - Classic Stellar account identities (`G...`)
 - Contract account identities (`C...`) without contract runtime assumptions
-- SEP-0005 deterministic Classic public-key derivation
+- SEP-0005 deterministic Classic public-key derivation and supported-language detection
 - Classic Ed25519 software signer
 - External Ed25519 transaction signer for hardware, device, or process-backed providers
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
 - Password and system-key protection providers for locally stored wallet signing material
+- Protected signing-material unlock into a Classic `SoftwareSigner` with public-key identity validation
 
 Transaction building, network submission, storage, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
 
@@ -32,7 +33,7 @@ Protection applies only to secret material held locally for software signing. Ha
 
 Password protection preserves the existing version-1 Scrypt + AES-256-GCM wallet format. System protection generates a random 32-byte wrapping key and delegates only that key to `SystemKeyStore`, which is the platform boundary for Keychain, DPAPI/Hello, Android Keystore, or another OS facility. Fresnica persists the encrypted wallet payload plus an opaque key reference, not the wrapping key itself.
 
-Password-derived keys, system wrapping keys, loaded system keys, and intermediate decrypted byte buffers use zeroizing containers. The decoded payload returned to its caller is live plaintext and should be consumed immediately rather than cached. No global vault or master key is introduced by this layer.
+Password-derived keys, system wrapping keys, loaded system keys, and intermediate decrypted byte buffers use zeroizing containers. `unlock_software_signer` consumes decrypted `secret` or `mnemonic` strings by moving their allocations into zeroizing containers before constructing the signer, then verifies that the resulting Stellar public key matches public wallet metadata. Generic decoded payloads remain live plaintext and should not be cached. No global vault or master key is introduced by this layer.
 
 ## Validation
 
