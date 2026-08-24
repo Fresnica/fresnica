@@ -1,0 +1,27 @@
+name: Mobile Core bindings
+
+on:
+  push:
+    paths:
+      - "bindings/mobile/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/mobile-core-bindings.yml"
+  pull_request:
+    paths:
+      - "bindings/mobile/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/mobile-core-bindings.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --manifest-path bindings/mobile/Cargo.toml -- --check
+      - run: cargo test --manifest-path core/rust/Cargo.toml
+      - run: cargo test --manifest-path bindings/mobile/Cargo.toml
