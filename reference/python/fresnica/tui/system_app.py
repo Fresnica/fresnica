@@ -3,7 +3,7 @@
 from textual import work
 
 from ..client_system_unlock import SystemUnlockError
-from ..errors import FresnicaError, InvalidUnlockKeyError, WalletNotFoundError
+from ..errors import FresnicaError, InvalidUnlockKeyError
 from .app import FresnicaApp as ProductFresnicaApp
 from .system_unlock import SystemUnlockEnrollmentDialog
 from .wallet_management import WalletManagerDialog
@@ -32,11 +32,14 @@ class FresnicaApp(ProductFresnicaApp):
         controller = self.runtime.system_unlock
         system_unlock = None
         if controller.available():
-            system_unlock = {
-                record.name: controller.enrolled(record)
-                for record in records
-                if not record.watch_only
-            }
+            try:
+                system_unlock = {
+                    record.name: controller.enrolled(record)
+                    for record in records
+                    if not record.watch_only
+                }
+            except (SystemUnlockError, FresnicaError, ValueError):
+                system_unlock = None
 
         dialog = WalletManagerDialog(
             records,
@@ -73,7 +76,7 @@ class FresnicaApp(ProductFresnicaApp):
                     )
                     self._system_unlock_wallet(wallet_name, after)
                     return
-            except (FresnicaError, ValueError):
+            except (SystemUnlockError, FresnicaError, ValueError):
                 pass
         self._password_unlock(wallet_name, after, error)
 
@@ -94,7 +97,7 @@ class FresnicaApp(ProductFresnicaApp):
         except InvalidUnlockKeyError:
             try:
                 self.runtime.system_unlock.disable(manager, wallet_name)
-            except SystemUnlockError:
+            except (SystemUnlockError, FresnicaError, ValueError):
                 pass
             self.call_from_thread(
                 self._password_unlock,
@@ -205,10 +208,9 @@ class FresnicaApp(ProductFresnicaApp):
                         self.runtime.wallet_manager,
                         name,
                     )
-            except (SystemUnlockError, FresnicaError, ValueError):
-                # Wallet deletion still owns its original confirmation/error path.
-                # A platform backend should make stale-record cleanup retryable.
-                pass
+            except (SystemUnlockError, FresnicaError, ValueError) as exc:
+                self._show_error(exc)
+                return
         super()._delete_wallet(name, confirmed)
 
 
