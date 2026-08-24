@@ -55,9 +55,17 @@ policy is moved into `fresnica-core`.
 Reviewed write commands present operation-specific review and ask for
 confirmation before requesting the Fresnica passcode. A short-lived verified
 `WalletUnlockKey` is then derived and the exact prepared envelope is signed by
-Rust Core before Horizon submission. Transport or server failures during
-submission are reported with the locally computed transaction hash so status can
-be checked before retrying.
+Rust Core before Horizon submission. If the HTTP submission result is uncertain,
+the native client persists the locally computed transaction hash and blocks a
+later same-account write until Horizon confirms it or the 210-second recovery
+window expires after a not-found lookup.
+
+Pending recovery state uses the same `pending-transactions.json` path and public
+metadata schema as the Python reference. It stores only network, account,
+transaction hash, kind, and submission time; signed XDR, secrets, passcodes,
+unlock keys, and signer material are never persisted there. Horizon lookup
+failures leave the pending record intact, and failure to persist a newly uncertain
+submission produces an explicit do-not-retry warning.
 
 The client transaction builder supports multiple operations when product
 semantics require an atomic bundle. SDEX creation uses this only when the user
@@ -120,8 +128,8 @@ wallet record; use `--network testnet` for a testnet wallet.
 
 ## Deliberate non-goals of this slice
 
-Local chain-data caching, contacts, anchor protocols, durable pending-transaction
-recovery, and TUI presentation remain in the Python reference for now.
+Local chain-data caching, contacts, anchor protocols, and TUI presentation remain
+in the Python reference for now.
 
 The native client does not expose a raw `sign-xdr` shortcut. Routine transaction
 signing stays behind client-side construction and review rather than creating a
