@@ -32,12 +32,15 @@ fn software_signer_from_payload(payload: Value) -> Result<SoftwareSigner, Protec
         _ => return Err(ProtectedSignerError::InvalidSigningMaterial),
     };
 
-    // Move all known sensitive string allocations into zeroizing containers before
-    // inspecting the discriminator. Corrupted or future payload kinds therefore do
-    // not make these fields fall back to an ordinary String drop path.
-    let secret = take_optional_sensitive_string(&mut object, "secret")?;
-    let mnemonic = take_optional_sensitive_string(&mut object, "mnemonic")?;
-    let passphrase = take_optional_sensitive_string(&mut object, "mnemonic_passphrase")?;
+    // Extract every known sensitive string before propagating any field-format
+    // error. This keeps later sensitive fields on a zeroizing drop path even if
+    // an earlier sensitive field is malformed.
+    let secret = take_optional_sensitive_string(&mut object, "secret");
+    let mnemonic = take_optional_sensitive_string(&mut object, "mnemonic");
+    let passphrase = take_optional_sensitive_string(&mut object, "mnemonic_passphrase");
+    let secret = secret?;
+    let mnemonic = mnemonic?;
+    let passphrase = passphrase?;
     let kind = take_string(&mut object, "kind")?;
 
     match kind.as_str() {
