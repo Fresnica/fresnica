@@ -174,6 +174,28 @@ class RustCoreClient:
             raise RustCoreUnavailableError("Rust Core returned malformed unlock key data") from exc
         return WalletUnlockKey(raw)
 
+    def validate_unlock_key(
+        self,
+        envelope: dict,
+        unlock_key: WalletUnlockKey,
+        expected_public_key: str,
+    ) -> None:
+        try:
+            self._call(
+                {
+                    "operation": "validate-unlock-key",
+                    "envelope": envelope,
+                    "unlock_key": base64.b64encode(unlock_key.as_bytes()).decode("ascii"),
+                    "expected_public_key": expected_public_key,
+                }
+            )
+        except _RustCoreProtocolError as exc:
+            if exc.code == "invalid-unlock-key":
+                raise InvalidUnlockKeyError("Invalid wallet unlock key") from exc
+            if exc.code == "identity-mismatch":
+                raise WalletLockedError("Decrypted wallet identity does not match metadata") from exc
+            raise WalletError(str(exc)) from exc
+
     def sign_transaction(
         self,
         envelope: dict,
