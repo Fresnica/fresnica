@@ -1,12 +1,10 @@
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::storage::WalletStorage;
 
-pub const FRIENDbot_URL: &str = "https://friendbot.stellar.org";
+pub const FRIENDBOT_URL: &str = "https://friendbot.stellar.org";
 
 pub fn command_fund(
     storage: &WalletStorage,
@@ -25,7 +23,7 @@ pub fn command_fund(
         ));
     }
 
-    let result = FriendbotClient::new(FRIENDbot_URL).fund(&record.address)?;
+    let result = FriendbotClient::new(FRIENDBOT_URL).fund(&record.address)?;
     let mut message = format!("Funded wallet \"{}\" on testnet", record.name);
     if let Some(hash) = result.get("hash").and_then(Value::as_str) {
         message.push_str("; transaction ");
@@ -75,6 +73,8 @@ fn parse_wallet_option(arguments: &[String]) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::thread;
 
     fn mock_friendbot(status: u16, body: &'static str) -> String {
