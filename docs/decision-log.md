@@ -2,6 +2,18 @@
 
 This file records design decisions that materially change Fresnica behavior or boundaries. Git history remains the detailed implementation record.
 
+## 2026-08-24 - Signing-material export is an explicit declassification boundary
+
+**Decision:** normal signing must keep mnemonic/private signing material inside Rust Core. User-requested Reveal / Export is a separate high-risk operation that may return the original recoverable signing material only after fresh Fresnica app-passcode authentication and Core identity verification.
+
+**Authentication:** Face ID, Touch ID, another system-auth success, or an already-unlocked application session is not sufficient by itself to disclose a mnemonic or private key. System authentication authorizes signer use; secret disclosure changes the confidentiality boundary and therefore requires explicit passcode re-entry.
+
+**Material semantics:** mnemonic-backed wallets may reveal the stored mnemonic plus any mnemonic passphrase and derivation metadata required to reconstruct the account. Secret-key-backed wallets may reveal the stored Stellar `S...` secret. A secret key must never be presented as if its original mnemonic can be reconstructed. External/hardware/remote signers cannot export private material that Fresnica never possessed.
+
+**Mobile handling:** revealed plaintext must not be persisted, logged, sent to analytics, automatically copied to the clipboard, or retained after the export flow. Normal transaction signing must not reuse the export API.
+
+See [Signing Material Reveal and Export](secret-export.md) and [Mobile / Rust Core Vault Contract](mobile-core-contract.md).
+
 ## 2026-08-24 - One app passcode; system authentication authorizes signers
 
 **Decision:** ordinary local software wallets use one Fresnica app passcode at the product level. Each wallet remains independently protected by Core using its own random salt and nonce, so the same app passcode does not imply one shared wallet AES key.
