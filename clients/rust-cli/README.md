@@ -5,9 +5,13 @@ It is the second concrete Core client after the Python reference/TUI bridge.
 
 ## Current scope
 
-The first native slice intentionally covers local wallet lifecycle only:
+The native client currently covers local wallet lifecycle plus a small read-only
+Horizon slice:
 
 - `info [--wallet NAME]`
+- `account [--wallet NAME] [--json]`
+- `balance [--wallet NAME] [--json]` (`assets` is an alias)
+- `history [--wallet NAME] [--limit N] [--json]`
 - `wallet list`
 - `wallet use NAME`
 - `wallet create NAME`
@@ -29,6 +33,11 @@ mnemonic, BIP39-passphrase, and Fresnica-passcode prompts are read from the
 controlling terminal with input hidden; they are not accepted as command-line
 arguments.
 
+Read-only account state, balances, and recent operations are fetched by the CLI
+client directly from the matching public or testnet Horizon server. This network
+code is deliberately outside `fresnica-core`; Core remains responsible for wallet
+cryptography and signing semantics rather than HTTP, caching, or product UI.
+
 ## Build
 
 ```sh
@@ -42,18 +51,25 @@ clients/rust-cli/target/release/fresnica
 ```
 
 For example, it can inspect the same local wallet library used by the Python
-client:
+client and query its network account:
 
 ```sh
 clients/rust-cli/target/release/fresnica wallet list
 clients/rust-cli/target/release/fresnica info
+clients/rust-cli/target/release/fresnica account
+clients/rust-cli/target/release/fresnica balance
+clients/rust-cli/target/release/fresnica history --limit 20
 ```
+
+A wallet record is bound to its configured Stellar network. Network commands
+fail before contacting Horizon if the invocation network does not match the
+wallet record; use `--network testnet` for a testnet wallet.
 
 ## Deliberate non-goals of this slice
 
-Network account state, Horizon history, assets, contacts, SDEX, anchor
-protocols, transaction construction, submission, and TUI presentation remain in
-the Python reference for now.
+Local chain-data caching, contacts, SDEX, anchor protocols, transaction
+construction, submission, and TUI presentation remain in the Python reference
+for now.
 
 The native client also does not expose a raw `sign-xdr` shortcut. Routine
 transaction signing should be added together with the client-side transaction
