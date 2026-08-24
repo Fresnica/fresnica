@@ -174,23 +174,24 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(
-            unlock_software_signer(
-                &registry,
-                &envelope,
-                &credential,
-                "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY",
-            )
-            .unwrap_err(),
-            ProtectedSignerError::IdentityMismatch
-        );
+        let error = unlock_software_signer(
+            &registry,
+            &envelope,
+            &credential,
+            "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY",
+        )
+        .err()
+        .unwrap();
+
+        assert_eq!(error, ProtectedSignerError::IdentityMismatch);
     }
 
     #[test]
     fn rejects_unknown_signing_material_kind() {
-        assert_eq!(
-            software_signer_from_payload(json!({"kind": "future"})).unwrap_err(),
-            ProtectedSignerError::UnsupportedSigningMaterial
-        );
+        let error = software_signer_from_payload(json!({"kind": "future"}))
+            .err()
+            .unwrap();
+
+        assert_eq!(error, ProtectedSignerError::UnsupportedSigningMaterial);
     }
 }
