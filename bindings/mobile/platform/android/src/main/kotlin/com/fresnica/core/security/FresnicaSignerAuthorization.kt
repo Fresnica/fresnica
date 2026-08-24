@@ -113,6 +113,12 @@ class FresnicaSignerAuthorization(
         }
     }
 
+    /** Cancels a pending biometric sign and clears its frozen reviewed transaction bytes. */
+    fun cancelSystemAuthSign(session: SigningSession) {
+        session.consume()
+        session.clearTransaction()
+    }
+
     /**
      * App-passcode recovery/fallback path. The derived unlock key never leaves this native method.
      */
