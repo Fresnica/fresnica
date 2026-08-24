@@ -27,12 +27,12 @@ impl SoftwareSigner {
         Ok(Self::from_signing_key(SigningKey::from_bytes(&private.0)))
     }
 
-    pub fn from_signing_key(signing_key: SigningKey) -> Result<Self, SignerError> {
+    pub(crate) fn from_signing_key(signing_key: SigningKey) -> Self {
         let public_key = format!("{}", PublicKey(signing_key.verifying_key().to_bytes()));
-        Ok(Self {
+        Self {
             signing_key,
             public_key,
-        })
+        }
     }
 }
 
