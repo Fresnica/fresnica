@@ -1,7 +1,7 @@
 use fresnica_core::{
-    detect_mnemonic_language, export_signing_material, generate_protected_mnemonic,
-    protect_mnemonic_signing_material, protect_secret_signing_material,
-    ExportedSigningMaterial, ProtectionRegistry,
+    derive_verified_unlock_key, detect_mnemonic_language, export_signing_material,
+    generate_protected_mnemonic, protect_mnemonic_signing_material,
+    protect_secret_signing_material, ExportedSigningMaterial, ProtectionRegistry,
 };
 use serde_json::{Map, Number, Value};
 use zeroize::Zeroizing;
@@ -95,6 +95,22 @@ pub fn create_mnemonic_record(
     Ok((record, generated.mnemonic))
 }
 
+pub fn verify_passcode(record: &WalletRecord, passcode: &str) -> Result<(), String> {
+    let envelope = record
+        .secret
+        .as_ref()
+        .ok_or_else(|| "watch-only wallet has no signing material".to_owned())?;
+    let key = derive_verified_unlock_key(
+        &ProtectionRegistry::new(),
+        envelope,
+        passcode,
+        &record.address,
+    )
+    .map_err(|_| "invalid Fresnica passcode".to_owned())?;
+    drop(key);
+    Ok(())
+}
+
 pub fn reveal_record(
     record: &WalletRecord,
     passcode: &str,
@@ -146,6 +162,11 @@ mod tests {
         assert_eq!(record.address, PUBLIC);
         assert_eq!(record.wallet_type, "secret");
         assert!(!record.secret.as_ref().unwrap().to_string().contains(SECRET));
+        verify_passcode(&record, "passcode").unwrap();
+        assert_eq!(
+            verify_passcode(&record, "different").unwrap_err(),
+            "invalid Fresnica passcode"
+        );
 
         match reveal_record(&record, "passcode").unwrap() {
             ExportedSigningMaterial::Secret { secret } => assert_eq!(secret.as_str(), SECRET),
