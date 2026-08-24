@@ -5,9 +5,9 @@ It is the second concrete Core client after the Python reference/TUI bridge.
 
 ## Current scope
 
-The native client currently covers local wallet lifecycle and contacts, read-only
-Horizon queries, reviewed payments, issued-asset trustline lifecycle, and Classic
-SDEX read/write/history operations:
+The native client currently covers local wallet lifecycle and contacts, testnet
+Friendbot funding, read-only Horizon queries, reviewed payments, issued-asset
+trustline lifecycle, and Classic SDEX read/write/history operations:
 
 - `info [--wallet NAME]`
 - `account [--wallet NAME] [--json]`
@@ -35,6 +35,7 @@ SDEX read/write/history operations:
 - `wallet import-secret NAME`
 - `wallet import-mnemonic NAME`
 - `wallet import-watch NAME G...`
+- `wallet testnet-fund [--wallet NAME]` (`wallet fund` is an alias)
 - `wallet reveal [NAME]`
 - `wallet backup NAME PATH`
 - `wallet restore PATH [--name NAME]`
@@ -54,6 +55,10 @@ Contacts are client-local public metadata. Contact names are resolved before
 payment construction, an explicit `--memo` takes precedence over a contact's
 default memo, and transaction review always shows the resolved G address even
 when the user entered an alias.
+
+Friendbot is a testnet-only client utility. It funds the selected testnet address
+directly through `friendbot.stellar.org` with a 15-second request timeout and does
+not require signing material, so watch-only testnet wallets are valid targets.
 
 Account state, balances, recent operations, SDEX reads, transaction preparation
 and Horizon submission are client responsibilities. The CLI talks directly to
@@ -118,6 +123,7 @@ For example:
 
 ```sh
 clients/rust-cli/target/release/fresnica wallet list
+clients/rust-cli/target/release/fresnica --network testnet wallet testnet-fund
 clients/rust-cli/target/release/fresnica account
 clients/rust-cli/target/release/fresnica balance
 clients/rust-cli/target/release/fresnica history --limit 20
