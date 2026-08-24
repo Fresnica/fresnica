@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
+import fresnica.cli.commands.tui as tui_command
 import fresnica.cli.main as cli_main
-import fresnica.tui.app as tui_app
+import fresnica.tui.system_app as system_app
 
 
 def test_network_only_invocation_enters_tui_with_requested_context(monkeypatch):
@@ -12,8 +15,41 @@ def test_network_only_invocation_enters_tui_with_requested_context(monkeypatch):
             created.append(network)
 
     monkeypatch.setattr(cli_main, "Runtime", FakeRuntime)
-    monkeypatch.setattr(tui_app, "run_tui", lambda runtime: launched.append(runtime))
+    monkeypatch.setattr(tui_command, "run", lambda runtime: launched.append(runtime))
 
     assert cli_main.main(["--network", "testnet"]) == 0
     assert created == ["testnet"]
     assert launched[0].network == "testnet"
+
+
+def test_default_invocation_uses_core_labelled_tui_launcher(monkeypatch):
+    runtime = SimpleNamespace(core_client=object())
+    launched = []
+    monkeypatch.setattr(tui_command, "run", lambda value: launched.append(value))
+
+    assert cli_main.main([], runtime=runtime) == 0
+    assert launched == [runtime]
+    assert tui_command.core_subtitle(runtime) == "Stellar Wallet · Rust Core"
+    assert (
+        tui_command.core_subtitle(SimpleNamespace(core_client=None))
+        == "Stellar Wallet · Python Reference"
+    )
+
+
+def test_tui_launcher_applies_backend_subtitle_to_app(monkeypatch):
+    created = []
+
+    class FakeApp:
+        def __init__(self, runtime):
+            self.runtime = runtime
+            self.sub_title = "Stellar Wallet"
+            created.append(self)
+
+        def run(self):
+            return "ran"
+
+    monkeypatch.setattr(system_app, "FresnicaApp", FakeApp)
+    runtime = SimpleNamespace(core_client=object())
+
+    assert tui_command.run(runtime) == "ran"
+    assert created[0].sub_title == "Stellar Wallet · Rust Core"

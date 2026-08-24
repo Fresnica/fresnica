@@ -24,7 +24,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
 
     if command == "import-secret":
         secret = secret_input("Stellar secret (S...): ")
-        password = _new_password(secret_input)
+        password = _app_passcode(manager, secret_input)
         record = manager.import_secret(
             args.name,
             secret,
@@ -39,7 +39,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         mnemonic_passphrase = secret_input(
             "BIP39 passphrase (optional; leave empty if none): "
         )
-        password = _new_password(secret_input)
+        password = _app_passcode(manager, secret_input)
         record = manager.import_mnemonic(
             args.name,
             mnemonic,
@@ -56,7 +56,7 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
         mnemonic_passphrase = secret_input(
             "BIP39 passphrase (optional; leave empty if none): "
         )
-        password = _new_password(secret_input)
+        password = _app_passcode(manager, secret_input)
         record, mnemonic = manager.create_mnemonic(
             args.name,
             password,
@@ -72,14 +72,21 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
     if command == "backup":
         path = manager.backup(args.name, args.path, overwrite=args.force)
         renderer.success(
-            f'Encrypted backup for "{args.name}" written to {path}; wallet password is unchanged'
+            f'Encrypted backup for "{args.name}" written to {path}; Fresnica passcode is unchanged'
         )
         return path
 
     if command == "restore":
-        record = manager.restore_backup(args.path, name=args.name)
+        password = None
+        if manager.has_app_passcode():
+            password = _existing_app_passcode(secret_input)
+        record = manager.restore_backup(
+            args.path,
+            name=args.name,
+            wallet_password=password,
+        )
         renderer.success(
-            f'Restored wallet "{record.name}" [{record.network}]; unlock with its original wallet password'
+            f'Restored wallet "{record.name}" [{record.network}]; unlock with the Fresnica passcode'
         )
         return record
 
@@ -101,11 +108,24 @@ def execute_wallet(runtime, args, renderer, input_fn=input, secret_input=getpass
     raise ValueError(f"Unknown wallet command: {command}")
 
 
-def _new_password(secret_input) -> str:
-    password = secret_input("New wallet password: ")
-    confirmation = secret_input("Confirm wallet password: ")
-    if password != confirmation:
-        raise ValueError("Wallet passwords do not match")
+def _app_passcode(manager, secret_input) -> str:
+    if manager.has_app_passcode():
+        return _existing_app_passcode(secret_input)
+    return _new_app_passcode(secret_input)
+
+
+def _existing_app_passcode(secret_input) -> str:
+    password = secret_input("Fresnica passcode: ")
     if not password:
-        raise ValueError("Wallet password cannot be empty")
+        raise ValueError("Fresnica passcode cannot be empty")
+    return password
+
+
+def _new_app_passcode(secret_input) -> str:
+    password = secret_input("Create Fresnica passcode: ")
+    confirmation = secret_input("Confirm Fresnica passcode: ")
+    if password != confirmation:
+        raise ValueError("Fresnica passcodes do not match")
+    if not password:
+        raise ValueError("Fresnica passcode cannot be empty")
     return password

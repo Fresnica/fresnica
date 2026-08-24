@@ -8,22 +8,24 @@ from .parser import parse_args
 from .rich_renderer import RichRenderer
 
 
+def _run_tui(runtime):
+    from .commands.tui import run
+
+    return run(runtime)
+
+
 def main(argv=None, runtime=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if not argv:
-        from ..tui.app import run_tui
-
-        run_tui(runtime or Runtime())
+        _run_tui(runtime or Runtime())
         return 0
 
     args = parse_args(argv)
     runtime = runtime or Runtime(network=args.network)
 
     if args.command is None:
-        from ..tui.app import run_tui
-
-        run_tui(runtime)
+        _run_tui(runtime)
         return 0
 
     renderer = RichRenderer()

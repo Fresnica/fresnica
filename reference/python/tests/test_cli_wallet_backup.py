@@ -55,4 +55,4 @@ def test_cli_backup_and_restore_round_trip_without_secret_prompt(tmp_path):
     assert restored.network == "testnet"
     assert manager.get_record("copy").address == restored.address
     assert "Encrypted backup" in renderer.messages[0]
-    assert "original wallet password" in renderer.messages[1]
+    assert "Fresnica passcode" in renderer.messages[1]

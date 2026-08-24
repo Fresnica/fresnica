@@ -475,8 +475,8 @@ def test_wallet_management_can_create_wallet_and_show_backup_once():
             app.screen.query_one("#name", Input).value = "gamma"
             app.screen.query_one("#network", Select).value = "testnet"
             app.screen.query_one("#strength", Select).value = "128"
-            app.screen.query_one("#password", Input).value = "gamma-pw"
-            app.screen.query_one("#password-confirm", Input).value = "gamma-pw"
+            app.screen.query_one("#password", Input).value = "pw"
+            app.screen.query_one("#password-confirm", Input).value = "pw"
             await pilot.click("#create")
             await _settle(pilot, 20)
 
