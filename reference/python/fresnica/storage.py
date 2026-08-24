@@ -26,6 +26,17 @@ class WalletRecord:
     signer_kind: str | None = None
     signer_public_key: str | None = None
 
+    def __post_init__(self) -> None:
+        # Pre-release compatibility for records and direct constructor calls from
+        # before signer identity was separated from account identity.
+        if (
+            self.signer_kind is None
+            and self.wallet_type != "watch-only"
+            and self.secret is not None
+        ):
+            self.signer_kind = "protected-software"
+            self.signer_public_key = self.signer_public_key or self.address
+
     @property
     def watch_only(self) -> bool:
         return self.signer_kind is None
