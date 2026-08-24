@@ -62,23 +62,24 @@ Implemented in the Python reference and increasingly ported to the native Rust C
 - Android four-ABI Rust package + generated Kotlin package
 - Apple device/simulator Rust package + generated Swift/FFI XCFramework
 - Native platform packaging CI/artifacts
+- Per-signer user-auth-bound `WalletUnlockKey` storage on Android and Apple
+- Core-backed native software-signer enrollment and biometric signing coordinators
+- Thin React Native protected-signing bridge with no unlock-key exposure to JavaScript
 
 ### Current
 
-- Per-signer user-auth-bound `WalletUnlockKey` storage on Android and Apple
-- Thin React Native native modules over generated Swift/Kotlin APIs
-- Native-only routine signing orchestration so unlock-key bytes never reach JavaScript
+- Xaman-derived mobile host integration for the `FresnicaCore` React Native module
+- Fresnica AccountRecord / SignerRecord persistence in the mobile Realm/client layer
+- Watch-only account lifecycle using signer attachment rather than account/private-key coupling
 
 ### Next
 
-1. Finish Android/Apple system-auth storage and compile it in native CI.
-2. Add thin `FresnicaCoreModule` React Native adapters to the Xaman-derived application shape.
-3. Wire `derive_unlock_key -> native secure storage -> biometric sign_transaction_xdr` without exposing unlock-key bytes to React Native.
-4. Integrate Xaman-derived account/signer persistence without reusing Xaman secret cryptography.
-5. Add watch-only upgrade/downgrade and staged app-passcode rotation mobile flows.
-6. Add explicit mobile Reveal / Export handling.
-7. Add a first real hardware signer transport using the existing external Ed25519 prepare/apply API.
-8. Continue desktop client work against the same Core/mobile-neutral facade where applicable.
+1. Integrate Fresnica AccountRecord / SignerRecord persistence without reusing Xaman secret cryptography.
+2. Add mobile watch-only upgrade/downgrade while preserving stable account identity and metadata.
+3. Add staged/atomic app-passcode rotation across all protected software signers.
+4. Add explicit mobile Reveal / Export handling with a fresh app passcode.
+5. Add a first real hardware signer transport using the existing external Ed25519 prepare/apply API.
+6. Continue desktop client work against the same Core/mobile-neutral facade where applicable.
 
 ## Phase 4 - Mobile Product Integration
 

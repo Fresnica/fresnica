@@ -3,6 +3,7 @@ package com.fresnica.core.reactnative
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.UserNotAuthenticatedException
 import android.util.Base64
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -34,8 +35,11 @@ class FresnicaCoreModule(
 
     @ReactMethod
     fun canEnrollSystemAuth(promise: Promise) {
-        val activity = currentFragmentActivity()
-        promise.resolve(activity != null)
+        val available =
+            currentFragmentActivity() != null &&
+                BiometricManager.from(reactApplicationContext)
+                    .canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+        promise.resolve(available)
     }
 
     @ReactMethod

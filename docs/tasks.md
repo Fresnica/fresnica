@@ -100,9 +100,9 @@
 - [x] Native platform packaging CI/artifacts
 - [x] Android auth-per-use AES-GCM WalletUnlockKey storage primitive
 - [x] Apple `ThisDeviceOnly + biometryCurrentSet` WalletUnlockKey storage primitive
-- [ ] Wire Keychain/Keystore enrollment to Core `derive_unlock_key`
-- [ ] Add React Native native-module adapter
-- [ ] Native-only biometric `sign_transaction_xdr` orchestration
+- [x] Wire Keychain/Keystore enrollment to Core `derive_unlock_key`
+- [x] Add React Native native-module adapter
+- [x] Native-only biometric `sign_transaction_xdr` orchestration
 - [ ] Mobile watch-only upgrade/downgrade lifecycle
 - [ ] Mobile staged/atomic app-passcode rotation
 - [ ] Explicit mobile Reveal / Export flow
@@ -118,3 +118,4 @@
 - [x] Host Swift/Kotlin UniFFI generation gate
 - [x] Android/Apple native package build gate
 - [x] Android/Apple system-auth support compile gate
+- [x] Android/Apple React Native protected-signing bridge build gate

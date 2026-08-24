@@ -38,7 +38,7 @@ public final class FresnicaCoreModule: NSObject {
                 expectedSignerPublicKey: expectedSignerPublicKey
             )))
         } catch {
-            reject(error, with: reject)
+            rejectNativeError(error, with: reject)
         }
     }
 
@@ -52,7 +52,7 @@ public final class FresnicaCoreModule: NSObject {
             try authorization.removeSystemAuth(expectedSignerPublicKey: expectedSignerPublicKey)
             resolve(true)
         } catch {
-            reject(error, with: reject)
+            rejectNativeError(error, with: reject)
         }
     }
 
@@ -72,7 +72,7 @@ public final class FresnicaCoreModule: NSObject {
             )
             resolve(true)
         } catch {
-            reject(error, with: reject)
+            rejectNativeError(error, with: reject)
         }
     }
 
@@ -101,7 +101,7 @@ public final class FresnicaCoreModule: NSObject {
             defer { wipe(&signed) }
             resolve(signed.base64EncodedString())
         } catch {
-            reject(error, with: reject)
+            rejectNativeError(error, with: reject)
         }
     }
 
@@ -130,7 +130,7 @@ public final class FresnicaCoreModule: NSObject {
             defer { wipe(&signed) }
             resolve(signed.base64EncodedString())
         } catch {
-            reject(error, with: reject)
+            rejectNativeError(error, with: reject)
         }
     }
 
@@ -146,7 +146,7 @@ public final class FresnicaCoreModule: NSObject {
         reject("invalid-input", message, error)
     }
 
-    private func reject(
+    private func rejectNativeError(
         _ error: Swift.Error,
         with block: FresnicaPromiseRejectBlock
     ) {
