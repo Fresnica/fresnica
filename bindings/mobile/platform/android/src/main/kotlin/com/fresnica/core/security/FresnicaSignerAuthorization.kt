@@ -92,20 +92,23 @@ class FresnicaSignerAuthorization(
      */
     fun finishSystemAuthSign(session: SigningSession): ByteArray {
         session.consume()
-        val unlockKey = keyStore.finishUnlock(session.storeSession)
         try {
-            require(unlockKey.size == WalletUnlockKeyStore.UNLOCK_KEY_BYTES) {
-                "Stored WalletUnlockKey has an invalid length"
+            val unlockKey = keyStore.finishUnlock(session.storeSession)
+            try {
+                require(unlockKey.size == WalletUnlockKeyStore.UNLOCK_KEY_BYTES) {
+                    "Stored WalletUnlockKey has an invalid length"
+                }
+                return core.signTransactionXdr(
+                    session.envelopeJson,
+                    unlockKey,
+                    session.expectedSignerPublicKey,
+                    session.transactionXdr,
+                    session.networkPassphrase,
+                )
+            } finally {
+                unlockKey.fill(0)
             }
-            return core.signTransactionXdr(
-                session.envelopeJson,
-                unlockKey,
-                session.expectedSignerPublicKey,
-                session.transactionXdr,
-                session.networkPassphrase,
-            )
         } finally {
-            unlockKey.fill(0)
             session.clearTransaction()
         }
     }
