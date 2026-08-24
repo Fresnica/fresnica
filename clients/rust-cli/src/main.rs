@@ -30,7 +30,9 @@ Wallet commands:
   delete NAME
 
 The native client links Fresnica Rust Core directly. It uses the same wallet files
-and version-1 encrypted backup format as the Python reference client.
+and version-1 encrypted backup format as the Python reference client. All local
+software wallets share one Fresnica passcode while retaining independent Core
+salt/nonce-derived encryption keys.
 "#;
 
 fn main() {
@@ -126,7 +128,11 @@ fn command_info(storage: &WalletStorage, arguments: &[String]) -> Result<(), Str
     println!("Type:       {}", record.wallet_type);
     println!(
         "Protection: {}",
-        if record.watch_only() { "none" } else { "password envelope v1" }
+        if record.watch_only() {
+            "none"
+        } else {
+            "Fresnica passcode envelope v1"
+        }
     );
     println!(
         "Default:    {}",
@@ -197,7 +203,7 @@ fn wallet_list(storage: &WalletStorage) -> Result<(), String> {
 fn wallet_create(storage: &WalletStorage, network: &str, arguments: &[String]) -> Result<(), String> {
     let (name, options) = parse_mnemonic_options(arguments, true)?;
     let mnemonic_passphrase = prompt_hidden("BIP39 passphrase (optional; leave empty if none): ")?;
-    let passcode = prompt_new_passcode()?;
+    let passcode = prompt_app_passcode(storage)?;
     let (record, mnemonic) = wallet_ops::create_mnemonic_record(
         name,
         network,
@@ -217,7 +223,7 @@ fn wallet_create(storage: &WalletStorage, network: &str, arguments: &[String]) -
 
 fn wallet_import_secret(storage: &WalletStorage, network: &str, name: &str) -> Result<(), String> {
     let secret = prompt_hidden("Stellar secret (S...): ")?;
-    let passcode = prompt_new_passcode()?;
+    let passcode = prompt_app_passcode(storage)?;
     let record = wallet_ops::import_secret_record(name, network, &secret, &passcode)?;
     save_new_record(storage, &record)?;
     println!("Imported wallet \"{}\"", record.name);
@@ -233,7 +239,7 @@ fn wallet_import_mnemonic(
     let (name, options) = parse_mnemonic_options(arguments, false)?;
     let mnemonic = prompt_hidden("Mnemonic phrase: ")?;
     let mnemonic_passphrase = prompt_hidden("BIP39 passphrase (optional; leave empty if none): ")?;
-    let passcode = prompt_new_passcode()?;
+    let passcode = prompt_app_passcode(storage)?;
     let record = wallet_ops::import_mnemonic_record(
         name,
         network,
@@ -341,9 +347,14 @@ fn wallet_restore(storage: &WalletStorage, arguments: &[String]) -> Result<(), S
         }
         record.name = arguments[2].clone();
     }
+    if !record.watch_only() && has_app_passcode(storage)? {
+        let passcode = prompt_existing_app_passcode(storage)?;
+        wallet_ops::verify_passcode(&record, &passcode)
+            .map_err(|_| "backup does not use the current Fresnica passcode".to_owned())?;
+    }
     save_new_record(storage, &record)?;
     println!(
-        "Restored wallet \"{}\" [{}]; unlock with its original Fresnica passcode",
+        "Restored wallet \"{}\" [{}]; unlock with the Fresnica passcode",
         record.name, record.network
     );
     Ok(())
@@ -379,6 +390,42 @@ fn save_new_record(storage: &WalletStorage, record: &WalletRecord) -> Result<(),
         storage.set_default(&record.name)?;
     }
     Ok(())
+}
+
+fn signing_records(storage: &WalletStorage) -> Result<Vec<WalletRecord>, String> {
+    Ok(storage
+        .list()?
+        .into_iter()
+        .filter(|record| !record.watch_only() && record.secret.is_some())
+        .collect())
+}
+
+fn has_app_passcode(storage: &WalletStorage) -> Result<bool, String> {
+    Ok(!signing_records(storage)?.is_empty())
+}
+
+fn verify_app_passcode(storage: &WalletStorage, passcode: &str) -> Result<(), String> {
+    for record in signing_records(storage)? {
+        wallet_ops::verify_passcode(&record, passcode)?;
+    }
+    Ok(())
+}
+
+fn prompt_app_passcode(storage: &WalletStorage) -> Result<Zeroizing<String>, String> {
+    if has_app_passcode(storage)? {
+        prompt_existing_app_passcode(storage)
+    } else {
+        prompt_new_passcode()
+    }
+}
+
+fn prompt_existing_app_passcode(storage: &WalletStorage) -> Result<Zeroizing<String>, String> {
+    let passcode = prompt_hidden("Fresnica passcode: ")?;
+    if passcode.is_empty() {
+        return Err("Fresnica passcode cannot be empty".to_owned());
+    }
+    verify_app_passcode(storage, &passcode)?;
+    Ok(passcode)
 }
 
 struct MnemonicOptions {
@@ -455,7 +502,7 @@ fn prompt_hidden(prompt: &str) -> Result<Zeroizing<String>, String> {
 }
 
 fn prompt_new_passcode() -> Result<Zeroizing<String>, String> {
-    let passcode = prompt_hidden("New Fresnica passcode: ")?;
+    let passcode = prompt_hidden("Create Fresnica passcode: ")?;
     let confirmation = prompt_hidden("Confirm Fresnica passcode: ")?;
     if passcode.is_empty() {
         return Err("Fresnica passcode cannot be empty".to_owned());
@@ -476,7 +523,8 @@ fn validate_network(network: &str) -> Result<(), String> {
 
 fn default_home() -> Result<PathBuf, String> {
     if let Some(home) = env::var_os("FRESNICA_HOME") {
-        return Ok(PathBuf::from(home));
+        let home = home.to_string_lossy();
+        return expand_path(&home);
     }
     let base = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
