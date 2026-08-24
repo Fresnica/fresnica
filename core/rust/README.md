@@ -12,13 +12,16 @@ Implemented production primitives currently include:
 - Contract account identities (`C...`) without contract runtime assumptions
 - SEP-0005 deterministic Classic public-key derivation
 - Classic Ed25519 software signer
+- External Ed25519 transaction signer for hardware, device, or process-backed providers
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
 
 Transaction building, network submission, storage, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
 
 ## Signing boundary
 
-Classic transaction signing deliberately accepts an exact 32-byte Stellar transaction hash. It is not an arbitrary-message signing API.
+Classic transaction signing signs an exact 32-byte Stellar transaction hash. `TransactionSigningRequest` also carries the current raw envelope XDR and network passphrase so an external signer can inspect public transaction context before approving a signature; those fields are review context, not an alternate payload to sign.
+
+External signers hold only the declared Stellar public key and a provider callback. Fresnica verifies the provider's returned Ed25519 signature against the exact transaction hash before mutating the envelope. Private signing material remains outside Fresnica for hardware/device/process-backed signers.
 
 Arbitrary message signing is reserved as a separate future capability following **SEP-53 (Sign and Verify Messages)**. That extension must preserve SEP-53 domain separation (`Stellar Signed Message:\n`) rather than widening the transaction-signing method to accept arbitrary bytes.
 
