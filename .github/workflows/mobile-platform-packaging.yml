@@ -35,9 +35,11 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build Android package
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
-        run: bash bindings/mobile/scripts/build-android.sh
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          test -d "$ANDROID_NDK_HOME"
+          bash bindings/mobile/scripts/build-android.sh
       - name: Validate Android package
         run: |
           for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
