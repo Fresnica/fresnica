@@ -102,8 +102,11 @@ pub fn authorize_agent_transaction(
             return Err(AgentAccessError::UnsupportedEnvelope)
         }
     };
-    let tx = &envelope.tx;
+    if !envelope.signatures.is_empty() {
+        return Err(AgentAccessError::PreexistingSignatures);
+    }
 
+    let tx = &envelope.tx;
     if muxed_account_public_key(&tx.source_account) != capability.public_key {
         return Err(AgentAccessError::TransactionSourceNotAllowed);
     }
@@ -197,8 +200,10 @@ pub enum AgentAccessError {
     NetworkNotAllowed,
     #[error("agent capability has expired")]
     CapabilityExpired,
-    #[error("agent access currently supports Classic V1 transaction envelopes only")]
+    #[error("agent access currently supports unsigned Classic V1 transaction envelopes only")]
     UnsupportedEnvelope,
+    #[error("agent access does not accept transactions that already contain signatures")]
+    PreexistingSignatures,
     #[error("transaction source account is outside the agent capability")]
     TransactionSourceNotAllowed,
     #[error("transaction fee {fee} exceeds agent capability limit {max_fee}")]
@@ -224,7 +229,9 @@ pub enum AgentAccessError {
 mod tests {
     use super::*;
     use crate::{parse_transaction_envelope_xdr, SoftwareSigner};
-    use stellar_xdr::{BumpSequenceOp, Operation, OperationBody, SequenceNumber};
+    use stellar_xdr::{
+        BumpSequenceOp, Operation, OperationBody, SequenceNumber, Uint256,
+    };
 
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
@@ -249,13 +256,14 @@ mod tests {
         let TransactionEnvelope::Tx(value) = &mut envelope else {
             panic!("test vector must be V1")
         };
-        let operations = vec![Operation {
+        value.tx.operations = vec![Operation {
             source_account: None,
             body: OperationBody::BumpSequence(BumpSequenceOp {
                 bump_to: SequenceNumber(2),
             }),
-        }];
-        value.tx.operations = operations.try_into().unwrap();
+        }]
+        .try_into()
+        .unwrap();
         envelope
     }
 
@@ -337,12 +345,24 @@ mod tests {
         };
         let other = PublicKey::from_string(OTHER_PUBLIC).unwrap();
         let mut operations: Vec<_> = value.tx.operations.clone().into();
-        operations[0].source_account = Some(MuxedAccount::Ed25519(other.0.into()));
+        operations[0].source_account = Some(MuxedAccount::Ed25519(Uint256(other.0)));
         value.tx.operations = operations.try_into().unwrap();
 
         assert!(matches!(
             authorize_agent_transaction(&capability(), &envelope, TESTNET, 1_000),
             Err(AgentAccessError::OperationSourceNotAllowed { index: 0 })
+        ));
+    }
+
+    #[test]
+    fn rejects_preexisting_signatures() {
+        let mut envelope = one_operation_envelope();
+        let signer = SoftwareSigner::from_secret(SECRET).unwrap();
+        sign_transaction_envelope(&mut envelope, TESTNET, &signer).unwrap();
+
+        assert!(matches!(
+            authorize_agent_transaction(&capability(), &envelope, TESTNET, 1_000),
+            Err(AgentAccessError::PreexistingSignatures)
         ));
     }
 
@@ -363,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_operation_and_unsupported_envelope() {
+    fn rejects_zero_operation_transaction() {
         let envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
         assert!(matches!(
             authorize_agent_transaction(&capability(), &envelope, TESTNET, 1_000),
