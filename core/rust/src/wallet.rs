@@ -47,7 +47,7 @@ fn derive_key(
     let seed = Zeroizing::new(mnemonic.to_seed(passphrase));
 
     DerivedEd25519Key::derive_path(
-        &seed,
+        &seed[..],
         &format!("m/{STELLAR_PURPOSE}'/{STELLAR_COIN_TYPE}'/{index}'"),
     )
     .map_err(|_| WalletDerivationError::InvalidIndex)
