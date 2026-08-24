@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from stellar_sdk import Keypair
+from stellar_sdk import Keypair, TransactionEnvelope
 from stellar_sdk.decorated_signature import DecoratedSignature
 from stellar_sdk.exceptions import BadSignatureError
 
@@ -45,6 +45,35 @@ class StellarKeypairSigner(Signer):
 
     def sign(self, transaction):
         transaction.sign(self.keypair)
+        return transaction
+
+
+class RustCoreProtectedSigner(Signer):
+    """Software signer whose protected secret is opened only inside Rust Core."""
+
+    def __init__(self, public_key: str, core_client, envelope: dict, unlock_key):
+        self._public_key = Keypair.from_public_key(public_key).public_key
+        self.core_client = core_client
+        self.envelope = envelope
+        self.unlock_key = unlock_key
+
+    @property
+    def public_key(self) -> str:
+        return self._public_key
+
+    def sign(self, transaction):
+        signed_xdr = self.core_client.sign_transaction(
+            self.envelope,
+            self.unlock_key,
+            self.public_key,
+            transaction.to_xdr(),
+            transaction.network_passphrase,
+        )
+        signed = TransactionEnvelope.from_xdr(
+            signed_xdr,
+            transaction.network_passphrase,
+        )
+        transaction.signatures = signed.signatures
         return transaction
 
 
