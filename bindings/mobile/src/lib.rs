@@ -17,7 +17,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 uniffi::setup_scaffolding!();
 
-pub const MOBILE_BINDING_API_VERSION: u64 = 1;
+pub const MOBILE_BINDING_API_VERSION: u64 = 2;
 
 /// Stateless mobile entry point.
 ///
@@ -375,13 +375,13 @@ impl MobileCoreErrorCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Error)]
 #[serde(tag = "code", rename_all = "kebab-case")]
 pub enum MobileCoreError {
-    InvalidInput { message: String },
-    InvalidPasscode { message: String },
-    InvalidUnlockKey { message: String },
-    InvalidProtectedData { message: String },
-    IdentityMismatch { message: String },
-    InvalidTransaction { message: String },
-    CoreError { message: String },
+    InvalidInput { detail: String },
+    InvalidPasscode { detail: String },
+    InvalidUnlockKey { detail: String },
+    InvalidProtectedData { detail: String },
+    IdentityMismatch { detail: String },
+    InvalidTransaction { detail: String },
+    CoreError { detail: String },
 }
 
 impl MobileCoreError {
@@ -399,26 +399,26 @@ impl MobileCoreError {
 
     pub fn message(&self) -> &str {
         match self {
-            Self::InvalidInput { message }
-            | Self::InvalidPasscode { message }
-            | Self::InvalidUnlockKey { message }
-            | Self::InvalidProtectedData { message }
-            | Self::IdentityMismatch { message }
-            | Self::InvalidTransaction { message }
-            | Self::CoreError { message } => message,
+            Self::InvalidInput { detail }
+            | Self::InvalidPasscode { detail }
+            | Self::InvalidUnlockKey { detail }
+            | Self::InvalidProtectedData { detail }
+            | Self::IdentityMismatch { detail }
+            | Self::InvalidTransaction { detail }
+            | Self::CoreError { detail } => detail,
         }
     }
 
     fn new(code: MobileCoreErrorCode, message: impl Into<String>) -> Self {
-        let message = message.into();
+        let detail = message.into();
         match code {
-            MobileCoreErrorCode::InvalidInput => Self::InvalidInput { message },
-            MobileCoreErrorCode::InvalidPasscode => Self::InvalidPasscode { message },
-            MobileCoreErrorCode::InvalidUnlockKey => Self::InvalidUnlockKey { message },
-            MobileCoreErrorCode::InvalidProtectedData => Self::InvalidProtectedData { message },
-            MobileCoreErrorCode::IdentityMismatch => Self::IdentityMismatch { message },
-            MobileCoreErrorCode::InvalidTransaction => Self::InvalidTransaction { message },
-            MobileCoreErrorCode::CoreError => Self::CoreError { message },
+            MobileCoreErrorCode::InvalidInput => Self::InvalidInput { detail },
+            MobileCoreErrorCode::InvalidPasscode => Self::InvalidPasscode { detail },
+            MobileCoreErrorCode::InvalidUnlockKey => Self::InvalidUnlockKey { detail },
+            MobileCoreErrorCode::InvalidProtectedData => Self::InvalidProtectedData { detail },
+            MobileCoreErrorCode::IdentityMismatch => Self::IdentityMismatch { detail },
+            MobileCoreErrorCode::InvalidTransaction => Self::InvalidTransaction { detail },
+            MobileCoreErrorCode::CoreError => Self::CoreError { detail },
         }
     }
 }

@@ -1,0 +1,80 @@
+name: Mobile native signing
+
+on:
+  push:
+    paths:
+      - "bindings/mobile/**"
+      - "core/rust/**"
+      - ".github/workflows/mobile-native-signing.yml"
+  pull_request:
+    paths:
+      - "bindings/mobile/**"
+      - "core/rust/**"
+      - ".github/workflows/mobile-native-signing.yml"
+
+jobs:
+  android-aar:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "26.1.10909125"
+      FRESNICA_ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 -print -quit)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;${ANDROID_NDK_VERSION}" "platforms;android-34"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build Rust Android package and generated Kotlin
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          bash bindings/mobile/scripts/build-android.sh
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.5.1"
+      - name: Build and lint Android AAR
+        run: |
+          gradle -p bindings/mobile/platform/android assembleRelease lintRelease --stacktrace
+      - name: Validate AAR contents
+        run: |
+          AAR="$(find bindings/mobile/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          test -s "$AAR"
+          unzip -l "$AAR" > /tmp/fresnica-aar.txt
+          grep -q 'classes.jar' /tmp/fresnica-aar.txt
+          for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
+            grep -q "jni/${abi}/libfresnica_mobile_core.so" /tmp/fresnica-aar.txt
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-mobile-android-aar
+          path: bindings/mobile/platform/android/build/outputs/aar/*release.aar
+          if-no-files-found: error
+
+  apple-coordinator:
+    runs-on: macos-14
+    env:
+      FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build generated Apple Core package
+        run: bash bindings/mobile/scripts/build-apple.sh
+      - name: Type-check generated Core plus native authorization service
+        run: |
+          SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator swiftc \
+            -target arm64-apple-ios13.4-simulator \
+            -sdk "$SDK" \
+            -I bindings/mobile/build/apple/headers \
+            -typecheck \
+            bindings/mobile/build/apple/generated-swift/FresnicaCore.swift \
+            bindings/mobile/platform/apple/FresnicaWalletUnlockKeyStore.swift \
+            bindings/mobile/platform/apple/FresnicaSignerAuthorization.swift
