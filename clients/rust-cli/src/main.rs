@@ -1,3 +1,5 @@
+mod horizon;
+mod read_commands;
 mod storage;
 mod wallet_ops;
 
@@ -15,7 +17,15 @@ const HELP: &str = r#"Fresnica native Rust CLI
 
 Usage:
   fresnica [--home PATH] [--network mainnet|testnet] info [--wallet NAME]
+  fresnica [--home PATH] [--network mainnet|testnet] account [--wallet NAME] [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] balance [--wallet NAME] [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] history [--wallet NAME] [--limit N] [--json]
   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
+
+Read-only network commands:
+  account                       Show current Horizon account state
+  balance                       Show current account balances and liabilities
+  history                       Show newest Horizon operations (default 20, max 200)
 
 Wallet commands:
   list
@@ -64,6 +74,11 @@ fn run() -> Result<(), String> {
     let storage = WalletStorage::new(&global.home)?;
     match global.command[0].as_str() {
         "info" => command_info(&storage, &global.command[1..]),
+        "account" => read_commands::command_account(&storage, &global.network, &global.command[1..]),
+        "balance" | "assets" => {
+            read_commands::command_balance(&storage, &global.network, &global.command[1..])
+        }
+        "history" => read_commands::command_history(&storage, &global.network, &global.command[1..]),
         "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }
