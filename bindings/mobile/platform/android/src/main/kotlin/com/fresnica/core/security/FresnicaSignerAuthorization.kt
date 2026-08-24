@@ -60,7 +60,9 @@ class FresnicaSignerAuthorization(
 
     /** Cancels a pending enrollment and removes its temporary AndroidKeyStore alias. */
     fun cancelSystemAuthEnrollment(session: EnrollmentSession) {
-        session.clearUnlockKey()
+        check(session.discardUnlockKey()) {
+            "Enrollment session has already been completed"
+        }
         keyStore.cancelEnrollment(session.storeSession)
     }
 
@@ -165,9 +167,11 @@ class FresnicaSignerAuthorization(
         }
 
         @Synchronized
-        internal fun clearUnlockKey() {
-            pendingUnlockKey?.fill(0)
+        internal fun discardUnlockKey(): Boolean {
+            val key = pendingUnlockKey ?: return false
+            key.fill(0)
             pendingUnlockKey = null
+            return true
         }
     }
 
