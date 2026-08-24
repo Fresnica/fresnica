@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+from stellar_sdk import Keypair
+
 from .errors import NetworkError, WalletError
 from .network import get_network
 from .storage import WalletRecord
@@ -87,9 +89,20 @@ def _validate_record(record: WalletRecord) -> None:
     if wallet.address() != record.address:
         raise WalletError("Invalid wallet backup: non-canonical Stellar address")
     if record.watch_only:
-        if record.secret is not None:
+        if record.secret is not None or record.signer_public_key is not None:
             raise WalletError("Invalid wallet backup: watch-only wallet contains signing material")
-    elif not isinstance(record.secret, dict):
-        raise WalletError("Invalid wallet backup: encrypted signing material is missing")
+    else:
+        if record.signer_kind != "protected-software":
+            raise WalletError("Invalid wallet backup: unsupported signer kind")
+        if not isinstance(record.secret, dict):
+            raise WalletError("Invalid wallet backup: encrypted signing material is missing")
+        if not isinstance(record.signer_public_key, str):
+            raise WalletError("Invalid wallet backup: signer public key is missing")
+        try:
+            canonical_signer = Keypair.from_public_key(record.signer_public_key).public_key
+        except (TypeError, ValueError) as exc:
+            raise WalletError("Invalid wallet backup: signer public key is invalid") from exc
+        if canonical_signer != record.signer_public_key:
+            raise WalletError("Invalid wallet backup: non-canonical signer public key")
     if not isinstance(record.metadata, dict):
         raise WalletError("Invalid wallet backup: metadata must be an object")

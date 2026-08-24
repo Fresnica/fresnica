@@ -5,6 +5,7 @@
 
 pub mod account;
 pub mod agent_access;
+pub mod client_api;
 pub mod protected_signer;
 pub mod protection;
 pub mod secret_store;
@@ -17,6 +18,11 @@ pub use account::{AccountError, AccountIdentity, AccountKind};
 pub use agent_access::{
     authorize_agent_transaction, sign_agent_transaction, AgentAccessError, AgentAuthorization,
     AgentCapability,
+};
+pub use client_api::{
+    ClientAccountIdentity, ClientAccountKind, ClientApiError, ClientApiErrorCode,
+    ClientEd25519SigningRequest, ClientGeneratedMnemonic, ClientProtectedSoftwareSigner,
+    CoreClientApi, CLIENT_API_VERSION,
 };
 pub use protected_signer::{
     derive_verified_unlock_key, export_signing_material, sign_protected_transaction_envelope,

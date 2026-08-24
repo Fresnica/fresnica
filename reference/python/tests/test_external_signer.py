@@ -109,7 +109,7 @@ def test_external_signer_rejects_duplicate_signature():
     assert len(envelope.signatures) == 1
 
 
-def test_wallet_rejects_signer_for_different_account():
+def test_wallet_allows_signer_identity_to_differ_from_account_identity():
     account_key = Keypair.random()
     signer_key = Keypair.random()
     signer = ExternalEd25519Signer(
@@ -117,8 +117,11 @@ def test_wallet_rejects_signer_for_different_account():
         lambda request: signer_key.sign(request.transaction_hash),
     )
 
-    with pytest.raises(ValueError, match="does not match"):
-        Wallet(
-            Account(0, account_key.public_key, account_key.public_key),
-            signer,
-        )
+    wallet = Wallet(
+        Account(0, account_key.public_key, account_key.public_key),
+        signer,
+    )
+
+    assert wallet.address() == account_key.public_key
+    assert wallet.signer_public_key() == signer_key.public_key
+    assert wallet.can_sign()

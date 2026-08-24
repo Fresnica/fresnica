@@ -1,7 +1,8 @@
 """Wallet metadata persistence.
 
-Public metadata (name, address, network) stays readable. Sensitive mnemonic or
-secret-key material is stored only as an authenticated encrypted envelope.
+Public account metadata stays readable. Local signer capability is represented
+separately from the account address. Sensitive mnemonic or secret-key material
+is stored only as an authenticated encrypted Core/reference envelope.
 """
 
 from abc import ABC, abstractmethod
@@ -22,20 +23,40 @@ class WalletRecord:
     network: str = "mainnet"
     secret: dict | None = None
     metadata: dict = field(default_factory=dict)
+    signer_kind: str | None = None
+    signer_public_key: str | None = None
+
+    def __post_init__(self) -> None:
+        # Pre-release compatibility for records and direct constructor calls from
+        # before signer identity was separated from account identity.
+        if (
+            self.signer_kind is None
+            and self.wallet_type != "watch-only"
+            and self.secret is not None
+        ):
+            self.signer_kind = "protected-software"
+            self.signer_public_key = self.signer_public_key or self.address
 
     @property
     def watch_only(self) -> bool:
-        return self.wallet_type == "watch-only"
+        return self.signer_kind is None
 
     @property
     def locked(self) -> bool:
-        return self.secret is not None
+        return self.signer_kind == "protected-software" and self.secret is not None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "WalletRecord":
+        # Pre-release compatibility for reference records created before signer
+        # identity was separated from account identity.
+        signer_kind = data.get("signer_kind")
+        signer_public_key = data.get("signer_public_key")
+        if signer_kind is None and data.get("wallet_type") != "watch-only" and data.get("secret") is not None:
+            signer_kind = "protected-software"
+            signer_public_key = signer_public_key or data["address"]
         return cls(
             name=data["name"],
             address=data["address"],
@@ -43,6 +64,8 @@ class WalletRecord:
             network=data.get("network", "mainnet"),
             secret=data.get("secret"),
             metadata=data.get("metadata") or {},
+            signer_kind=signer_kind,
+            signer_public_key=signer_public_key,
         )
 
 

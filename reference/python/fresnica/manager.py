@@ -18,7 +18,7 @@ from .protection import ProtectionCredential, ProtectionRegistry
 from .secret_store import WalletUnlockKey
 from .signer import RustCoreProtectedSigner
 from .storage import WalletRecord, WalletStorage
-from .wallet import Wallet
+from .wallet import Account, Wallet
 from .wallet_backup import read_wallet_backup, write_wallet_backup
 
 
@@ -88,27 +88,27 @@ class WalletManager:
         return WalletCapabilities(
             state=state,
             can_send=state is not WalletState.WATCH_ONLY,
-            can_unlock=state is WalletState.LOCKED,
+            can_unlock=state is WalletState.LOCKED and record.signer_kind == "protected-software",
             can_lock=state is WalletState.UNLOCKED,
             can_fund_testnet=record.network == "testnet",
         )
 
     def protection_kind(self, name: str | None = None) -> str | None:
         record = self.get_record(name)
-        if record.watch_only or record.secret is None:
+        if record.signer_kind != "protected-software" or record.secret is None:
             return None
         return self.protection_registry.kind_for(record.secret)
 
     def has_app_passcode(self) -> bool:
         return any(
-            not record.watch_only and record.secret is not None
+            record.signer_kind == "protected-software" and record.secret is not None
             for record in self.storage.list()
         )
 
     def validate_app_passcode(self, wallet_password: str) -> None:
-        """Require one Fresnica passcode for every local software wallet."""
+        """Require one Fresnica passcode for every local protected software signer."""
         for record in self.storage.list():
-            if record.watch_only or record.secret is None:
+            if record.signer_kind != "protected-software" or record.secret is None:
                 continue
             try:
                 self._derive_record_unlock_key(record, wallet_password)
@@ -123,10 +123,14 @@ class WalletManager:
         make_default: bool | None = None,
     ) -> WalletRecord:
         get_network(network)
-        wallet = Wallet.from_address(address)
+        if self.core_client is not None:
+            identity = self.core_client.parse_account(address)
+            account = Account.parse(identity.address)
+        else:
+            account = Account.parse(address)
         record = WalletRecord(
             name=name,
-            address=wallet.address(),
+            address=account.address,
             wallet_type="watch-only",
             network=network,
             metadata={"created_at": _now()},
@@ -164,19 +168,22 @@ class WalletManager:
         self.validate_app_passcode(password)
         if self.core_client is not None:
             protected = self.core_client.protect_secret(secret, password)
-            wallet = Wallet.from_address(protected.public_key)
+            signer_public_key = protected.signer_public_key
             envelope = protected.envelope
         else:
             wallet = Wallet.from_secret(secret)
+            signer_public_key = wallet.signer_public_key()
             envelope = self.protection_registry.protect(
                 {"kind": "secret", "secret": secret.strip()},
                 credential,
             )
         record = WalletRecord(
             name=name,
-            address=wallet.address(),
+            address=signer_public_key,
             wallet_type="secret",
             network=network,
+            signer_kind="protected-software",
+            signer_public_key=signer_public_key,
             secret=envelope,
             metadata={"created_at": _now()},
         )
@@ -231,7 +238,7 @@ class WalletManager:
                 index=index,
                 language=language_value,
             )
-            wallet = Wallet.from_address(protected.public_key)
+            signer_public_key = protected.signer_public_key
             envelope = protected.envelope
         else:
             wallet = Wallet.from_mnemonic(
@@ -240,6 +247,7 @@ class WalletManager:
                 index=index,
                 language=language,
             )
+            signer_public_key = wallet.signer_public_key()
             envelope = self.protection_registry.protect(
                 {
                     "kind": "mnemonic",
@@ -252,9 +260,11 @@ class WalletManager:
             )
         record = WalletRecord(
             name=name,
-            address=wallet.address(),
+            address=signer_public_key,
             wallet_type="mnemonic",
             network=network,
+            signer_kind="protected-software",
+            signer_public_key=signer_public_key,
             secret=envelope,
             metadata={
                 "created_at": _now(),
@@ -265,6 +275,120 @@ class WalletManager:
         self.storage.save(record)
         self._maybe_default(record.name, make_default)
         return record
+
+    def upgrade_watch_with_secret(
+        self,
+        name: str,
+        secret: str,
+        wallet_password: str,
+    ) -> WalletRecord:
+        record = self._watch_classic_record(name)
+        self.validate_app_passcode(wallet_password)
+        if self.core_client is not None:
+            protected = self.core_client.protect_secret(
+                secret,
+                wallet_password,
+                expected_signer_public_key=record.address,
+            )
+            envelope = protected.envelope
+            signer_public_key = protected.signer_public_key
+        else:
+            signer_wallet = Wallet.from_secret(secret)
+            signer_public_key = signer_wallet.signer_public_key()
+            if signer_public_key != record.address:
+                raise WalletLockedError("Signer identity does not match watch-only account")
+            envelope = self.protection_registry.protect(
+                {"kind": "secret", "secret": secret.strip()},
+                ProtectionCredential.password(wallet_password),
+            )
+        upgraded = replace(
+            record,
+            wallet_type="secret",
+            signer_kind="protected-software",
+            signer_public_key=signer_public_key,
+            secret=envelope,
+        )
+        self.storage.save(upgraded, overwrite=True)
+        return upgraded
+
+    def upgrade_watch_with_mnemonic(
+        self,
+        name: str,
+        mnemonic: str,
+        wallet_password: str,
+        mnemonic_passphrase: str = "",
+        index: int = 0,
+        language=None,
+    ) -> WalletRecord:
+        record = self._watch_classic_record(name)
+        self.validate_app_passcode(wallet_password)
+        if language is None:
+            language = detect_mnemonic_language(mnemonic)
+        language_value = getattr(language, "value", language)
+        if self.core_client is not None:
+            protected = self.core_client.protect_mnemonic(
+                mnemonic,
+                wallet_password,
+                mnemonic_passphrase=mnemonic_passphrase,
+                index=index,
+                language=language_value,
+                expected_signer_public_key=record.address,
+            )
+            envelope = protected.envelope
+            signer_public_key = protected.signer_public_key
+        else:
+            signer_wallet = Wallet.from_mnemonic(
+                mnemonic,
+                passphrase=mnemonic_passphrase,
+                index=index,
+                language=language,
+            )
+            signer_public_key = signer_wallet.signer_public_key()
+            if signer_public_key != record.address:
+                raise WalletLockedError("Signer identity does not match watch-only account")
+            envelope = self.protection_registry.protect(
+                {
+                    "kind": "mnemonic",
+                    "mnemonic": mnemonic.strip(),
+                    "mnemonic_passphrase": mnemonic_passphrase,
+                    "index": index,
+                    "language": language_value,
+                },
+                ProtectionCredential.password(wallet_password),
+            )
+        upgraded = replace(
+            record,
+            wallet_type="mnemonic",
+            signer_kind="protected-software",
+            signer_public_key=signer_public_key,
+            secret=envelope,
+            metadata={
+                **record.metadata,
+                "index": index,
+                "language": language_value,
+            },
+        )
+        self.storage.save(upgraded, overwrite=True)
+        return upgraded
+
+    def downgrade_to_watch(self, name: str) -> WalletRecord:
+        """Remove local signer capability while preserving the account record.
+
+        Caller/UI authorization policy is intentionally outside this reference
+        lifecycle method.
+        """
+        record = self.get_record(name)
+        downgraded = replace(
+            record,
+            wallet_type="watch-only",
+            signer_kind=None,
+            signer_public_key=None,
+            secret=None,
+        )
+        if self._session and self._session.record.name == name:
+            self.lock()
+        self.storage.save(downgraded, overwrite=True)
+        return downgraded
 
     def create_mnemonic(
         self,
@@ -326,9 +450,11 @@ class WalletManager:
         )
         record = WalletRecord(
             name=name,
-            address=generated.public_key,
+            address=generated.signer_public_key,
             wallet_type="mnemonic",
             network=network,
+            signer_kind="protected-software",
+            signer_public_key=generated.signer_public_key,
             secret=generated.envelope,
             metadata={
                 "created_at": _now(),
@@ -339,6 +465,45 @@ class WalletManager:
         self.storage.save(record)
         self._maybe_default(record.name, make_default)
         return record, generated.mnemonic
+
+    def reprotect_signer(
+        self,
+        name: str | None,
+        current_password: str,
+        new_password: str,
+    ) -> WalletRecord:
+        """Replace one protected signer envelope without declassifying its secret."""
+        record = self._signing_record(name)
+        if self.core_client is not None:
+            protected = self.core_client.reprotect(
+                record.secret,
+                current_password,
+                new_password,
+                record.signer_public_key,
+            )
+            envelope = protected.envelope
+            signer_public_key = protected.signer_public_key
+        else:
+            payload = self.protection_registry.unprotect(
+                record.secret,
+                ProtectionCredential.password(current_password),
+            )
+            signer_wallet = self._wallet_from_payload(payload)
+            self._verify_signer_identity(record, signer_wallet)
+            envelope = self.protection_registry.protect(
+                payload,
+                ProtectionCredential.password(new_password),
+            )
+            signer_public_key = signer_wallet.signer_public_key()
+        updated = replace(
+            record,
+            signer_public_key=signer_public_key,
+            secret=envelope,
+        )
+        self.storage.save(updated, overwrite=True)
+        if self._session and self._session.record.name == updated.name:
+            self.lock()
+        return updated
 
     def backup(self, name: str, path, overwrite: bool = False):
         """Back up the stored encrypted record without unlocking the wallet."""
@@ -399,7 +564,7 @@ class WalletManager:
             return self.core_client.derive_verified_unlock_key(
                 record.secret,
                 wallet_password,
-                record.address,
+                record.signer_public_key,
             )
 
         unlock_key = self.protection_registry.derive_unlock_key(
@@ -411,8 +576,8 @@ class WalletManager:
             )
         except InvalidUnlockKeyError as exc:
             raise InvalidPasswordError("Invalid wallet password") from exc
-        wallet = self._wallet_from_payload(payload)
-        self._verify_identity(record, wallet)
+        signer_wallet = self._wallet_from_payload(payload)
+        self._verify_signer_identity(record, signer_wallet)
         return unlock_key
 
     def unlock(self, name: str | None, wallet_password: str) -> WalletSession:
@@ -425,28 +590,27 @@ class WalletManager:
         unlock_key: WalletUnlockKey,
     ) -> WalletSession:
         record = self._signing_record(name)
+        account_wallet = Wallet.from_address(record.address)
         if self.core_client is not None:
             self.core_client.validate_unlock_key(
                 record.secret,
                 unlock_key,
-                record.address,
+                record.signer_public_key,
             )
             signer = RustCoreProtectedSigner(
-                record.address,
+                record.signer_public_key,
                 self.core_client,
                 record.secret,
                 unlock_key,
             )
-            wallet = Wallet.from_signer(
-                signer,
-                index=int(record.metadata.get("index", 0)),
-            )
+            wallet = account_wallet.with_signer(signer)
         else:
             payload = self.protection_registry.unprotect_with_unlock_key(
                 record.secret, unlock_key
             )
-            wallet = self._wallet_from_payload(payload)
-            self._verify_identity(record, wallet)
+            signer_wallet = self._wallet_from_payload(payload)
+            self._verify_signer_identity(record, signer_wallet)
+            wallet = account_wallet.with_signer(signer_wallet.signer)
         self._session = WalletSession(record, wallet)
         return self._session
 
@@ -466,14 +630,14 @@ class WalletManager:
             return self.core_client.reveal(
                 record.secret,
                 wallet_password,
-                record.address,
+                record.signer_public_key,
             )
         payload = self.protection_registry.unprotect(
             record.secret,
             ProtectionCredential.password(wallet_password),
         )
-        wallet = self._wallet_from_payload(payload)
-        self._verify_identity(record, wallet)
+        signer_wallet = self._wallet_from_payload(payload)
+        self._verify_signer_identity(record, signer_wallet)
         return payload
 
     def upgrade_legacy_protection(
@@ -487,7 +651,7 @@ class WalletManager:
         KDF remain byte-for-byte unchanged.
         """
         record = self.get_record(name)
-        if record.watch_only or record.secret is None:
+        if record.signer_kind != "protected-software" or record.secret is None:
             return record
         if not self.protection_registry.is_legacy_password(record.secret):
             return record
@@ -497,7 +661,7 @@ class WalletManager:
             self.core_client.derive_verified_unlock_key(
                 record.secret,
                 password,
-                record.address,
+                record.signer_public_key,
             )
         else:
             self.protection_registry.unprotect(record.secret, credential)
@@ -531,9 +695,20 @@ class WalletManager:
     def _signing_record(self, name: str | None) -> WalletRecord:
         record = self.get_record(name)
         if record.watch_only:
-            raise WatchOnlyError("Watch-only wallet cannot be unlocked for signing")
-        if record.secret is None:
+            raise WatchOnlyError("Watch-only wallet has no local signer")
+        if record.signer_kind != "protected-software":
+            raise WalletLockedError("Signer is not a protected software signer")
+        if record.secret is None or record.signer_public_key is None:
             raise WalletLockedError("Wallet has no protected signing material")
+        return record
+
+    def _watch_classic_record(self, name: str) -> WalletRecord:
+        record = self.get_record(name)
+        if not record.watch_only:
+            raise WalletError("Wallet already has a local signer")
+        account = Account.parse(record.address)
+        if not account.is_classic:
+            raise WalletError("Direct secret/mnemonic upgrade requires a classic G account")
         return record
 
     @staticmethod
@@ -551,9 +726,9 @@ class WalletManager:
         raise WalletLockedError("Unsupported wallet signing material")
 
     @staticmethod
-    def _verify_identity(record: WalletRecord, wallet: Wallet) -> None:
-        if wallet.address() != record.address:
-            raise WalletLockedError("Decrypted wallet identity does not match metadata")
+    def _verify_signer_identity(record: WalletRecord, signer_wallet: Wallet) -> None:
+        if signer_wallet.signer_public_key() != record.signer_public_key:
+            raise WalletLockedError("Decrypted signer identity does not match metadata")
 
     @staticmethod
     def _password_from_credential(credential: ProtectionCredential) -> str:

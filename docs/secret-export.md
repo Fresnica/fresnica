@@ -2,7 +2,7 @@
 
 Status: **accepted pre-release security contract**.
 
-Fresnica normally keeps software-wallet signing material inside Rust Core. Signing, transaction authorization, and normal wallet use must not require returning a mnemonic or private key to the mobile JavaScript runtime.
+Fresnica normally keeps protected software-signer material inside Rust Core. Signing, transaction authorization, and normal wallet use must not require returning a mnemonic or private key to the mobile JavaScript runtime.
 
 A user may nevertheless need the original signing material for migration, backup verification, or moving to another wallet. Fresnica therefore supports an explicit **Reveal / Export** operation as a controlled declassification boundary.
 
@@ -13,9 +13,9 @@ Normal signing and secret export are different security operations.
 ```text
 Normal signing
 -------------
-protected envelope
+protected signer envelope
       |
-Core unlocks + validates identity + signs
+Core unlocks + validates signer identity + signs
       |
 signature / signed XDR
 
@@ -25,7 +25,7 @@ user explicitly requests Reveal / Export
       |
 mandatory fresh Fresnica app-passcode entry
       |
-Core decrypts + validates identity
+Core decrypts + validates signer identity
       |
 original secret material crosses the Core boundary temporarily
       |
@@ -36,9 +36,9 @@ System authentication by itself is not sufficient to reveal signing material. A 
 
 ## What may be exported
 
-Core returns the original recoverable signing material represented by the protected wallet payload.
+Core returns the original recoverable signing material represented by the protected software-signer payload.
 
-### Mnemonic-backed wallet
+### Mnemonic-backed signer
 
 Export may return:
 
@@ -47,13 +47,13 @@ Export may return:
 - derivation index;
 - mnemonic language metadata.
 
-The mnemonic must be returned exactly as stored. Derivation metadata must be sufficient to reconstruct the same account.
+The mnemonic must be returned exactly as stored. Derivation metadata must be sufficient to reconstruct the same signer public key.
 
-### Secret-key-backed wallet
+### Secret-key-backed signer
 
 Export may return the original Stellar `S...` secret.
 
-A Stellar secret key cannot be converted back into an original mnemonic. If a wallet was imported from `S...` and no mnemonic was stored, Fresnica must not imply that a mnemonic can later be recovered.
+A Stellar secret key cannot be converted back into an original mnemonic. If a signer was imported from `S...` and no mnemonic was stored, Fresnica must not imply that a mnemonic can later be recovered.
 
 ### External / hardware / remote signer
 
@@ -63,15 +63,17 @@ Fresnica cannot export secret material that it never possessed. Hardware, extern
 
 Before returning any signing material, Rust Core MUST:
 
-1. require password-based wallet authentication rather than system-auth-only authorization;
-2. decrypt the canonical protected wallet envelope;
+1. require password-based software-signer authentication rather than system-auth-only authorization;
+2. decrypt the canonical protected signer envelope;
 3. parse the signing-material type;
 4. construct or derive the corresponding signer;
-5. verify that the resulting public key matches the expected public wallet metadata;
+5. verify that the resulting public key matches `expected_signer_public_key`;
 6. fail closed on unsupported, corrupted, or identity-mismatched material;
-7. return only the signing material belonging to the validated wallet.
+7. return only the signing material belonging to the validated signer.
 
-The identity check is mandatory even though the user supplied the passcode. It prevents corrupted or substituted encrypted material from being presented as belonging to another wallet.
+The identity check is mandatory even though the user supplied the passcode. It prevents corrupted or substituted encrypted material from being presented as belonging to another signer/account record.
+
+Account identity and signer identity are separate. For an ordinary master-key wallet the two `G...` values match; for Stellar additional/multisig signers they may differ. Reveal validates the signer represented by the envelope, not ledger authorization for a particular account.
 
 ## Mobile handling rules
 
@@ -87,7 +89,7 @@ Mobile MUST NOT:
 
 Mobile SHOULD:
 
-- clearly warn that anyone seeing the material can control the wallet;
+- clearly warn that anyone seeing the material can invoke that signer wherever it is authorized;
 - require an explicit user action before copying or sharing;
 - keep the reveal screen short-lived;
 - clear native buffers and UI state as soon as practical when leaving the flow;
@@ -97,19 +99,19 @@ JavaScript strings cannot be reliably zeroized. The preferred long-term mobile i
 
 ## API boundary
 
-Core should expose secret export separately from signer unlock and transaction signing.
+Core exposes secret export separately from signer unlock, re-protection, and transaction signing.
 
 Conceptually:
 
 ```text
 export_signing_material(
-    protected_envelope,
+    protected_signer_envelope,
     app_passcode,
-    expected_public_key,
+    expected_signer_public_key,
 ) -> ExportedSigningMaterial
 ```
 
-The export API must not be reused by normal transaction signing. Normal signing should continue to use a one-shot operation that unlocks, validates, signs, and drops secret-bearing state without returning the private key.
+The export API must not be reused by normal transaction signing or passcode rotation. Normal signing uses `WalletUnlockKey`; passcode rotation uses dedicated Core `reprotect` so plaintext material does not cross the boundary.
 
 ## Relation to system authentication
 

@@ -8,7 +8,7 @@ Client implementations may differ by operating system. Rust Core must remain pla
 
 ## 1. Core principle
 
-Core receives cryptographic inputs. Clients handle operating-system policy.
+Core receives cryptographic inputs. Clients handle operating-system policy and product persistence.
 
 ```text
 Client / OS layer
@@ -17,46 +17,115 @@ UI
 system authentication
 secure storage
 session policy
-persistence
+account/signer persistence
         |
         | standard Core inputs
         v
 Rust Core
 ---------
-wallet envelope semantics
+account identity parsing
+protected software-signer envelope semantics
 Scrypt / AES-GCM
 unlock-key verification
-identity validation
-signer construction
+signer identity validation
 transaction signing
-secret export
+secret export / re-protection
+external-signature verification
 ```
 
 Core MUST NOT know whether authorization came from Face ID, Touch ID, Windows Hello, Android biometrics, a desktop keyring, PAM, or another OS facility.
 
-## 2. Two software-wallet credentials
+## 2. Account identity and signer capability are separate
 
-The software-wallet boundary deliberately distinguishes two inputs.
+A wallet account is the chain identity the user observes. A signer is one capability that may authorize transactions for an account.
+
+These are deliberately not the same object.
+
+```text
+AccountRecord
+  identity: G... or C...
+  metadata: name, network, UI state, ...
+
+SignerRecord
+  signer_public_key: G...
+  kind: protected-software | hardware | external | future
+  signer-specific data
+```
+
+A watch-only account is therefore an account with no locally available signer. It does not contain an empty envelope and does not require a passcode, mnemonic, secret key, or `WalletUnlockKey`.
+
+For a simple software wallet, the account and signer public keys are normally the same `G...` value. This is only the simplest case. Stellar additional signers and multisig allow an account to be authorized by other Ed25519 public keys, so Core APIs MUST name signer identity explicitly and MUST NOT assume that the signer public key equals the transaction source account.
+
+A `C...` contract address is an account/contract identity, not an Ed25519 signer public key. Supplying an `S...` key or mnemonic does not by itself prove ownership of a contract address. Contract/passkey authorization is a separate future capability.
+
+Core owns Stellar address parsing and canonical identity classification. Clients may pre-check for UI purposes but MUST NOT reproduce authoritative `G...` / `C...` semantics.
+
+## 3. Watch-only upgrade and downgrade
+
+Adding signing capability to an existing watch-only classic account is an attachment operation, not creation of a second account.
+
+```text
+existing account GABC... + no local signer
+        |
+user supplies S... or mnemonic
+        |
+Core derives signer public key
+        |
+Core verifies expected_signer_public_key == GABC...
+        |
+protected software-signer envelope
+```
+
+If the derived signer does not match the expected signer identity, Core returns `identity-mismatch` and no signer is attached.
+
+For an ordinary master-key account upgrade, `expected_signer_public_key` is the existing account `G...`. For future delegated/multisig attachment, it is the specific signer key the client intends to attach; it need not equal the account address.
+
+Downgrading a local software wallet to watch-only is primarily a client persistence operation: after explicit user authorization, the client removes the signer reference, protected envelope, and any stored system-auth unlock key while preserving the account record and public history/cache state. No cryptographic Core operation is required to manufacture a watch-only envelope.
+
+## 4. Protected software signer
+
+The canonical encrypted object protects software **signing material**, not the account record itself.
+
+The public Client/Core type is therefore conceptually:
+
+```text
+ProtectedSoftwareSigner
+  signer_public_key
+  envelope
+```
+
+The envelope may contain either an imported `S...` secret or mnemonic recovery material. It is opaque to clients.
+
+Creating/importing a signer accepts an optional `expected_signer_public_key`:
+
+- absent: normal new signer import;
+- present: Core must verify the derived signer identity before returning the protected signer.
+
+This supports watch-only upgrade without making Mobile/CLI/Swift/JNI duplicate identity checks.
+
+## 5. Two software-signer credentials
+
+The software-signer boundary deliberately distinguishes two inputs.
 
 ### WalletUnlockKey: routine use
 
-`WalletUnlockKey` is the 32-byte Scrypt output for one canonical password-protected wallet envelope.
+`WalletUnlockKey` is the 32-byte Scrypt output for one canonical password-protected software-signer envelope.
 
 It may be stored behind client-controlled system authentication.
 
-Submitting a valid unlock key to Core permits routine secret-bearing operations such as constructing the software signer and signing a transaction. Core still decrypts the canonical envelope and verifies the expected wallet identity before signing.
+Submitting a valid unlock key to Core permits routine secret-bearing operations such as reconstructing the software signer and signing a transaction. Core still decrypts the canonical envelope and verifies the expected signer public key before signing.
 
 An unlock key MUST NOT authorize secret Reveal / Export.
 
-### App passcode: declassification and recovery
+### App passcode: declassification, recovery, and re-protection
 
-The Fresnica app passcode is the user-known recovery credential for the password-protected wallet envelope.
+The Fresnica app passcode is the user-known recovery credential for ordinary local software-signer envelopes.
 
-Submitting the passcode allows Core to derive the corresponding unlock key. It is also the required credential for explicit signing-material Reveal / Export.
+Submitting the passcode allows Core to derive the corresponding unlock key. A fresh passcode is also required for explicit signing-material Reveal / Export and for changing protection.
 
 Clients must request a fresh passcode for Reveal / Export; a previously released unlock key or system-authenticated session is insufficient.
 
-## 3. System-auth enrollment
+## 6. System-auth enrollment
 
 A client that wants convenient system authorization follows this flow:
 
@@ -68,10 +137,10 @@ Core derive_verified_unlock_key
   - derive Scrypt key
   - decrypt canonical envelope
   - reconstruct signer
-  - verify expected public key
+  - verify expected signer public key
         |
         v
-WalletUnlockKey
+WalletUnlockKey (32 bytes)
         |
         v
 Client stores/protects key using OS-specific mechanism
@@ -79,117 +148,143 @@ Client stores/protects key using OS-specific mechanism
 
 Core does not store the key for the client and does not invoke any OS API.
 
-The client MUST bind its stored unlock-key record to the intended wallet identity and canonical envelope/version so stale records can be invalidated safely.
+The client MUST bind its stored unlock-key record to the intended signer identity and current canonical envelope/version so stale records can be invalidated safely.
 
-## 4. Routine signing
+## 7. Routine signing
 
 ```text
-user requests transaction signing
+user requests transaction signing for an account
         |
-Client performs whatever local authorization policy it requires
+client selects an authorized local signer
         |
-Client obtains WalletUnlockKey
+client performs local authorization policy
+        |
+client obtains signer WalletUnlockKey
         |
         v
 Core sign_protected_transaction_envelope
-  - decrypt same canonical envelope
+  - decrypt signer envelope
   - reconstruct signer
-  - verify expected public key
+  - verify expected signer public key
   - sign exact transaction
   - drop secret-bearing signer
         |
         v
-signature / signed XDR
+signed XDR
 ```
 
 The client never needs the mnemonic or Stellar secret for normal signing.
 
-## 5. Passcode fallback
+Signer selection and the question "is this signer authorized for this account now?" may depend on current ledger state and product policy. Those account-level authorization relationships are not encoded into the software-signer envelope.
 
-If the OS authorization mechanism or secure-store record is unavailable, the wallet is still recoverable from the canonical envelope and Fresnica app passcode.
+## 8. Re-protection / passcode change
 
-For normal signing, a client may obtain a fresh verified unlock key from Core using the passcode and use that key for the one-shot signing call.
+Changing a passcode MUST NOT be implemented as client-side `reveal -> protect`, because that unnecessarily declassifies the mnemonic or secret across the Client/Core boundary.
 
-For Reveal / Export, the client passes the fresh passcode to the dedicated export API instead.
+Core provides a re-protection operation:
 
-## 6. Re-keying and invalidation
+```text
+reprotect(
+  envelope,
+  current_passcode,
+  new_passcode,
+  expected_signer_public_key,
+) -> new ProtectedSoftwareSigner
+```
 
-A `WalletUnlockKey` is bound to the exact password envelope because it is derived from the passcode and that envelope's Scrypt salt.
+Core decrypts internally, reconstructs and verifies the signer identity, then encrypts the same recovery material using fresh protection parameters. Plaintext signing material is never returned to the client.
 
-Changing the app passcode or re-encrypting the wallet with a new salt changes the unlock key.
+A new envelope normally has a new salt/nonce and therefore a new `WalletUnlockKey`. Clients MUST invalidate the previous system-auth unlock-key record and enroll the new verified key.
 
-Clients MUST invalidate any previously stored system-auth unlock key when the canonical envelope is replaced or re-keyed, then perform verified enrollment again.
+Changing one global Fresnica app passcode across multiple local signers remains client orchestration: call Core re-protection for each signer, stage the resulting envelopes, verify them, then atomically commit or roll back the client-side batch.
 
-## 7. Client responsibilities
+## 9. Reveal / Export
 
-Each client owns its own OS-specific implementation.
+Reveal / Export is a separate declassification operation.
 
-Examples:
+```text
+user explicitly requests Reveal / Export
+        |
+fresh Fresnica app passcode
+        |
+        v
+Core export_signing_material
+  - decrypt canonical signer envelope
+  - reconstruct signer
+  - verify expected signer public key
+        |
+        v
+original mnemonic / S... material
+```
 
-- a macOS TUI may use Keychain and LocalAuthentication;
-- a Windows CLI may use Windows Hello / platform credential facilities;
-- a Linux client may use Secret Service, a desktop keyring, PAM-backed policy, or another explicit local mechanism;
-- mobile may reuse Xaman-derived Keychain/Keystore and biometric infrastructure.
+A `WalletUnlockKey`, Face ID success, or an already-unlocked client session MUST NOT be sufficient to invoke this path.
 
-These adapters MUST remain outside Rust Core.
+## 10. External / hardware Ed25519 signers
 
-Clients are also responsible for:
+The unlock-key model applies only to local protected software signers.
+
+For hardware, secure-element, remote, or other external Ed25519 signers, Core should expose a transport-neutral two-step boundary rather than an FFI callback:
+
+```text
+prepare_ed25519_signing(transaction_xdr, network_passphrase)
+    -> transaction_hash + public signing context
+
+external provider signs transaction_hash
+
+apply_ed25519_signature(
+    transaction_xdr,
+    network_passphrase,
+    signer_public_key,
+    signature,
+) -> signed_xdr
+```
+
+Core recomputes the transaction hash and verifies the returned Ed25519 signature before mutating the envelope. The external provider never needs a `WalletUnlockKey` because Core never owns its private material.
+
+## 11. Client responsibilities
+
+Each client owns its OS-specific implementation and account/signer persistence.
+
+Clients are responsible for:
 
 - deciding when system authentication is required;
+- maintaining account metadata and account-to-signer references;
+- resolving current ledger authorization when multiple/additional signers are involved;
 - short-lived session policy;
-- storing the opaque Core envelope;
-- storing/protecting the unlock key;
+- storing opaque Core signer envelopes;
+- storing/protecting unlock keys;
 - deleting stale unlock-key records;
+- atomic persistence when rotating a global app passcode;
 - preventing unlock keys, passcodes, mnemonics, and secrets from logs/telemetry;
 - clearing temporary native buffers where practical.
 
-## 8. Core responsibilities
+## 12. Core responsibilities
 
 Rust Core is authoritative for:
 
-- canonical wallet envelope format;
+- Stellar account identity parsing/classification;
+- canonical software-signer envelope format;
 - Scrypt parameters and derivation;
 - `WalletUnlockKey` semantics;
-- AES-GCM decryption;
-- signing-material parsing;
-- expected-public-key validation;
+- AES-GCM encryption/decryption;
+- signing-material parsing and derivation;
+- expected signer-public-key validation;
 - one-shot protected signing;
+- internal re-protection without client-side declassification;
 - explicit passcode-based Reveal / Export;
+- external-signature preparation/verification primitives;
 - stable cryptographic error semantics.
 
-Core MUST NOT implement a `SystemProtectionProvider`, Keychain abstraction, biometric abstraction, or OS key-store abstraction.
+Core MUST NOT implement a `SystemProtectionProvider`, Keychain abstraction, biometric abstraction, OS key-store abstraction, Realm schema, or product UI policy.
 
-## 9. TUI/CLI as first real Core client
+## 13. TUI/CLI as first real Core client
 
-The Python implementation remains the behavioral reference for product semantics, but it can now also act as a real Rust Core client.
+The Python implementation remains the behavioral reference for product semantics, but it can also act as a real Rust Core client.
 
-When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is available on `PATH`, the Python TUI delegates software-wallet cryptographic operations to Rust Core:
+When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is available on `PATH`, the Python TUI delegates software-signer cryptographic operations to Rust Core.
 
-```text
-Python TUI
-  - UI / Horizon / DB / contacts / product orchestration
-        |
-        | stdin/stdout protocol v1
-        v
-fresnica-core Rust process
-  - protect/import/generate
-  - derive + validate WalletUnlockKey
-  - sign transaction
-  - reveal signing material
-```
-
-An unlocked Rust-backed Python wallet contains a Rust Core protected-signer adapter, not a Python private-key `Keypair`.
-
-The process protocol is the first verification transport, not a requirement for every future client. A native Rust CLI should link the Core crate directly. Mobile and desktop clients may use another native binding mechanism while preserving exactly the same Core operations and credential boundaries.
+The process protocol is the first verification transport, not a requirement for every future client. A native Rust CLI should link the Core crate directly. Mobile and desktop clients may use another native binding mechanism while preserving the same Core operations and credential boundaries.
 
 OS-specific system-auth work still belongs to the client that releases a `WalletUnlockKey`; it is not implemented in Core or in the machine protocol.
 
 See [`docs/core-client-protocol.md`](core-client-protocol.md).
-
-## 10. External and future signers
-
-The unlock-key model applies only to local software signers.
-
-For hardware, external, remote, secure-element, or future passkey/contract signers, the client may use the same OS authorization policy to permit signer invocation, but no `WalletUnlockKey` is required when Core never owns local secret material.
-
-The common abstraction is signer authorization; the 32-byte unlock key is specifically the software-wallet credential at the Client/Core boundary.
