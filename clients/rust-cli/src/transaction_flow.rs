@@ -1,4 +1,8 @@
+use std::cell::RefCell;
+use std::ffi::OsString;
+use std::fs;
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7,12 +11,15 @@ use fresnica_core::{
     derive_verified_unlock_key, sign_protected_transaction_envelope, transaction_envelope_xdr,
     transaction_hash, ProtectionRegistry,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stellar_xdr::{
     AccountId, Memo, MuxedAccount, Operation, OperationBody, Preconditions, PublicKey,
     SequenceNumber, StringM, TimeBounds, TimePoint, Transaction, TransactionEnvelope,
     TransactionExt, TransactionV1Envelope, VecM,
 };
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::horizon::{
     HorizonClient, SubmissionError, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
@@ -21,8 +28,16 @@ use crate::storage::{WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
 const TX_TIMEOUT_SECONDS: u64 = 30;
+const PENDING_TTL_SECONDS: i64 = 210;
 const MAINNET_PASSPHRASE: &str = "Public Global Stellar Network ; September 2015";
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
+thread_local! {
+    // All current write flows resolve their wallet through resolve_signing_wallet
+    // before signing. Retaining the invocation home here lets the shared submit
+    // path persist recovery state without threading storage through every command.
+    static ACTIVE_CLIENT_HOME: RefCell<Option<PathBuf>> = RefCell::new(None);
+}
 
 pub fn network_client(network: &str) -> Result<HorizonClient, String> {
     Ok(HorizonClient::new(match network {
@@ -47,6 +62,10 @@ pub fn resolve_signing_wallet(
     if record.watch_only() || record.secret.is_none() {
         return Err(format!("wallet \"{}\" is watch-only", record.name));
     }
+
+    set_active_client_home(storage.home());
+    PendingTransactionStore::for_home(storage.home())
+        .reconcile_and_ensure_clear(network, &record.address)?;
     Ok(record)
 }
 
@@ -186,10 +205,265 @@ pub fn sign_and_submit(
         Err(SubmissionError::Rejected(message)) => {
             Err(format!("Transaction rejected ({tx_hash_hex}): {message}"))
         }
-        Err(SubmissionError::Uncertain(message)) => Err(format!(
-            "Transaction submission status is uncertain for {tx_hash_hex}: {message}. Check this transaction hash before retrying."
-        )),
+        Err(SubmissionError::Uncertain(message)) => {
+            let persist_result = active_client_home().and_then(|home| {
+                PendingTransactionStore::for_home(&home).remember(
+                    network,
+                    &record.address,
+                    &tx_hash_hex,
+                    "transaction",
+                )
+            });
+            match persist_result {
+                Ok(()) => Err(format!(
+                    "Transaction submission status is uncertain for {tx_hash_hex}: {message}. A pending record was saved; Fresnica will check this hash before allowing another write from the account."
+                )),
+                Err(persist_error) => Err(format!(
+                    "Transaction submission status is uncertain for {tx_hash_hex}: {message}. Fresnica could not persist pending-transaction protection: {persist_error}. Do not retry until you verify the transaction hash manually."
+                )),
+            }
+        }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct PendingTransaction {
+    network: String,
+    account: String,
+    tx_hash: String,
+    kind: String,
+    submitted_at: String,
+}
+
+struct PendingTransactionStore {
+    path: PathBuf,
+    ttl_seconds: i64,
+}
+
+impl PendingTransactionStore {
+    fn for_home(home: &Path) -> Self {
+        Self {
+            path: home.join("pending-transactions.json"),
+            ttl_seconds: PENDING_TTL_SECONDS,
+        }
+    }
+
+    fn remember(
+        &self,
+        network: &str,
+        account: &str,
+        tx_hash: &str,
+        kind: &str,
+    ) -> Result<(), String> {
+        let submitted_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .map_err(|error| format!("unable to format pending transaction time: {error}"))?;
+        self.put(PendingTransaction {
+            network: network.to_owned(),
+            account: account.to_owned(),
+            tx_hash: tx_hash.to_owned(),
+            kind: kind.to_owned(),
+            submitted_at,
+        })
+    }
+
+    fn reconcile_and_ensure_clear(&self, network: &str, account: &str) -> Result<(), String> {
+        self.reconcile_with(network, account, |tx_hash| {
+            lookup_transaction(network, tx_hash)
+        })
+    }
+
+    fn reconcile_with<F>(
+        &self,
+        network: &str,
+        account: &str,
+        mut lookup: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(&str) -> Result<Option<Value>, String>,
+    {
+        let items = self.load()?;
+        if !items
+            .iter()
+            .any(|item| item.network == network && item.account == account)
+        {
+            return Ok(());
+        }
+
+        let now = OffsetDateTime::now_utc();
+        let mut retained = Vec::with_capacity(items.len());
+        let mut pending_hash = None;
+        let mut changed = false;
+
+        for item in items {
+            if item.network != network || item.account != account {
+                retained.push(item);
+                continue;
+            }
+
+            match lookup(&item.tx_hash)? {
+                Some(_) => changed = true,
+                None if pending_age_seconds(&item, now) >= self.ttl_seconds => changed = true,
+                None => {
+                    if pending_hash.is_none() {
+                        pending_hash = Some(item.tx_hash.clone());
+                    }
+                    retained.push(item);
+                }
+            }
+        }
+
+        if changed {
+            self.save(&retained)?;
+        }
+        if let Some(tx_hash) = pending_hash {
+            return Err(format!(
+                "A previous transaction is still pending confirmation: {tx_hash}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn put(&self, pending: PendingTransaction) -> Result<(), String> {
+        validate_pending(&pending)?;
+        let mut items = self.load()?;
+        items.retain(|item| {
+            !(item.network == pending.network
+                && item.account == pending.account
+                && item.tx_hash == pending.tx_hash)
+        });
+        items.push(pending);
+        self.save(&items)
+    }
+
+    fn load(&self) -> Result<Vec<PendingTransaction>, String> {
+        if !self.path.exists() {
+            return Ok(Vec::new());
+        }
+        let text = fs::read_to_string(&self.path).map_err(|error| {
+            format!(
+                "Unable to read pending transaction state {}: {error}",
+                self.path.display()
+            )
+        })?;
+        let items: Vec<PendingTransaction> = serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "Pending transaction state is malformed {}: {error}",
+                self.path.display()
+            )
+        })?;
+        for item in &items {
+            validate_pending(item)?;
+        }
+        Ok(items)
+    }
+
+    fn save(&self, items: &[PendingTransaction]) -> Result<(), String> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Unable to create pending transaction directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        let text = serde_json::to_string_pretty(items)
+            .map_err(|error| format!("Unable to encode pending transaction state: {error}"))?
+            + "\n";
+        let mut temporary_name: OsString = self.path.as_os_str().to_owned();
+        temporary_name.push(".tmp");
+        let temporary = PathBuf::from(temporary_name);
+        let result = (|| {
+            fs::write(&temporary, &text).map_err(|error| {
+                format!(
+                    "Unable to persist pending transaction state {}: {error}",
+                    temporary.display()
+                )
+            })?;
+            #[cfg(windows)]
+            if self.path.exists() {
+                fs::remove_file(&self.path).map_err(|error| {
+                    format!(
+                        "Unable to replace pending transaction state {}: {error}",
+                        self.path.display()
+                    )
+                })?;
+            }
+            fs::rename(&temporary, &self.path).map_err(|error| {
+                format!(
+                    "Unable to replace pending transaction state {}: {error}",
+                    self.path.display()
+                )
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+}
+
+fn lookup_transaction(network: &str, tx_hash: &str) -> Result<Option<Value>, String> {
+    let base_url = match network {
+        "mainnet" => MAINNET_HORIZON_URL,
+        "testnet" => TESTNET_HORIZON_URL,
+        other => return Err(format!("unknown network: {other}")),
+    };
+    let url = format!("{base_url}/transactions/{tx_hash}");
+    let mut response = match ureq::get(&url).call() {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(404)) => return Ok(None),
+        Err(ureq::Error::StatusCode(code)) => {
+            return Err(format!("Horizon returned HTTP {code} for {url}"))
+        }
+        Err(error) => return Err(format!("Unable to contact Horizon at {url}: {error}")),
+    };
+    response
+        .body_mut()
+        .read_json::<Value>()
+        .map(Some)
+        .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
+}
+
+fn validate_pending(item: &PendingTransaction) -> Result<(), String> {
+    if [
+        item.network.as_str(),
+        item.account.as_str(),
+        item.tx_hash.as_str(),
+        item.kind.as_str(),
+        item.submitted_at.as_str(),
+    ]
+    .iter()
+    .any(|value| value.trim().is_empty())
+    {
+        return Err(
+            "Pending transaction state is malformed: fields must be non-empty strings".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn pending_age_seconds(pending: &PendingTransaction, now: OffsetDateTime) -> i64 {
+    let Ok(submitted) = OffsetDateTime::parse(&pending.submitted_at, &Rfc3339) else {
+        return i64::MAX;
+    };
+    (now - submitted).whole_seconds().max(0)
+}
+
+fn set_active_client_home(home: &Path) {
+    ACTIVE_CLIENT_HOME.with(|value| {
+        *value.borrow_mut() = Some(home.to_path_buf());
+    });
+}
+
+fn active_client_home() -> Result<PathBuf, String> {
+    ACTIVE_CLIENT_HOME.with(|value| {
+        value
+            .borrow()
+            .clone()
+            .ok_or_else(|| "client home is unavailable for pending transaction recovery".to_owned())
+    })
 }
 
 pub fn account_sequence(account: &Value) -> Result<i64, String> {
@@ -310,8 +584,18 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use time::Duration;
 
     const SOURCE: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+    fn pending_store(label: &str) -> PendingTransactionStore {
+        let nonce = OffsetDateTime::now_utc().unix_timestamp_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "fresnica-pending-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        PendingTransactionStore::for_home(&home)
+    }
 
     #[test]
     fn exact_stroop_parser_rejects_rounding() {
@@ -339,5 +623,87 @@ mod tests {
         assert_eq!(envelope.tx.fee, 200);
         assert_eq!(envelope.tx.operations.len(), 2);
         assert_eq!(envelope.tx.seq_num, SequenceNumber(8));
+    }
+
+    #[test]
+    fn pending_store_persists_public_metadata_only() {
+        let store = pending_store("metadata");
+        store
+            .remember("testnet", "GACCOUNT", "abc123", "transaction")
+            .unwrap();
+        let text = fs::read_to_string(&store.path).unwrap();
+        let raw: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(raw[0]["network"], "testnet");
+        assert_eq!(raw[0]["account"], "GACCOUNT");
+        assert_eq!(raw[0]["tx_hash"], "abc123");
+        assert_eq!(raw[0]["kind"], "transaction");
+        assert!(!text.to_ascii_lowercase().contains("secret"));
+        assert!(!text.to_ascii_lowercase().contains("xdr"));
+    }
+
+    #[test]
+    fn recent_not_found_pending_transaction_blocks_retry() {
+        let store = pending_store("pending");
+        store
+            .remember("testnet", "GACCOUNT", "abc123", "transaction")
+            .unwrap();
+        let error = store
+            .reconcile_with("testnet", "GACCOUNT", |_| Ok(None))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "A previous transaction is still pending confirmation: abc123"
+        );
+        assert_eq!(store.load().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn confirmed_pending_transaction_is_removed() {
+        let store = pending_store("confirmed");
+        store
+            .remember("testnet", "GACCOUNT", "abc123", "transaction")
+            .unwrap();
+        store
+            .reconcile_with("testnet", "GACCOUNT", |tx_hash| {
+                Ok(Some(serde_json::json!({"hash": tx_hash})))
+            })
+            .unwrap();
+        assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn old_not_found_pending_transaction_expires() {
+        let store = pending_store("expired");
+        let submitted_at = (OffsetDateTime::now_utc() - Duration::minutes(10))
+            .format(&Rfc3339)
+            .unwrap();
+        store
+            .put(PendingTransaction {
+                network: "testnet".to_owned(),
+                account: "GACCOUNT".to_owned(),
+                tx_hash: "abc123".to_owned(),
+                kind: "transaction".to_owned(),
+                submitted_at,
+            })
+            .unwrap();
+        store
+            .reconcile_with("testnet", "GACCOUNT", |_| Ok(None))
+            .unwrap();
+        assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pending_lookup_failure_keeps_record() {
+        let store = pending_store("lookup-error");
+        store
+            .remember("testnet", "GACCOUNT", "abc123", "transaction")
+            .unwrap();
+        assert_eq!(
+            store
+                .reconcile_with("testnet", "GACCOUNT", |_| Err("offline".to_owned()))
+                .unwrap_err(),
+            "offline"
+        );
+        assert_eq!(store.load().unwrap().len(), 1);
     }
 }
