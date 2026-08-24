@@ -152,6 +152,40 @@ def test_wallet_manager_session_uses_rust_signer_without_python_private_key(core
     assert transaction.to_xdr() == vector["signed_xdr_base64"]
 
 
+def test_verified_unlock_key_can_reopen_and_sign_without_passcode(core_client):
+    vector = _vector()
+    manager = WalletManager(MemoryWalletStorage(), core_client=core_client)
+    record = manager.import_secret("system-path", vector["secret"], "passcode")
+    unlock_key = manager.derive_verified_unlock_key(record.name, "passcode")
+
+    manager.lock()
+    session = manager.unlock_with_key(record.name, unlock_key)
+    assert isinstance(session.wallet.signer, RustCoreProtectedSigner)
+
+    transaction = TransactionEnvelope.from_xdr(
+        vector["unsigned_xdr_base64"],
+        vector["network_passphrase"],
+    )
+    session.wallet.sign(transaction)
+    assert transaction.to_xdr() == vector["signed_xdr_base64"]
+
+
+def test_encrypted_backup_restores_with_passcode_only(core_client, tmp_path):
+    vector = _vector()
+    original = WalletManager(MemoryWalletStorage(), core_client=core_client)
+    record = original.import_secret("backup", vector["secret"], "passcode")
+    backup_path = tmp_path / "wallet-backup.json"
+    original.backup(record.name, backup_path)
+
+    restored = WalletManager(MemoryWalletStorage(), core_client=core_client)
+    restored_record = restored.restore_backup(backup_path, make_default=True)
+    session = restored.unlock(restored_record.name, "passcode")
+
+    assert restored_record.address == vector["public_key"]
+    assert isinstance(session.wallet.signer, RustCoreProtectedSigner)
+    assert not hasattr(session.wallet.signer, "keypair")
+
+
 def test_generated_mnemonic_is_rust_owned_and_revealable(core_client):
     manager = WalletManager(MemoryWalletStorage(), core_client=core_client)
     record, mnemonic = manager.create_mnemonic(
