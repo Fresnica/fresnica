@@ -44,7 +44,7 @@
     },
     {
       "name": "chinese-simplified-12-words-index-0",
-      "language": "chinese-simplified",
+      "language": "chinese_simplified",
       "mnemonic": "这 的 的 的 的 的 的 的 的 的 的 人",
       "passphrase": "",
       "index": 0,
@@ -52,7 +52,7 @@
     },
     {
       "name": "chinese-traditional-12-words-index-0",
-      "language": "chinese-traditional",
+      "language": "chinese_traditional",
       "mnemonic": "這 的 的 的 的 的 的 的 的 的 的 人",
       "passphrase": "",
       "index": 0,
