@@ -3,6 +3,18 @@ use serde_json::Value;
 pub const MAINNET_HORIZON_URL: &str = "https://horizon.stellar.org";
 pub const TESTNET_HORIZON_URL: &str = "https://horizon-testnet.stellar.org";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerParameters {
+    pub base_fee_in_stroops: u32,
+    pub base_reserve_in_stroops: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmissionError {
+    Rejected(String),
+    Uncertain(String),
+}
+
 pub struct HorizonClient {
     base_url: String,
 }
@@ -21,6 +33,18 @@ impl HorizonClient {
         )
     }
 
+    pub fn account_exists(&self, address: &str) -> Result<bool, String> {
+        let url = format!("{}/accounts/{address}", self.base_url);
+        match ureq::get(&url).call() {
+            Ok(_) => Ok(true),
+            Err(ureq::Error::StatusCode(404)) => Ok(false),
+            Err(ureq::Error::StatusCode(code)) => {
+                Err(format!("Horizon returned HTTP {code} for {url}"))
+            }
+            Err(error) => Err(format!("Unable to contact Horizon at {url}: {error}")),
+        }
+    }
+
     pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
         let response = self.get_json(
             &format!("/accounts/{address}/operations?order=desc&limit={limit}"),
@@ -32,6 +56,58 @@ impl HorizonClient {
             .and_then(Value::as_array)
             .cloned()
             .ok_or_else(|| "Horizon returned malformed operation data".to_owned())
+    }
+
+    pub fn get_ledger_parameters(&self) -> Result<LedgerParameters, String> {
+        let response = self.get_json(
+            "/ledgers?order=desc&limit=1",
+            "Horizon returned no ledger data",
+        )?;
+        let ledger = response
+            .get("_embedded")
+            .and_then(|value| value.get("records"))
+            .and_then(Value::as_array)
+            .and_then(|records| records.first())
+            .ok_or_else(|| "Horizon returned no ledger data".to_owned())?;
+        let base_fee = integer(ledger.get("base_fee_in_stroops"))
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| "Horizon returned invalid base fee".to_owned())?;
+        let base_reserve = integer(ledger.get("base_reserve_in_stroops"))
+            .ok_or_else(|| "Horizon returned invalid base reserve".to_owned())?;
+        if base_reserve < 0 {
+            return Err("Horizon returned invalid base reserve".to_owned());
+        }
+        Ok(LedgerParameters {
+            base_fee_in_stroops: base_fee,
+            base_reserve_in_stroops: base_reserve,
+        })
+    }
+
+    pub fn submit_transaction(&self, transaction_xdr: &str) -> Result<Value, SubmissionError> {
+        let url = format!("{}/transactions", self.base_url);
+        let mut response = match ureq::post(&url).send_form([("tx", transaction_xdr)]) {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(code)) if code < 500 => {
+                return Err(SubmissionError::Rejected(format!(
+                    "Horizon rejected the transaction with HTTP {code}"
+                )))
+            }
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(SubmissionError::Uncertain(format!(
+                    "Horizon returned HTTP {code} while submitting"
+                )))
+            }
+            Err(error) => {
+                return Err(SubmissionError::Uncertain(format!(
+                    "Unable to contact Horizon while submitting: {error}"
+                )))
+            }
+        };
+        response.body_mut().read_json::<Value>().map_err(|error| {
+            SubmissionError::Uncertain(format!(
+                "Horizon returned invalid submission JSON: {error}"
+            ))
+        })
     }
 
     fn get_json(&self, path: &str, not_found: &str) -> Result<Value, String> {
@@ -209,6 +285,14 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
+fn integer(value: Option<&Value>) -> Option<i64> {
+    match value? {
+        Value::Number(value) => value.as_i64(),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
 fn short_address(value: &str) -> String {
     if value.len() <= 16 {
         return value.to_owned();
@@ -231,16 +315,16 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
-    fn mock_server(expected_target: &'static str, status: u16, body: &'static str) -> String {
+    fn mock_server(expected_method: &'static str, expected_target: &'static str, status: u16, body: &'static str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0u8; 4096];
+            let mut request = [0u8; 8192];
             let size = stream.read(&mut request).unwrap();
             let request = String::from_utf8_lossy(&request[..size]);
             assert!(
-                request.starts_with(&format!("GET {expected_target} HTTP/1.1")),
+                request.starts_with(&format!("{expected_method} {expected_target} HTTP/1.1")),
                 "unexpected request: {request}"
             );
             let reason = if status == 200 { "OK" } else { "Not Found" };
@@ -257,7 +341,7 @@ mod tests {
     #[test]
     fn account_and_balance_helpers_use_horizon_shape() {
         let body = r#"{"account_id":"GTEST","balances":[{"asset_type":"native","balance":"12.5000000"},{"asset_type":"credit_alphanum4","asset_code":"USDC","asset_issuer":"GISSUER","balance":"7.0000000"}]}"#;
-        let base = mock_server("/accounts/GTEST", 200, body);
+        let base = mock_server("GET", "/accounts/GTEST", 200, body);
         let account = HorizonClient::new(&base).get_account("GTEST").unwrap();
         let balances = account["balances"].as_array().unwrap();
         assert_eq!(balance_asset_label(&balances[0]), "XLM");
@@ -268,6 +352,7 @@ mod tests {
     fn operations_are_requested_newest_first_with_limit() {
         let body = r#"{"_embedded":{"records":[{"type":"payment","amount":"1.0000000","asset_type":"native","from":"GSOURCE","to":"GACCOUNT"}]}}"#;
         let base = mock_server(
+            "GET",
             "/accounts/GACCOUNT/operations?order=desc&limit=2",
             200,
             body,
@@ -284,10 +369,37 @@ mod tests {
 
     #[test]
     fn account_404_is_distinct_from_transport_failure() {
-        let base = mock_server("/accounts/GNOTFOUND", 404, r#"{}"#);
+        let base = mock_server("GET", "/accounts/GNOTFOUND", 404, r#"{}"#);
         assert_eq!(
             HorizonClient::new(&base).get_account("GNOTFOUND").unwrap_err(),
             "Stellar account not found: GNOTFOUND"
         );
+    }
+
+    #[test]
+    fn account_exists_maps_404_to_false() {
+        let base = mock_server("GET", "/accounts/GNEW", 404, r#"{}"#);
+        assert!(!HorizonClient::new(&base).account_exists("GNEW").unwrap());
+    }
+
+    #[test]
+    fn ledger_parameters_match_horizon_fields() {
+        let body = r#"{"_embedded":{"records":[{"base_fee_in_stroops":100,"base_reserve_in_stroops":5000000}]}}"#;
+        let base = mock_server("GET", "/ledgers?order=desc&limit=1", 200, body);
+        assert_eq!(
+            HorizonClient::new(&base).get_ledger_parameters().unwrap(),
+            LedgerParameters {
+                base_fee_in_stroops: 100,
+                base_reserve_in_stroops: 5_000_000,
+            }
+        );
+    }
+
+    #[test]
+    fn submission_uses_horizon_transaction_endpoint() {
+        let body = r#"{"hash":"abc","ledger":7,"successful":true}"#;
+        let base = mock_server("POST", "/transactions", 200, body);
+        let result = HorizonClient::new(&base).submit_transaction("AAAA").unwrap();
+        assert_eq!(result["hash"], "abc");
     }
 }
