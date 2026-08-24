@@ -8,8 +8,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     derive_classic_signer, detect_mnemonic_language, sign_transaction_envelope, ClassicSigner,
-    ProtectionCredential, ProtectionError, ProtectionRegistry, SignerError, SoftwareSigner,
-    TransactionSigningError, WalletDerivationError, WalletUnlockKey,
+    ProtectionCredential, ProtectionError, ProtectionRegistry, SecretStoreError, SignerError,
+    SoftwareSigner, TransactionSigningError, WalletDerivationError, WalletUnlockKey,
 };
 
 pub enum ExportedSigningMaterial {
@@ -66,11 +66,24 @@ pub fn derive_verified_unlock_key(
     expected_public_key: &str,
 ) -> Result<WalletUnlockKey, ProtectedSignerError> {
     let unlock_key = registry.derive_unlock_key(envelope, passcode)?;
-    let payload = registry.unprotect_with_unlock_key(envelope, &unlock_key)?;
+    let payload = registry
+        .unprotect_with_unlock_key(envelope, &unlock_key)
+        .map_err(map_passcode_verification_error)?;
     let signer = software_signer_from_payload(payload)?;
     ensure_expected_identity(&signer, expected_public_key)?;
     drop(signer);
     Ok(unlock_key)
+}
+
+fn map_passcode_verification_error(error: ProtectionError) -> ProtectedSignerError {
+    match error {
+        ProtectionError::SecretStore(SecretStoreError::InvalidUnlockKey) => {
+            ProtectedSignerError::Protection(ProtectionError::SecretStore(
+                SecretStoreError::InvalidPassword,
+            ))
+        }
+        other => ProtectedSignerError::Protection(other),
+    }
 }
 
 pub fn unlock_software_signer(
@@ -250,7 +263,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::SecretStoreError;
 
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
@@ -295,6 +307,22 @@ mod tests {
         let signer = unlock_software_signer(&registry, &envelope, &key, PUBLIC).unwrap();
 
         assert_eq!(signer.public_key(), PUBLIC);
+    }
+
+    #[test]
+    fn wrong_passcode_cannot_derive_verified_unlock_key() {
+        let registry = ProtectionRegistry::new();
+        let envelope = protected_secret(&registry, "correct");
+
+        let error =
+            derive_verified_unlock_key(&registry, &envelope, "wrong", PUBLIC).unwrap_err();
+
+        assert_eq!(
+            error,
+            ProtectedSignerError::Protection(ProtectionError::SecretStore(
+                SecretStoreError::InvalidPassword
+            ))
+        );
     }
 
     #[test]
