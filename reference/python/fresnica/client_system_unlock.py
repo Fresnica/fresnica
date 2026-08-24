@@ -93,3 +93,44 @@ class UnavailableSystemUnlockBackend(SystemUnlockBackend):
 
     def delete(self, slot: SystemUnlockSlot) -> None:
         return None
+
+
+class SystemUnlockController:
+    """Client orchestration between WalletManager and one OS backend."""
+
+    def __init__(self, backend: SystemUnlockBackend):
+        self.backend = backend
+
+    def available(self) -> bool:
+        return self.backend.available()
+
+    def enrolled(self, record) -> bool:
+        if not self.available() or record.watch_only or record.secret is None:
+            return False
+        return self.backend.has(SystemUnlockSlot.for_record(record))
+
+    def enroll(self, manager, wallet_name: str, passcode: str) -> None:
+        if not self.available():
+            raise SystemUnlockUnavailableError("System unlock is unavailable on this client")
+        record = manager.get_record(wallet_name)
+        slot = SystemUnlockSlot.for_record(record)
+        unlock_key = manager.derive_verified_unlock_key(wallet_name, passcode)
+        self.backend.enroll(slot, unlock_key)
+
+    def unlock(self, manager, wallet_name: str):
+        if not self.available():
+            raise SystemUnlockUnavailableError("System unlock is unavailable on this client")
+        record = manager.get_record(wallet_name)
+        slot = SystemUnlockSlot.for_record(record)
+        if not self.backend.has(slot):
+            raise SystemUnlockNotEnrolledError(
+                f'System unlock is not enrolled for wallet "{record.name}"'
+            )
+        unlock_key = self.backend.release(slot)
+        return manager.unlock_with_key(wallet_name, unlock_key)
+
+    def disable(self, manager, wallet_name: str) -> None:
+        if not self.available():
+            raise SystemUnlockUnavailableError("System unlock is unavailable on this client")
+        record = manager.get_record(wallet_name)
+        self.backend.delete(SystemUnlockSlot.for_record(record))
