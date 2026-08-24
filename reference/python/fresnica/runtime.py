@@ -8,7 +8,7 @@ from .anchor_cache import AnchorCapabilitiesStore
 from .anchor_transfer_service import AnchorTransferService
 from .asset_catalog import AssetCatalogService
 from .balance_service import BalanceService
-from .client_system_unlock import UnavailableSystemUnlockBackend
+from .client_system_unlock import SystemUnlockController, UnavailableSystemUnlockBackend
 from .contacts import ContactStore
 from .datastore import SQLiteDataStore
 from .dex_service import DexService
@@ -75,6 +75,7 @@ class Runtime:
         self.system_unlock_backend = (
             system_unlock_backend or UnavailableSystemUnlockBackend()
         )
+        self.system_unlock = SystemUnlockController(self.system_unlock_backend)
         self._services: dict[str, NetworkServices] = {}
 
     def services_for(self, network_name: str | None = None) -> NetworkServices:
