@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 bip39 = "2"
+ed25519-dalek = { version = "=2.2.0", features = ["zeroize"] }
 near-slip10 = "=0.4.8"
 stellar-strkey = "=0.0.18"
 thiserror = "2"
