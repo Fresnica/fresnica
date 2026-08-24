@@ -16,6 +16,8 @@ Implemented production primitives currently include:
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
 - Password and system-key protection providers for locally stored wallet signing material
 - Protected signing-material unlock into a Classic `SoftwareSigner` with public-key identity validation
+- One-shot protected transaction signing that keeps secret material inside Core
+- Explicit password-only signing-material export for user-requested reveal/migration flows
 - Agent Access capability checks before Classic transaction signing
 
 Transaction building, network submission, storage, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
@@ -25,6 +27,8 @@ Transaction building, network submission, storage, SDEX, anchors, Soroban accoun
 Classic transaction signing signs an exact 32-byte Stellar transaction hash. `TransactionSigningRequest` also carries the current raw envelope XDR and network passphrase so an external signer can inspect public transaction context before approving a signature; those fields are review context, not an alternate payload to sign.
 
 External signers hold only the declared Stellar public key and a provider callback. Fresnica verifies the provider's returned Ed25519 signature against the exact transaction hash before mutating the envelope. Private signing material remains outside Fresnica for hardware/device/process-backed signers.
+
+`sign_protected_transaction_envelope` is the preferred foundation for mobile software-wallet signing: it unlocks protected material, verifies the expected public identity, signs the transaction, and drops the secret-bearing signer without returning a private key to the caller.
 
 Arbitrary message signing is reserved as a separate future capability following **SEP-53 (Sign and Verify Messages)**. That extension must preserve SEP-53 domain separation (`Stellar Signed Message:\n`) rather than widening the transaction-signing method to accept arbitrary bytes.
 
@@ -40,9 +44,11 @@ For mobile integration, system authentication is signer authorization rather tha
 
 Password-derived keys, system prototype keys, and intermediate decrypted byte buffers use zeroizing containers. `unlock_software_signer` consumes decrypted `secret` or `mnemonic` strings by moving their allocations into zeroizing containers before constructing the signer, then verifies that the resulting Stellar public key matches public wallet metadata. Generic decoded payloads remain live plaintext and should not be cached.
 
-Before mobile FFI is frozen, Core should decouple signer/system authorization from the registry's mutually exclusive `ProtectionCredential::System` path and add a one-shot protected signing entry point so routine mobile signing does not return private keys into JavaScript.
+`export_signing_material` is deliberately separate from normal signing. It requires a password credential, reconstructs and validates the signer identity before returning material, and returns either the stored Stellar secret or the stored mnemonic plus passphrase/derivation metadata. System authorization alone cannot use this API. Exported values use zeroizing containers and redact their `Debug` representation, but any caller that intentionally reveals them must still treat the plaintext as declassified secret data.
 
-See [`docs/mobile-core-contract.md`](../../docs/mobile-core-contract.md) and [`docs/protection.md`](../../docs/protection.md).
+Before mobile FFI is frozen, Core still needs to decouple signer/system authorization from the registry's mutually exclusive `ProtectionCredential::System` path and define the native system-auth unlock credential contract with the mobile layer.
+
+See [`docs/mobile-core-contract.md`](../../docs/mobile-core-contract.md), [`docs/protection.md`](../../docs/protection.md), and [`docs/secret-export.md`](../../docs/secret-export.md).
 
 ## Agent Access boundary
 
