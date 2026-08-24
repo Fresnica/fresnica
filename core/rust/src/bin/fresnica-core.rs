@@ -6,9 +6,9 @@ use fresnica_core::{
     derive_verified_unlock_key, export_signing_material, generate_protected_mnemonic,
     parse_transaction_envelope_xdr, protect_mnemonic_signing_material,
     protect_secret_signing_material, sign_protected_transaction_envelope,
-    transaction_envelope_xdr, ExportedSigningMaterial, ProtectedSignerError,
-    ProtectedSigningError, ProtectionError, ProtectionRegistry, SecretStoreError,
-    WalletMaterialError, WalletUnlockKey,
+    transaction_envelope_xdr, unlock_software_signer, ExportedSigningMaterial,
+    ProtectedSignerError, ProtectedSigningError, ProtectionError, ProtectionRegistry,
+    SecretStoreError, WalletMaterialError, WalletUnlockKey,
 };
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
@@ -140,6 +140,20 @@ fn run() -> Result<Value, BridgeError> {
             Ok(json!({
                 "unlock_key": STANDARD.encode(unlock_key.as_bytes()),
             }))
+        }
+        "validate-unlock-key" => {
+            let envelope = take_value(object, "envelope")?;
+            let unlock_key = decode_unlock_key(&take_sensitive_string(object, "unlock_key")?)?;
+            let expected_public_key = take_string(object, "expected_public_key")?;
+            let signer = unlock_software_signer(
+                &registry,
+                &envelope,
+                &unlock_key,
+                &expected_public_key,
+            )
+            .map_err(classify_protected_signer_error)?;
+            drop(signer);
+            Ok(json!({}))
         }
         "sign-transaction" => {
             let envelope = take_value(object, "envelope")?;
