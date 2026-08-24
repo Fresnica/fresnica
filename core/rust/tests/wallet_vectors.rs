@@ -1,4 +1,6 @@
-use fresnica_core::{derive_classic_public_key, derive_classic_signer, ClassicSigner};
+use fresnica_core::{
+    derive_classic_public_key, derive_classic_signer, detect_mnemonic_language, ClassicSigner,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -43,5 +45,14 @@ fn wallet_derivation_matches_cross_language_vectors() {
 
         assert_eq!(public_key, vector.expected_public_key, "{}", vector.name);
         assert_eq!(signer.public_key(), vector.expected_public_key, "{}", vector.name);
+
+        if vector.language.starts_with("chinese_") {
+            assert_eq!(
+                detect_mnemonic_language(&vector.mnemonic).unwrap(),
+                vector.language,
+                "{}",
+                vector.name
+            );
+        }
     }
 }
