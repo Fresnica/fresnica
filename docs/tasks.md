@@ -67,9 +67,44 @@
 - [x] Result/history refresh after submit
 - [x] Memo-required account handling
 
+## Production Core
+
+- [x] Rust wallet derivation and software signer primitives
+- [x] Versioned protected signer envelope
+- [x] Verified `WalletUnlockKey` derivation and signing
+- [x] Explicit Reveal / Export boundary
+- [x] Account `G...` / `C...` identity parsing
+- [x] Account identity / signer capability separation
+- [x] Library-level `CoreClientApi` v2
+- [x] Thin `fresnica-core` process adapter
+- [x] Watch-only signer attachment identity verification
+- [x] Core-side passcode re-protection
+- [x] External Ed25519 prepare/apply signing boundary
+- [x] Native Rust CLI direct-link client
+
+## Mobile Binding
+
+- [x] FFI-neutral mobile facade crate (`bindings/mobile`)
+- [x] Fixed-width / String / byte-array DTO boundary
+- [x] Stable mobile error mapping from `ClientApiErrorCode`
+- [x] 32-byte unlock-key boundary validation
+- [x] Shared transaction-vector conformance tests
+- [x] Dedicated mobile binding CI
+- [ ] Select concrete Swift/Kotlin binding generator or ABI adapter
+- [ ] Generate/build iOS native binding
+- [ ] Generate/build Android native binding
+- [ ] Add React Native native-module adapter
+- [ ] Keychain/Keystore unlock-key enrollment
+- [ ] Biometric signer authorization flow
+- [ ] Mobile watch-only upgrade/downgrade lifecycle
+- [ ] Mobile staged/atomic app-passcode rotation
+- [ ] Explicit mobile Reveal / Export flow
+
 ## Quality
 
 - [x] Unit tests for storage, encryption, cache, CLI parsing, availability, runtime, and transfer orchestration
 - [x] GitHub Actions test workflow
 - [x] Real Horizon integration tests on Testnet
-- [x] Cross-language test vectors for future Rust Core
+- [x] Cross-language test vectors for Rust Core
+- [x] Rust Core / Python process conformance coverage
+- [x] Mobile binding conformance workflow
