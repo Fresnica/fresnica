@@ -17,42 +17,43 @@ Wallet
 
 ## Account
 
-For Stellar:
+Fresnica distinguishes account identity from signing key identity.
+
+Current account kinds:
 
 ```
 Account
-  = Public Identity
-  = G Address
-  = Public Key representation
+  |
+  +-- Classic account  G...
+  |      +-- Ed25519 public key
+  |
+  +-- Contract account C...
+         +-- no classic public key assumption
 ```
+
+The Python reference fully implements classic-account behavior. Contract-account identity is representable so future Core APIs do not encode `G... == account` as a permanent assumption, but contract runtime/signing behavior is intentionally not implemented yet.
 
 A wallet may have an account without having signing capability.
 
 ## Signer
 
-Signer interface:
+Current classic signer interface:
 
 ```
 Signer
   |
-  +-- public_key()
+  +-- public_key
   +-- sign(transaction)
 ```
 
-Current implementation:
+Current implementations:
 
-```
-StellarKeypairSigner
-        |
-        +-- Stellar SDK Keypair
-```
+- `StellarKeypairSigner`
+- `ExternalEd25519Signer`
 
-Future implementations:
+Future classic implementations may include hardware-wallet or secure-enclave signers.
 
-- Hardware wallet signer
-- Secure enclave signer
-- External/remote signer
-- Agent approval signer
+Future contract/passkey signing must not be forced through the classic Ed25519 public-key contract. It may use a separate signer/authentication implementation appropriate to Soroban contract authorization.
 
 ## Wallet Types
 
@@ -63,9 +64,9 @@ Mnemonic
    |
 Keypair
    |
-Signer
+Classic Signer
    |
-Wallet
+Classic Account
 ```
 
 ### Secret Key Wallet
@@ -75,25 +76,35 @@ Secret Key
    |
 Keypair
    |
-Signer
+Classic Signer
    |
-Wallet
+Classic Account
 ```
 
-### Watch-only Wallet
+### Classic Watch-only Wallet
 
 ```
-Address/Public Key
+G Address / Public Key
         |
-     Account
+  Classic Account
         |
-     Wallet
+      Wallet
 ```
 
-No signer exists. The wallet can query state but cannot sign transactions.
+### Future Contract Wallet
+
+```
+C Address
+   |
+Contract Account
+   |
+contract authorization / passkey signer
+```
+
+Only the identity boundary exists in the Python reference. Soroban RPC, SAC asset behavior, SEP-45, and passkey smart-wallet signing remain future work.
 
 ## Design Goal
 
-All transaction signing must go through the Signer abstraction.
+All transaction signing must go through an appropriate signer abstraction.
 
-The wallet layer must not assume where keys are stored.
+The wallet layer must not assume where keys are stored, and generic account identity must not assume every Stellar account is an Ed25519 `G...` account.
