@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha256};
-use stellar_xdr::curr::{
-    DecoratedSignature, Hash, Limits, ReadXdr, Signature, SignatureHint, TransactionEnvelope, WriteXdr,
+use stellar_xdr::{
+    DecoratedSignature, Hash, Limits, ReadXdr, Signature, SignatureHint, TransactionEnvelope,
+    WriteXdr,
 };
 use thiserror::Error;
 
