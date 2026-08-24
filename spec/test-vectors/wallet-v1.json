@@ -41,6 +41,22 @@
       "passphrase": "p4ssphr4se",
       "index": 1,
       "expected_public_key": "GDY47CJARRHHL66JH3RJURDYXAMIQ5DMXZLP3TDAUJ6IN2GUOFX4OJOC"
+    },
+    {
+      "name": "chinese-simplified-12-words-index-0",
+      "language": "chinese-simplified",
+      "mnemonic": "这 的 的 的 的 的 的 的 的 的 的 人",
+      "passphrase": "",
+      "index": 0,
+      "expected_public_key": "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY"
+    },
+    {
+      "name": "chinese-traditional-12-words-index-0",
+      "language": "chinese-traditional",
+      "mnemonic": "這 的 的 的 的 的 的 的 的 的 的 人",
+      "passphrase": "",
+      "index": 0,
+      "expected_public_key": "GDV4V754BDMMUD3O4LPALGILRXG55G7PK5FOIPD3KVBO4QADH2HJRDEF"
     }
   ]
 }
