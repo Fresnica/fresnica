@@ -92,9 +92,8 @@ fn command_offers(
         let selling = horizon_asset(offer.get("selling"));
         let buying = horizon_asset(offer.get("buying"));
         let amount = text(&offer, "amount").unwrap_or("?");
-        let price = offer_price(&offer).unwrap_or_else(|_| {
-            text(&offer, "price").unwrap_or("?").to_owned()
-        });
+        let price = offer_price(&offer)
+            .unwrap_or_else(|_| text(&offer, "price").unwrap_or("?").to_owned());
         println!(
             "{:<12} {:<24} {:<24} {:>16} {:>14}",
             id, selling, buying, amount, price
@@ -121,7 +120,11 @@ impl OrderbookRequest {
         for argument in &arguments[2..] {
             match argument.as_str() {
                 "--json" => json = true,
-                _ => return Err("usage: fresnica dex orderbook SELLING BUYING [--json]".to_owned()),
+                _ => {
+                    return Err(
+                        "usage: fresnica dex orderbook SELLING BUYING [--json]".to_owned(),
+                    )
+                }
             }
         }
         Ok(Self {
@@ -202,7 +205,10 @@ impl ClassicAsset {
             .ok_or_else(|| "Issued assets must use CODE:GISSUER".to_owned())?;
         let code = code.trim();
         let issuer = issuer.trim();
-        if code.is_empty() || code.len() > 12 || !code.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        if code.is_empty()
+            || code.len() > 12
+            || !code.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        {
             return Err("Asset code must be 1 to 12 ASCII alphanumeric characters".to_owned());
         }
         let identity = AccountIdentity::parse(issuer)
@@ -313,7 +319,8 @@ fn rows<'a>(value: &'a Value, key: &str) -> Result<&'a [Value], String> {
 }
 
 fn book_bid_cells(row: &Value) -> Result<(String, String), String> {
-    let amount = parse_stroops(text(row, "amount").unwrap_or(""))?;
+    let amount = parse_stroops(text(row, "amount").unwrap_or(""), true)
+        .map_err(|_| "Horizon returned invalid order book amount".to_owned())?;
     let (n, d) = price_ratio(row)?;
     let numerator = i128::from(amount)
         .checked_mul(i128::from(d))
@@ -326,9 +333,13 @@ fn book_bid_cells(row: &Value) -> Result<(String, String), String> {
 }
 
 fn book_ask_cells(row: &Value) -> Result<(String, String), String> {
-    let amount = parse_stroops(text(row, "amount").unwrap_or(""))?;
+    let amount = parse_stroops(text(row, "amount").unwrap_or(""), true)
+        .map_err(|_| "Horizon returned invalid order book amount".to_owned())?;
     let (n, d) = price_ratio(row)?;
-    Ok((format_price_ratio(n, d)?, format_scaled_7(i128::from(amount))))
+    Ok((
+        format_price_ratio(n, d)?,
+        format_scaled_7(i128::from(amount)),
+    ))
 }
 
 fn offer_price(offer: &Value) -> Result<String, String> {
