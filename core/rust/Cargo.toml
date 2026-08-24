@@ -1,0 +1,11 @@
+[package]
+name = "fresnica-core"
+version = "0.1.0"
+edition = "2021"
+description = "Production core primitives for the Fresnica Stellar wallet"
+license = "MIT"
+publish = false
+
+[dependencies]
+stellar-strkey = "=0.0.18"
+thiserror = "2"
