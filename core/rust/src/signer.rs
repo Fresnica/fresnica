@@ -59,9 +59,8 @@ impl ClassicSigner for SoftwareSigner {
     }
 }
 
-type ExternalSigningProvider = dyn Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>
-    + Send
-    + Sync;
+type ExternalSigningProvider =
+    dyn Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>;
 
 pub struct ExternalEd25519Signer {
     public_key: String,
@@ -71,10 +70,7 @@ pub struct ExternalEd25519Signer {
 impl ExternalEd25519Signer {
     pub fn new<F>(public_key: &str, sign_request: F) -> Result<Self, SignerError>
     where
-        F: Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError> + 'static,
     {
         let public = PublicKey::from_string(public_key.trim())
             .map_err(|_| SignerError::InvalidPublicKey)?;
