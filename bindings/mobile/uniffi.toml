@@ -1,0 +1,8 @@
+[bindings.kotlin]
+package_name = "com.fresnica.core"
+android = true
+generate_immutable_records = true
+
+[bindings.swift]
+module_name = "FresnicaCore"
+ffi_module_name = "FresnicaCoreFFI"

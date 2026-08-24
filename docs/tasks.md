@@ -90,9 +90,13 @@
 - [x] 32-byte unlock-key boundary validation
 - [x] Shared transaction-vector conformance tests
 - [x] Dedicated mobile binding CI
-- [ ] Select concrete Swift/Kotlin binding generator or ABI adapter
-- [ ] Generate/build iOS native binding
-- [ ] Generate/build Android native binding
+- [x] Select stable UniFFI 0.32.x for Swift/Kotlin generation
+- [x] Export mobile facade with UniFFI proc macros
+- [x] Generate Swift and Kotlin bindings from compiled library metadata in CI
+- [ ] Package Android Rust libraries for supported ABIs
+- [ ] Compile/package generated Kotlin API in Android build
+- [ ] Build Apple simulator/device static libraries
+- [ ] Package generated Swift API + Rust static libraries for Xcode/XCFramework use
 - [ ] Add React Native native-module adapter
 - [ ] Keychain/Keystore unlock-key enrollment
 - [ ] Biometric signer authorization flow
@@ -108,3 +112,4 @@
 - [x] Cross-language test vectors for Rust Core
 - [x] Rust Core / Python process conformance coverage
 - [x] Mobile binding conformance workflow
+- [x] Host Swift/Kotlin UniFFI generation gate
