@@ -1,39 +1,71 @@
 # Wallet Protection Model
 
-Fresnica separates account identity, signing, local secret material, and protection.
+Fresnica separates account identity, signing, local secret material, protection, persistence, and system authentication.
 
 ```text
 Wallet / Account
       |
-   Signer
+    Signer
       |
 Secret Material (software signer only)
       |
-Protection Provider
+Core Wallet Protection
+      |
+Opaque Encrypted Envelope
+      |
+Mobile Persistence
 ```
 
-Password is one protection provider, not part of the wallet or signer identity.
+System authentication sits beside this flow as **signer authorization**. It is not itself a wallet encryption algorithm.
 
-## Password protection
+See [Mobile / Rust Core Vault Contract](mobile-core-contract.md) for the normative mobile integration boundary.
 
-`PasswordProtectionProvider` retains the existing Scrypt + AES-256-GCM behavior. Existing pre-provider password envelopes remain readable. They may be upgraded by wrapping the unchanged encrypted envelope in protection metadata; this migration does not re-encrypt the secret.
+## App passcode and local software wallets
 
-## System protection
+The default product model uses one Fresnica app passcode for ordinary software wallets.
 
-`SystemProtectionProvider` models platform-protected wallet secrets without choosing a concrete desktop/mobile API in the Python reference.
+The user sees one passcode, but each wallet envelope has its own random Scrypt salt and AES-GCM nonce. Therefore the same passcode produces different effective wallet encryption keys.
 
-The provider generates a random 256-bit wallet protection key, stores that key through `SystemKeyStore`, and encrypts wallet secret material with AES-256-GCM. A native implementation may map `SystemKeyStore` to macOS/iOS Keychain and Secure Enclave policy, Windows platform protection/Hello, Android Keystore, Linux Secret Service, or another suitable OS facility.
+`PasswordProtectionProvider` currently retains the version-1 Scrypt + AES-256-GCM envelope behavior.
 
-System authentication is therefore an authorization gate around access to a protection key. Biometrics are not treated as encryption keys.
+The Core owns:
+
+- signing-material payload format;
+- KDF parameters and salt semantics;
+- AEAD encryption/decryption;
+- secret parsing and zeroization;
+- identity verification after unlock.
+
+Mobile code must not duplicate those rules.
+
+## System authentication
+
+Face ID, Touch ID, Android biometrics, Windows Hello, device passcode, and similar mechanisms are authorization gates.
+
+Biometric data is never encryption-key material.
+
+For a software signer, successful system authentication may authorize use of platform-protected Core-compatible unlock material so the user does not need to enter the app passcode again. That shortcut must open the same canonical Core wallet envelope; it must not create a second independently encrypted copy of the wallet.
+
+For hardware, external, remote, or future contract/passkey signers, the same authorization concept may permit signer invocation without any local wallet secret.
+
+System-auth session policy, Keychain / Keystore integration, and biometric UI belong to the mobile or desktop platform layer.
+
+## Current Rust implementation note
+
+The Rust Core currently contains `SystemProtectionProvider` backed by `SystemKeyStore`. That implementation generates a separate random 256-bit wallet protection key and models `system` as a peer protection kind.
+
+This was useful for proving the platform-storage boundary, but it is **not the target mobile product model** after the Mobile/Core contract was accepted.
+
+Before mobile FFI is frozen, Core should decouple system authentication / signer authorization from the mutually exclusive wallet `ProtectionProvider` kind while keeping password protection as the canonical local software-wallet envelope.
 
 ## Signer boundary
 
-Hardware and external signers do not use local secret protection at all. The signing abstraction remains authoritative: a signer may be backed by local protected material, secure hardware, a remote device, or a future smart-wallet/passkey mechanism.
+Hardware and external signers do not use local secret protection. The signing abstraction remains authoritative: a signer may be backed by local protected material, secure hardware, a remote device, or a future smart-wallet/passkey mechanism.
 
-## Future contract wallets
+Normal mobile signing should prefer a one-shot Core operation that unlocks protected material, verifies the expected public identity, signs, and then drops the secret-bearing signer rather than returning a private key into JavaScript.
 
-This model does not implement Stellar contract-account/passkey wallets. The intent is to avoid encoding classic-account password assumptions into Fresnica Core so a future `ContractAccount` and passkey-backed signer can be added independently.
+## Public release compatibility
 
-## Python reference scope
+Fresnica is still pre-release, so internal test wallet files do not require a dedicated migration path.
 
-The Python reference implements and tests the protection-provider boundary and a generic system-key-store interface. It intentionally does not bind to platform biometric APIs. Native system-authentication implementations belong in future desktop/mobile platform layers.
+After public release, any persisted wallet-format change must include explicit versioned migration, identity verification, write/read-back verification, recoverable or atomic commit behavior, and previous-version fixture tests.
