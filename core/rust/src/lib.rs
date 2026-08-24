@@ -17,7 +17,10 @@ pub use agent_access::{
     authorize_agent_transaction, sign_agent_transaction, AgentAccessError, AgentAuthorization,
     AgentCapability,
 };
-pub use protected_signer::{unlock_software_signer, ProtectedSignerError};
+pub use protected_signer::{
+    export_signing_material, sign_protected_transaction_envelope, unlock_software_signer,
+    ExportedSigningMaterial, ProtectedSignerError, ProtectedSigningError,
+};
 pub use protection::{
     PasswordProtectionProvider, ProtectionCredential, ProtectionError, ProtectionProvider,
     ProtectionRegistry, SystemKeyStore, SystemKeyStoreError, SystemProtectionProvider,
