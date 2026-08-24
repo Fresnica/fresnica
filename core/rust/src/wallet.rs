@@ -28,6 +28,10 @@ pub enum WalletDerivationError {
     AmbiguousLanguage,
     #[error("invalid Stellar account index")]
     InvalidIndex,
+    #[error("invalid mnemonic entropy strength")]
+    InvalidStrength,
+    #[error("secure randomness is unavailable")]
+    RandomUnavailable,
 }
 
 fn mnemonic_language(language: &str) -> Result<Language, WalletDerivationError> {
@@ -35,6 +39,25 @@ fn mnemonic_language(language: &str) -> Result<Language, WalletDerivationError> 
         .iter()
         .find_map(|(name, value)| (*name == language).then_some(*value))
         .ok_or_else(|| WalletDerivationError::UnsupportedLanguage(language.to_owned()))
+}
+
+pub fn generate_mnemonic_phrase(
+    language: &str,
+    strength: usize,
+) -> Result<Zeroizing<String>, WalletDerivationError> {
+    let entropy_bytes = match strength {
+        128 => 16,
+        160 => 20,
+        192 => 24,
+        224 => 28,
+        256 => 32,
+        _ => return Err(WalletDerivationError::InvalidStrength),
+    };
+    let mut entropy = Zeroizing::new(vec![0u8; entropy_bytes]);
+    getrandom::fill(&mut entropy[..]).map_err(|_| WalletDerivationError::RandomUnavailable)?;
+    let mnemonic = Mnemonic::from_entropy_in(mnemonic_language(language)?, &entropy)
+        .map_err(|_| WalletDerivationError::InvalidStrength)?;
+    Ok(Zeroizing::new(mnemonic.to_string()))
 }
 
 pub fn detect_mnemonic_language(
@@ -97,4 +120,24 @@ pub fn derive_classic_signer(
     Ok(crate::SoftwareSigner::from_signing_key(
         derive_key(mnemonic, passphrase, index, language)?.to_signing_key(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_mnemonic_roundtrips_through_derivation() {
+        let mnemonic = generate_mnemonic_phrase("english", 128).unwrap();
+        assert_eq!(mnemonic.split_whitespace().count(), 12);
+        assert!(derive_classic_public_key(&mnemonic, "", 0, "english").is_ok());
+    }
+
+    #[test]
+    fn rejects_non_bip39_entropy_strength() {
+        assert_eq!(
+            generate_mnemonic_phrase("english", 129).unwrap_err(),
+            WalletDerivationError::InvalidStrength
+        );
+    }
 }
