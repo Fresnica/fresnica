@@ -1,3 +1,5 @@
+#[path = "dex_history.rs"]
+mod history;
 #[path = "dex_write.rs"]
 mod write;
 
@@ -24,6 +26,9 @@ pub fn command_dex(
         "offers" => command_offers(storage, network, &arguments[1..]),
         "buy" | "sell" | "update" | "cancel" => {
             write::command_dex_write(storage, network, arguments)
+        }
+        "trades" | "fills" | "candles" => {
+            history::command_dex_history(storage, network, arguments)
         }
         _ => Err(usage().to_owned()),
     }
@@ -433,7 +438,7 @@ fn short_address(value: &str) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  fresnica dex orderbook SELLING BUYING [--json]\n  fresnica dex offers [--wallet NAME] [--limit N] [--json]\n  fresnica dex buy BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]\n  fresnica dex sell BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]\n  fresnica dex update OFFER_ID BASE COUNTER AMOUNT PRICE [--wallet NAME] [-y]\n  fresnica dex cancel OFFER_ID [--wallet NAME] [-y]"
+    "usage:\n  fresnica dex orderbook SELLING BUYING [--json]\n  fresnica dex offers [--wallet NAME] [--limit N] [--json]\n  fresnica dex buy BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]\n  fresnica dex sell BASE COUNTER AMOUNT PRICE [--wallet NAME] [--allow-trustline] [-y]\n  fresnica dex update OFFER_ID BASE COUNTER AMOUNT PRICE [--wallet NAME] [-y]\n  fresnica dex cancel OFFER_ID [--wallet NAME] [-y]\n  fresnica dex trades BASE COUNTER [--limit N] [--json]\n  fresnica dex fills [--wallet NAME] [--limit N] [--json]\n  fresnica dex candles BASE COUNTER [--resolution 1m|5m|15m|1h|1d|1w] [--start MS] [--end MS] [--offset MS] [--limit N] [--json]"
 }
 
 #[cfg(test)]
