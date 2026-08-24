@@ -2,6 +2,7 @@ use bip39::{Language, Mnemonic};
 use kobe_primitives::slip10::DerivedEd25519Key;
 use stellar_strkey::ed25519::PublicKey;
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 const STELLAR_PURPOSE: u32 = 44;
 const STELLAR_COIN_TYPE: u32 = 148;
@@ -43,7 +44,7 @@ fn derive_key(
 
     let mnemonic = Mnemonic::parse_in(mnemonic_language(language)?, mnemonic.trim())
         .map_err(|_| WalletDerivationError::InvalidMnemonic)?;
-    let seed = mnemonic.to_seed(passphrase);
+    let seed = Zeroizing::new(mnemonic.to_seed(passphrase));
 
     DerivedEd25519Key::derive_path(
         &seed,
@@ -58,7 +59,10 @@ pub fn derive_classic_public_key(
     index: usize,
     language: &str,
 ) -> Result<String, WalletDerivationError> {
-    Ok(format!("{}", PublicKey(derive_key(mnemonic, passphrase, index, language)?.public_key_bytes())))
+    Ok(format!(
+        "{}",
+        PublicKey(derive_key(mnemonic, passphrase, index, language)?.public_key_bytes())
+    ))
 }
 
 pub fn derive_classic_signer(
@@ -67,8 +71,7 @@ pub fn derive_classic_signer(
     index: usize,
     language: &str,
 ) -> Result<crate::SoftwareSigner, WalletDerivationError> {
-    crate::SoftwareSigner::from_signing_key(
+    Ok(crate::SoftwareSigner::from_signing_key(
         derive_key(mnemonic, passphrase, index, language)?.to_signing_key(),
-    )
-    .map_err(|_| WalletDerivationError::InvalidIndex)
+    ))
 }
