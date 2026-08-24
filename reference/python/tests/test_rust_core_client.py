@@ -1,10 +1,12 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from stellar_sdk import TransactionEnvelope
 
+from fresnica.cli.commands.tui import core_subtitle
 from fresnica.errors import InvalidPasswordError, InvalidUnlockKeyError
 from fresnica.manager import WalletManager
 from fresnica.rust_core_client import RustCoreClient
@@ -33,10 +35,20 @@ def _vector():
     return json.loads(VECTOR_PATH.read_text(encoding="utf-8"))["cases"][0]
 
 
+def test_tui_core_subtitle_reports_python_reference_without_bridge():
+    runtime = SimpleNamespace(core_client=None)
+    assert core_subtitle(runtime) == "Stellar Wallet · Python Reference"
+
+
 def test_bridge_version(core_client):
     version = core_client.version()
     assert version["protocol_version"] == 1
     assert version["core_version"] == "0.1.0"
+
+
+def test_tui_core_subtitle_reports_rust_bridge(core_client):
+    runtime = SimpleNamespace(core_client=core_client)
+    assert core_subtitle(runtime) == "Stellar Wallet · Rust Core"
 
 
 def test_secret_roundtrip_signs_exact_shared_vector(core_client):
@@ -73,6 +85,37 @@ def test_secret_roundtrip_signs_exact_shared_vector(core_client):
     assert revealed == {"kind": "secret", "secret": vector["secret"]}
 
 
+def test_same_passcode_unlock_keys_are_bound_to_each_envelope(core_client):
+    vector = _vector()
+    first = core_client.protect_secret(vector["secret"], "shared-passcode")
+    second = core_client.protect_secret(vector["secret"], "shared-passcode")
+
+    first_key = core_client.derive_verified_unlock_key(
+        first.envelope,
+        "shared-passcode",
+        first.public_key,
+    )
+    second_key = core_client.derive_verified_unlock_key(
+        second.envelope,
+        "shared-passcode",
+        second.public_key,
+    )
+
+    assert first_key.as_bytes() != second_key.as_bytes()
+    with pytest.raises(InvalidUnlockKeyError):
+        core_client.validate_unlock_key(
+            second.envelope,
+            first_key,
+            second.public_key,
+        )
+    with pytest.raises(InvalidUnlockKeyError):
+        core_client.validate_unlock_key(
+            first.envelope,
+            second_key,
+            first.public_key,
+        )
+
+
 def test_wrong_passcode_and_unlock_key_fail_closed(core_client):
     vector = _vector()
     protected = core_client.protect_secret(vector["secret"], "correct")
@@ -107,6 +150,40 @@ def test_wallet_manager_session_uses_rust_signer_without_python_private_key(core
     )
     session.wallet.sign(transaction)
     assert transaction.to_xdr() == vector["signed_xdr_base64"]
+
+
+def test_verified_unlock_key_can_reopen_and_sign_without_passcode(core_client):
+    vector = _vector()
+    manager = WalletManager(MemoryWalletStorage(), core_client=core_client)
+    record = manager.import_secret("system-path", vector["secret"], "passcode")
+    unlock_key = manager.derive_verified_unlock_key(record.name, "passcode")
+
+    manager.lock()
+    session = manager.unlock_with_key(record.name, unlock_key)
+    assert isinstance(session.wallet.signer, RustCoreProtectedSigner)
+
+    transaction = TransactionEnvelope.from_xdr(
+        vector["unsigned_xdr_base64"],
+        vector["network_passphrase"],
+    )
+    session.wallet.sign(transaction)
+    assert transaction.to_xdr() == vector["signed_xdr_base64"]
+
+
+def test_encrypted_backup_restores_with_passcode_only(core_client, tmp_path):
+    vector = _vector()
+    original = WalletManager(MemoryWalletStorage(), core_client=core_client)
+    record = original.import_secret("backup", vector["secret"], "passcode")
+    backup_path = tmp_path / "wallet-backup.json"
+    original.backup(record.name, backup_path)
+
+    restored = WalletManager(MemoryWalletStorage(), core_client=core_client)
+    restored_record = restored.restore_backup(backup_path, make_default=True)
+    session = restored.unlock(restored_record.name, "passcode")
+
+    assert restored_record.address == vector["public_key"]
+    assert isinstance(session.wallet.signer, RustCoreProtectedSigner)
+    assert not hasattr(session.wallet.signer, "keypair")
 
 
 def test_generated_mnemonic_is_rust_owned_and_revealable(core_client):
