@@ -19,6 +19,7 @@
 - [x] Export/backup workflow
 - [x] Verified external Ed25519 signer adapter
 - [ ] Hardware transport adapters
+- [x] Ledger hardware-provider boundary/dependency review (`docs/hardware-signer.md`)
 
 ## Data
 
