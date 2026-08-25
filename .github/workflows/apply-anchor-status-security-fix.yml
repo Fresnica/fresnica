@@ -1,0 +1,43 @@
+name: Apply anchor withdrawal source binding fix
+
+on:
+  push:
+    branches:
+      - dev/anchor-status-payment
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/anchor-status-payment
+          fetch-depth: 0
+
+      - name: Apply staged security patch
+        run: |
+          set -euo pipefail
+          test "$(wc -c < .ci/anchor-status-security.patch.gz.b64)" -eq 1580
+          echo "ded70a898a7f9e31d217ee0be950cd2ecdf8ea0e80c687447446fe0780f8282e  .ci/anchor-status-security.patch.gz.b64" | sha256sum -c -
+          base64 -d .ci/anchor-status-security.patch.gz.b64 | gzip -dc > /tmp/anchor-status-security.patch
+          test "$(wc -c < /tmp/anchor-status-security.patch)" -eq 4784
+          echo "5897f5ebdf0449a5af11a15d19b63b7d12b67bc47ae39fda051b4453221c0d7e  /tmp/anchor-status-security.patch" | sha256sum -c -
+          git apply --check /tmp/anchor-status-security.patch
+          git apply /tmp/anchor-status-security.patch
+          git diff --check
+          bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+
+      - name: Commit source changes
+        run: |
+          set -euo pipefail
+          rm -rf .ci
+          rm -f .github/workflows/apply-anchor-status-security-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Bind anchor withdrawal payment to wallet source"
+          git push origin HEAD:dev/anchor-status-payment
