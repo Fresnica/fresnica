@@ -311,7 +311,7 @@ fn short_id(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::thread;
 
@@ -320,12 +320,32 @@ mod tests {
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0u8; 8192];
-            let size = stream.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..size]);
+            let request_line = {
+                let mut reader = BufReader::new(&mut stream);
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).unwrap();
+
+                let mut content_length = 0usize;
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = header.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).unwrap();
+                request_line
+            };
             assert!(
-                request.starts_with(&format!("{expected_method} {expected_target} HTTP/1.1")),
-                "unexpected request: {request}"
+                request_line.starts_with(&format!("{expected_method} {expected_target} HTTP/1.1")),
+                "unexpected request: {request_line}"
             );
             let reason = if status == 200 { "OK" } else { "Not Found" };
             write!(
