@@ -75,4 +75,5 @@ test('Apple binary build compiles framework glue without absorbing Native SDK so
   assert.doesNotMatch(build, /FresnicaSignerAuthorization\.swift|FresnicaWalletUnlockKeyStore\.swift/);
   assert.match(build, /libFresnicaRNAdapter\.a/);
   assert.match(build, /-create-xcframework/);
+  assert.match(build, /! -path '\*macos\*'/, 'iOS device lookup must exclude the macOS Native SDK slice');
 });

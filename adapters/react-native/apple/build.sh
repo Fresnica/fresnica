@@ -47,7 +47,8 @@ find_sdk_framework() {
   if [ "$mode" = "simulator" ]; then
     find "$NATIVE_SDK_XCFRAMEWORK" -type d -name FresnicaSDK.framework -path '*simulator*' -print -quit
   else
-    find "$NATIVE_SDK_XCFRAMEWORK" -type d -name FresnicaSDK.framework ! -path '*simulator*' -print -quit
+    find "$NATIVE_SDK_XCFRAMEWORK" -type d -name FresnicaSDK.framework \
+      ! -path '*simulator*' ! -path '*macos*' -print -quit
   fi
 }
 
@@ -56,7 +57,8 @@ find_ffi_headers() {
   if [ "$mode" = "simulator" ]; then
     find "$NATIVE_FFI_XCFRAMEWORK" -type d -name Headers -path '*simulator*' -print -quit
   else
-    find "$NATIVE_FFI_XCFRAMEWORK" -type d -name Headers ! -path '*simulator*' -print -quit
+    find "$NATIVE_FFI_XCFRAMEWORK" -type d -name Headers \
+      ! -path '*simulator*' ! -path '*macos*' -print -quit
   fi
 }
 

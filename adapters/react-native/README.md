@@ -115,7 +115,7 @@ adapter-manifest.json
 
 `FresnicaRNAdapter.xcframework` is a static XCFramework containing the Swift adapter implementation and Objective-C React Native registration shim. The normal application build links the pinned adapter binary plus the pinned Fresnica Native SDK; it does not compile adapter source. Keep `-ObjC` in the Apple host linker flags so the React Native registration category/constructor is retained.
 
-The build path is implemented and locally orchestration-tested. Real macOS/Xcode validation of the new compiled `FresnicaSDK.xcframework` and the resulting RN adapter XCFramework is still required before the Apple binary path is called release-ready.
+The underlying `FresnicaSDK.xcframework` iOS path has passed real macOS/Xcode validation. The remaining release gate is to run this adapter build against a real React Native consumer with CocoaPods headers and validate the resulting `FresnicaRNAdapter.xcframework`. The adapter's iOS-device slice selection explicitly excludes the macOS Native SDK slice now carried by the shared Apple XCFrameworks.
 
 ## Transitional Mobile code
 
