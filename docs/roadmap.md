@@ -233,7 +233,7 @@ The provider-neutral Core prepare/apply boundary is already sufficient for hardw
 
 Fresnica should follow Stellar ecosystem standards and official SDK behavior rather than inventing competing wallet-specific protocol semantics.
 
-Current/reference anchor coverage includes SEP-1, SEP-10, SEP-6 and SEP-24. SEP-12/KYC remains a future explicit workflow rather than something to fake or silently bypass.
+Current/reference anchor coverage includes SEP-1, SEP-10, SEP-6 and SEP-24. The Rust reference client now mirrors the Python SEP-1 + SEP-6/SEP-24 capability-discovery path (`anchor discover CODE:GISSUER`); authenticated transfer execution remains in the Python reference until the Rust path grows an explicit SEP-10/SEP-45 authorization design. SEP-12/KYC remains a future explicit workflow rather than something to fake or silently bypass.
 
 Future SEP adoption should be driven by wallet/product requirements and reviewed as protocol behavior below the UI layer.
 
@@ -241,7 +241,7 @@ Future SEP adoption should be driven by wallet/product requirements and reviewed
 
 ### Rust CLI
 
-The Rust CLI is already the primary lightweight native validation client. Keep it working as SDK/Core contracts evolve.
+The Rust CLI is already the primary lightweight native validation client. Keep it working as SDK/Core contracts evolve. Its SDK-boundary guard, Rust unit suite, release build and Python compatibility suite were all revalidated on GitHub Actions on 2026-08-25 after PR #95.
 
 ### Rust TUI
 
@@ -290,7 +290,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 2. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
 3. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
 4. Treat the checked-in real smart-account Testnet vector as the provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile integration begins.
-5. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
+5. Continue Phase 5 wallet fundamentals below product UI. Rust anchor discovery is the next unblocked SEP slice; authenticated transfer execution can follow after its auth boundary is explicit. Hardware/external signer transport remains the next signer-capability gap, but Ledger stays gated by the reviewed XDR-version mismatch rather than forcing a lossy conversion.
 6. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
 7. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
 
@@ -303,5 +303,6 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 - Routine application builds must not rebuild Rust/Core or framework adapter source.
 - Plaintext secret/mnemonic exposure remains exceptional and explicit.
 - `WalletUnlockKey` and equivalent native authorization material must not cross into JavaScript/Dart merely for convenience.
+- UniFFI's internal C-compatible layer is not a stable Fresnica public C ABI.
 - Full Stellar asset identity and network scoping remain authoritative.
 - Stellar protocol/SEP behavior should reuse official primitives and standards wherever practical.
