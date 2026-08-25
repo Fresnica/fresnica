@@ -45,6 +45,8 @@ cargo build --manifest-path bindings/native/Cargo.toml
 
 Generated language bindings are release/build outputs, not hand-maintained source.
 
+On macOS, run `bash bindings/native/scripts/validate-apple-local.sh` to validate the compiled Apple direct-consumer package end to end. This is the local validation gate for the currently pending Apple packaging checkpoint.
+
 ## Platform signer authorization
 
 The generalized native packages now own the reusable platform security helpers that previously lived only in the transitional Mobile package:

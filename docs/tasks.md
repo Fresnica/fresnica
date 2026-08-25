@@ -89,10 +89,12 @@
 - [x] Generalized `fresnica-native-sdk` UniFFI binding
 - [x] Android Native SDK AAR without framework adapter code
 - [x] Apple Native SDK Rust FFI XCFramework/package without framework adapter code
-- [ ] Validate compiled importable `FresnicaSDK.xcframework` packaging on macOS (build path implemented)
+- [ ] Validate compiled importable `FresnicaSDK.xcframework` packaging on macOS (`validate-apple-local.sh` ready)
 - [x] Android Keystore/native signer-authorization helpers in Native SDK package
 - [x] Apple Keychain/LocalAuthentication signer-authorization helpers in Native SDK package
-- [ ] Windows/Linux/macOS direct-consumer package/API shapes
+- [x] Desktop direct-consumer contract and supported-surface rules
+- [ ] Extend validated Apple Swift Native SDK packaging to macOS
+- [ ] Windows/Linux non-Rust package only after a concrete consumer language/framework is selected
 - [x] Canonical React Native adapter source targets `fresnica-native-sdk` instead of the transitional Mobile facade
 - [x] React Native Android one-time adapter build entry point + compatibility manifest/rebuild diagnostics
 - [x] Apple one-time React Native adapter binary build path targets compiled `FresnicaSDK`

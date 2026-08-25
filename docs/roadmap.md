@@ -129,15 +129,15 @@ Apple    -> FFI XCFramework + compiled `FresnicaSDK.xcframework` build path (mac
 
 The Apple direct-consumer module build path is implemented, but the resulting `FresnicaSDK.xcframework` still needs real macOS/Xcode validation before the Native SDK binary boundary is called complete. The React Native one-time Apple build path now compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that module; it does not absorb SDK-owned Swift/security source. Both new Apple XCFramework paths still require a real Xcode validation run.
 
-Remaining desktop outputs:
+Desktop consumer surfaces are now defined in `desktop-sdk-contract.md`:
 
 ```text
-Windows  -> compiled native library/package + defined direct-consumer API surface
-Linux    -> compiled native library/package + defined direct-consumer API surface
-macOS    -> compiled framework/native library/package + defined direct-consumer API surface
+Rust desktop      -> consume `fresnica-sdk` directly
+macOS Swift       -> extend compiled `FresnicaSDK` after current Apple validation
+Windows/Linux     -> select an explicit supported consumer language/framework before packaging
 ```
 
-Android native applications may consume the AAR directly. The Apple direct-consumer packaging path is implemented and awaits real Xcode validation. Desktop packaging must first define the corresponding supported language/API surface; a bare UniFFI `.dll`/`.so` is not by itself a complete public SDK.
+Android native applications may consume the AAR directly. The Apple direct-consumer packaging path is implemented and awaits real Xcode validation. Fresnica will not publish a bare UniFFI `.dll`/`.so` as a language-neutral desktop SDK or treat UniFFI's internal C-compatible layer as a stable public C ABI.
 
 Platform-specific signer authorization remains outside the pure Core contract, for example:
 

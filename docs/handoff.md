@@ -236,7 +236,14 @@ The future Mobile onboarding order is:
 
 Desktop is no longer a separate architecture problem. It should use the same universal SDK contract.
 
-Native desktop apps consume Windows/Linux/macOS Native SDK binaries directly. Framework-based apps use thin adapters when needed, for example Electron/Node, Flutter Desktop, Qt or .NET.
+The direct-consumer contract is now explicit in `desktop-sdk-contract.md`:
+
+- Rust desktop clients consume `fresnica-sdk` directly;
+- macOS Swift should extend the compiled `FresnicaSDK` packaging after the current Apple path is validated;
+- Windows/Linux non-Rust packages are product-language driven rather than declared as generic `.dll`/`.so` SDKs;
+- UniFFI's internal C-compatible layer is not a stable Fresnica public C ABI.
+
+Framework-based apps use thin adapters when needed, for example Electron/Node, Flutter Desktop, Qt or .NET, after the direct-consumer language/framework is selected.
 
 Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Windows Hello and Linux Secret Service/libsecret where appropriate. These implementations must preserve the same signer/security contract instead of reimplementing Core crypto.
 
@@ -355,9 +362,9 @@ Validation workflows are PR/manual only so branch pushes and merges to `main` do
 
 The next coherent implementation batches are:
 
-1. **Validate Apple binary packaging**: run the new compiled `FresnicaSDK.xcframework` and static `FresnicaRNAdapter.xcframework` paths on real macOS/Xcode; keep SDK-owned Swift/security code out of framework adapters.
+1. **Validate Apple binary packaging**: run `bindings/native/scripts/validate-apple-local.sh` on real macOS/Xcode, then validate the static `FresnicaRNAdapter.xcframework` path against a real React Native consumer; keep SDK-owned Swift/security code out of framework adapters.
 2. **Keep the RN adapter contract stable**: Android and Apple now have one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
-3. **Define desktop Native SDK surfaces**: define Windows/Linux/macOS direct-consumer language/API shapes before publishing desktop binaries.
+3. **Desktop Native SDK execution**: the direct-consumer contract is defined; after Apple validation, extend `FresnicaSDK` to macOS Swift. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
 4. **WASM/Web boundary**: the filtered fresh-passcode WASM API is implemented and has passed `wasm32-unknown-unknown` compilation, generated-package surface validation, and Node-hosted shared-vector runtime conformance on macOS. Keep persistent WebAuthn/passkey authorization as a separate design.
 5. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
 6. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.

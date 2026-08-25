@@ -56,6 +56,12 @@ Run on macOS:
 bash bindings/native/scripts/build-apple.sh
 ```
 
+For the full direct-consumer validation, including a compiled-module import smoke check:
+
+```sh
+bash bindings/native/scripts/validate-apple-local.sh
+```
+
 Output:
 
 ```text
@@ -79,6 +85,8 @@ bindings/native/build/apple/
 `FresnicaSDKFFI.xcframework` is the low-level Rust FFI package. The build then uses a temporary Swift package only as a packaging mechanism to compile the generated API plus `platform-security/` into an importable `FresnicaSDK.xcframework`. Consumers import `FresnicaSDK`; ordinary application builds do not compile Fresnica Rust, run UniFFI generation, or compile SDK-owned Swift sources. The loose generated source remains in the build output for inspection/conformance.
 
 The final Swift framework is built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` and packaged from separate iOS-device and iOS-simulator archives. `FresnicaSDKFFI.xcframework` remains in the distribution because the generated Swift module has a compile/link dependency on its FFI module.
+
+`validate-apple-local.sh` rebuilds the package, type-checks the generated Swift API together with the SDK-owned Keychain/LocalAuthentication helpers, then proves that a separate consumer source can `import FresnicaSDK` from the compiled XCFramework without compiling those SDK sources itself.
 
 ## Security and framework boundary
 
