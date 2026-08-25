@@ -88,6 +88,7 @@ jobs:
             test "$(jq -r '.core_client_api_version' "$marker")" = "$core_api"
             test "$(jq -r '.android.min_sdk' "$marker")" = "26"
             test "$(jq -c '.android.abis' "$marker")" = '["armeabi-v7a","x86","x86_64","arm64-v8a"]'
+            test "$(jq -c '.android.host_dependencies' "$marker")" = '["org.jetbrains.kotlin:kotlin-stdlib:1.9.24","net.java.dev.jna:jna:5.12.1@aar","androidx.annotation:annotation:1.8.2"]'
             test "$(jq -r '.apple.minimum_ios' "$marker")" = "13.4"
             test "$(jq -r '.apple.minimum_macos' "$marker")" = "12.0"
           fi
@@ -300,7 +301,7 @@ jobs:
           - Native binding API: ${{ needs.prepare.outputs.native_api }}
           - Universal SDK API: ${{ needs.prepare.outputs.sdk_api }}
           - Core client API: ${{ needs.prepare.outputs.core_api }}
-          - Android: minSdk 26, four native ABIs, framework-neutral AAR
+          - Android: minSdk 26, four native ABIs, framework-neutral AAR; raw-AAR host dependencies are recorded in the release manifest
           - Apple: FresnicaSDK + FresnicaSDKFFI XCFramework package (iOS + macOS)
 
           React Native/Flutter adapters and application product code are intentionally not embedded in these Native SDK binaries. See docs/native-sdk-release.md in the tagged source tree.

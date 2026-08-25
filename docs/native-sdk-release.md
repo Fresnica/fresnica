@@ -40,7 +40,12 @@ Required marker shape:
   "core_client_api_version": 2,
   "android": {
     "min_sdk": 26,
-    "abis": ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+    "abis": ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"],
+    "host_dependencies": [
+      "org.jetbrains.kotlin:kotlin-stdlib:1.9.24",
+      "net.java.dev.jna:jna:5.12.1@aar",
+      "androidx.annotation:annotation:1.8.2"
+    ]
   },
   "apple": {
     "minimum_ios": "13.4",
@@ -72,6 +77,19 @@ SHA256SUMS
 - no React Native or Flutter implementation.
 
 The release workflow uses the same `build-android.sh` + AAR validation path as Native SDK platform packaging.
+
+The GitHub release artifact is a raw AAR, not a Maven publication, so Gradle cannot discover transitive dependencies from a POM. A direct local-file consumer must also provide the dependencies recorded in the release manifest. For the current 0.1.x baseline:
+
+```gradle
+dependencies {
+    implementation files("libs/fresnica-native-sdk-VERSION.aar")
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+    implementation "net.java.dev.jna:jna:5.12.1@aar"
+    implementation "androidx.annotation:annotation:1.8.2"
+}
+```
+
+JNA is required by the UniFFI Kotlin runtime. Fresnica intentionally does not build a fat AAR just to hide these dependencies. A future Maven publication may carry the same dependency contract in POM/module metadata without changing the Native SDK API.
 
 ### Apple
 

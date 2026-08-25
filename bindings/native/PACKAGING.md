@@ -38,7 +38,7 @@ The resulting AAR contains:
 - `libfresnica_native_sdk.so` for all four ABIs;
 - no React Native or Flutter adapter classes.
 
-An ordinary Android consumer links this AAR. It does not build Rust or run UniFFI.
+An ordinary Android consumer links this AAR. It does not build Rust or run UniFFI. When the AAR is consumed as a local/raw file rather than through Maven metadata, the host must also provide the Kotlin stdlib, JNA and AndroidX annotation versions recorded by `docs/native-sdk-release.md` / the release manifest; the raw AAR cannot carry transitive Gradle dependency metadata by itself.
 
 ## Apple
 
