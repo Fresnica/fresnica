@@ -103,9 +103,12 @@
 - [x] Wire Keychain/Keystore enrollment to Core `derive_unlock_key`
 - [x] Add React Native native-module adapter
 - [x] Native-only biometric `sign_transaction_xdr` orchestration
-- [ ] Mobile watch-only upgrade/downgrade lifecycle
-- [ ] Mobile staged/atomic app-passcode rotation
-- [ ] Explicit mobile Reveal / Export flow
+- [x] Mobile AccountRecord / SignerRecord lifecycle coordinator
+- [x] Mobile watch-only upgrade/downgrade lifecycle
+- [x] Realm-ready Account / Signer / reference schemas and WalletStore adapter
+- [x] Mobile staged/atomic app-passcode rotation
+- [ ] Wire the host application's Realm instance and migrations to `RealmWalletStore`
+- [ ] Explicit mobile Reveal / Export product flow
 
 ## Quality
 
@@ -119,3 +122,5 @@
 - [x] Android/Apple native package build gate
 - [x] Android/Apple system-auth support compile gate
 - [x] Android/Apple React Native protected-signing bridge build gate
+- [x] React Native account/signer lifecycle TypeScript gate
+- [x] CI path isolation between JS lifecycle, native platform, and Rust/UniFFI packaging work

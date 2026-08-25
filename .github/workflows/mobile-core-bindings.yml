@@ -3,13 +3,19 @@ name: Mobile Core bindings
 on:
   push:
     paths:
-      - "bindings/mobile/**"
+      - "bindings/mobile/Cargo.toml"
+      - "bindings/mobile/src/**"
+      - "bindings/mobile/uniffi.toml"
+      - "bindings/mobile/uniffi-bindgen.rs"
       - "core/rust/**"
       - "spec/test-vectors/**"
       - ".github/workflows/mobile-core-bindings.yml"
   pull_request:
     paths:
-      - "bindings/mobile/**"
+      - "bindings/mobile/Cargo.toml"
+      - "bindings/mobile/src/**"
+      - "bindings/mobile/uniffi.toml"
+      - "bindings/mobile/uniffi-bindgen.rs"
       - "core/rust/**"
       - "spec/test-vectors/**"
       - ".github/workflows/mobile-core-bindings.yml"

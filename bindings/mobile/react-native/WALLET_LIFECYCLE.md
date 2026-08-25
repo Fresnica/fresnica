@@ -1,8 +1,7 @@
 # React Native account / signer lifecycle
 
-`src/wallet-lifecycle.ts` is the first client-side implementation of the Mobile/Core account and
-signer model. It is intentionally storage-neutral: the future Fresnica app may adapt Realm, SQLite,
-or another local database through `WalletStore` without changing Core or the lifecycle semantics.
+`src/wallet-lifecycle.ts` is the client-side implementation of the Mobile/Core account and signer
+model. Core owns identity/crypto semantics; the mobile client owns persistence and lifecycle policy.
 
 The persisted concepts are separate:
 
@@ -27,6 +26,26 @@ There is no persisted `watchOnly` or `walletType` flag. `hasLocalSigner(accountI
 whether the account has local signer references. This is deliberately not named `canSign`: actual
 Stellar signability also depends on current ledger signer weights and thresholds.
 
+## Realm persistence
+
+`src/realm-wallet-store.ts` provides the first production-shaped `WalletStore` adapter. It exports
+three independent Realm schemas and schema version `1`:
+
+- `FresnicaAccountRecord`
+- `FresnicaSignerRecord`
+- `FresnicaAccountSignerReference`
+
+The host application owns the actual Realm instance, configuration, file location, encryption,
+schema composition and migrations. `RealmWalletStore` only consumes the small database surface it
+needs, so the lifecycle layer does not import or pin a Realm package version.
+
+The reference table uses a deterministic composite primary key while keeping `accountId` and
+`signerId` indexed. Signer envelopes remain opaque strings; plaintext secret/mnemonic fields do not
+exist in these schemas.
+
+Because Fresnica has not had a public wallet release yet, schema version 1 has no legacy migration.
+After the first public release, schema changes require an explicit migration and rollback plan.
+
 ## Watch-only flows
 
 Adding watch-only first calls native `parseAccount`, then persists only `AccountRecord`. It requires
@@ -48,10 +67,26 @@ Database deletion commits before Keychain/Keystore cleanup. This ordering ensure
 failure cannot restore or retain the encrypted signer envelope. `pendingSystemAuthCleanup` reports
 signer public keys whose secure-store cleanup should be retried by the host application.
 
+## App-passcode rotation
+
+`reprotectAllProtectedSigners(currentPasscode, newPasscode)` is a staged client transaction:
+
+1. snapshot every protected software signer;
+2. call Core `reprotect` for every envelope without changing persistence;
+3. if every Core operation succeeds, verify the signer snapshots are still current;
+4. replace all envelopes in one `WalletStore.transaction`;
+5. only after commit, remove stale system-auth `WalletUnlockKey` records;
+6. return the signer keys that need system-auth re-enrollment and any cleanup failures to retry.
+
+A wrong current passcode or any Core failure therefore leaves every persisted envelope on the old
+passcode. A concurrent signer modification aborts the database swap. A Keychain/Keystore cleanup
+failure never rolls the newly committed envelopes back.
+
 ## Store contract
 
 A `WalletStore` adapter must provide atomic `transaction` semantics. Reads used to decide whether a
-signer became orphaned occur inside the same transaction as reference/signer deletion. This is what
-prevents a downgrade of one account from deleting a signer still referenced by another account.
+signer became orphaned or whether a staged re-protection is still current occur inside the same
+transaction as the writes they protect.
 
-The included tests use an in-memory adapter only. It is not intended as production persistence.
+Tests include an in-memory lifecycle store plus a Realm-compatible database fake. The latter verifies
+the Realm schema/adapter behavior without tying CI to a particular Realm native package build.

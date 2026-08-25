@@ -18,9 +18,14 @@ class MemoryStore implements WalletStore {
   accounts = new Map<string, AccountRecord>();
   signers = new Map<string, ProtectedSoftwareSignerRecord>();
   references: AccountSignerReference[] = [];
+  beforeTransaction: (() => void) | null = null;
 
   async getAccount(accountId: string): Promise<AccountRecord | null> {
     return this.accounts.get(accountId) ?? null;
+  }
+
+  async listProtectedSoftwareSigners(): Promise<readonly ProtectedSoftwareSignerRecord[]> {
+    return [...this.signers.values()].map((signer) => ({ ...signer }));
   }
 
   async listSignerReferencesForAccount(
@@ -30,6 +35,8 @@ class MemoryStore implements WalletStore {
   }
 
   async transaction<T>(work: (transaction: WalletStoreTransaction) => T): Promise<T> {
+    this.beforeTransaction?.();
+    this.beforeTransaction = null;
     const accountsBefore = new Map(this.accounts);
     const signersBefore = new Map(this.signers);
     const referencesBefore = [...this.references];
@@ -82,7 +89,9 @@ class FakeCore implements FresnicaCoreLifecycleBridge {
   failCleanupFor = new Set<string>();
   protectSecretCalls: unknown[][] = [];
   protectMnemonicCalls: unknown[][] = [];
+  reprotectCalls: unknown[][] = [];
   protectSecretError: Error | null = null;
+  reprotectErrorFor = new Set<string>();
 
   async parseAccount(address: string): Promise<NativeAccountIdentity> {
     const identity = this.identities.get(address);
@@ -121,6 +130,27 @@ class FakeCore implements FresnicaCoreLifecycleBridge {
       expectedSignerPublicKey,
     ]);
     return this.protectedSigner;
+  }
+
+  async reprotect(
+    envelopeJson: string,
+    currentPasscode: string,
+    newPasscode: string,
+    expectedSignerPublicKey: string,
+  ): Promise<NativeProtectedSoftwareSigner> {
+    this.reprotectCalls.push([
+      envelopeJson,
+      currentPasscode,
+      newPasscode,
+      expectedSignerPublicKey,
+    ]);
+    if (this.reprotectErrorFor.has(expectedSignerPublicKey)) {
+      throw new Error(`reprotect failed for ${expectedSignerPublicKey}`);
+    }
+    return {
+      signerPublicKey: expectedSignerPublicKey,
+      envelopeJson: `${envelopeJson}:new`,
+    };
   }
 
   async hasSystemAuth(expectedSignerPublicKey: string): Promise<boolean> {
@@ -165,6 +195,15 @@ function setupWatchOnly(kind: "classic" | "contract" = "classic") {
   }
   const coordinator = new WalletLifecycleCoordinator(core, store, ids("account-1", "signer-1"));
   return { core, store, coordinator, address };
+}
+
+function signer(id: string, publicKey: string, envelopeJson: string): ProtectedSoftwareSignerRecord {
+  return {
+    id,
+    kind: "protected-software",
+    signerPublicKey: publicKey,
+    envelopeJson,
+  };
 }
 
 test("watch-only account persists only account identity and derives local-signer state", async () => {
@@ -260,6 +299,79 @@ test("contract watch-only account rejects Ed25519 software-signer upgrade before
   assert.equal(core.protectSecretCalls.length, 0);
 });
 
+test("app-passcode rotation stages every signer before atomically replacing envelopes", async () => {
+  const core = new FakeCore();
+  const store = new MemoryStore();
+  store.signers.set("signer-a", signer("signer-a", "GA", "old-a"));
+  store.signers.set("signer-b", signer("signer-b", "GB", "old-b"));
+  core.systemAuth.add("GA");
+  const coordinator = new WalletLifecycleCoordinator(core, store, ids("unused"));
+
+  const result = await coordinator.reprotectAllProtectedSigners("old-pass", "new-pass");
+
+  assert.deepEqual(core.reprotectCalls, [
+    ["old-a", "old-pass", "new-pass", "GA"],
+    ["old-b", "old-pass", "new-pass", "GB"],
+  ]);
+  assert.equal(store.signers.get("signer-a")?.envelopeJson, "old-a:new");
+  assert.equal(store.signers.get("signer-b")?.envelopeJson, "old-b:new");
+  assert.deepEqual(result.updatedSignerIds, ["signer-a", "signer-b"]);
+  assert.deepEqual(result.systemAuthReenrollment, ["GA"]);
+  assert.deepEqual(result.pendingSystemAuthCleanup, []);
+  assert.equal(core.systemAuth.has("GA"), false);
+});
+
+test("app-passcode rotation failure during staging leaves all persisted envelopes unchanged", async () => {
+  const core = new FakeCore();
+  const store = new MemoryStore();
+  store.signers.set("signer-a", signer("signer-a", "GA", "old-a"));
+  store.signers.set("signer-b", signer("signer-b", "GB", "old-b"));
+  core.reprotectErrorFor.add("GB");
+  const coordinator = new WalletLifecycleCoordinator(core, store, ids("unused"));
+
+  await assert.rejects(
+    coordinator.reprotectAllProtectedSigners("old-pass", "new-pass"),
+    /reprotect failed for GB/,
+  );
+
+  assert.equal(store.signers.get("signer-a")?.envelopeJson, "old-a");
+  assert.equal(store.signers.get("signer-b")?.envelopeJson, "old-b");
+  assert.equal(core.systemAuth.size, 0);
+});
+
+test("app-passcode rotation aborts when signer persistence changes after staging", async () => {
+  const core = new FakeCore();
+  const store = new MemoryStore();
+  store.signers.set("signer-a", signer("signer-a", "GA", "old-a"));
+  store.beforeTransaction = () => {
+    store.signers.set("signer-a", signer("signer-a", "GA", "concurrent"));
+  };
+  const coordinator = new WalletLifecycleCoordinator(core, store, ids("unused"));
+
+  await assert.rejects(
+    coordinator.reprotectAllProtectedSigners("old-pass", "new-pass"),
+    (error: unknown) =>
+      error instanceof WalletLifecycleError && error.code === "signer-changed",
+  );
+
+  assert.equal(store.signers.get("signer-a")?.envelopeJson, "concurrent");
+});
+
+test("app-passcode rotation reports stale system-auth cleanup for retry after commit", async () => {
+  const core = new FakeCore();
+  const store = new MemoryStore();
+  store.signers.set("signer-a", signer("signer-a", "GA", "old-a"));
+  core.systemAuth.add("GA");
+  core.failCleanupFor.add("GA");
+  const coordinator = new WalletLifecycleCoordinator(core, store, ids("unused"));
+
+  const result = await coordinator.reprotectAllProtectedSigners("old-pass", "new-pass");
+
+  assert.equal(store.signers.get("signer-a")?.envelopeJson, "old-a:new");
+  assert.deepEqual(result.systemAuthReenrollment, []);
+  assert.deepEqual(result.pendingSystemAuthCleanup, ["GA"]);
+});
+
 test("downgrade preserves account, deletes orphan signer, and removes system auth", async () => {
   const { coordinator, core, store, address } = setupWatchOnly();
   const account = await coordinator.addWatchOnly({ address, network: "public", name: "Persistent" });
@@ -280,12 +392,7 @@ test("downgrade preserves account, deletes orphan signer, and removes system aut
 test("downgrade keeps a signer and system auth when another account still references it", async () => {
   const core = new FakeCore();
   const store = new MemoryStore();
-  const signer: ProtectedSoftwareSignerRecord = {
-    id: "shared-signer",
-    kind: "protected-software",
-    signerPublicKey: "GDELEGATE",
-    envelopeJson: '{"shared":true}',
-  };
+  const sharedSigner = signer("shared-signer", "GDELEGATE", '{"shared":true}');
   const accountA: AccountRecord = {
     id: "account-a",
     address: "GACCOUNT_A",
@@ -302,21 +409,21 @@ test("downgrade keeps a signer and system auth when another account still refere
   };
   store.accounts.set(accountA.id, accountA);
   store.accounts.set(accountB.id, accountB);
-  store.signers.set(signer.id, signer);
+  store.signers.set(sharedSigner.id, sharedSigner);
   store.references.push(
-    { accountId: accountA.id, signerId: signer.id },
-    { accountId: accountB.id, signerId: signer.id },
+    { accountId: accountA.id, signerId: sharedSigner.id },
+    { accountId: accountB.id, signerId: sharedSigner.id },
   );
-  core.systemAuth.add(signer.signerPublicKey);
+  core.systemAuth.add(sharedSigner.signerPublicKey);
   const coordinator = new WalletLifecycleCoordinator(core, store, ids("unused"));
 
   const result = await coordinator.downgradeToWatchOnly(accountA.id);
 
   assert.deepEqual(result.removedSignerIds, []);
   assert.deepEqual(result.pendingSystemAuthCleanup, []);
-  assert.equal(store.signers.has(signer.id), true);
-  assert.deepEqual(store.references, [{ accountId: accountB.id, signerId: signer.id }]);
-  assert.equal(core.systemAuth.has(signer.signerPublicKey), true);
+  assert.equal(store.signers.has(sharedSigner.id), true);
+  assert.deepEqual(store.references, [{ accountId: accountB.id, signerId: sharedSigner.id }]);
+  assert.equal(core.systemAuth.has(sharedSigner.signerPublicKey), true);
 });
 
 test("downgrade reports post-commit system-auth cleanup failures without restoring secret material", async () => {
