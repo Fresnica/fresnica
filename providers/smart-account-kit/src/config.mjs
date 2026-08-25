@@ -15,6 +15,18 @@ export const STELLAR_TESTNET_SMART_ACCOUNT = Object.freeze({
 });
 
 export function smartAccountKitConfig(overrides = {}) {
+  for (const field of [
+    'networkPassphrase',
+    'accountWasmHash',
+    'webauthnVerifierAddress',
+    'ed25519VerifierAddress',
+  ]) {
+    if (overrides[field] !== undefined &&
+        overrides[field] !== STELLAR_TESTNET_SMART_ACCOUNT[field]) {
+      throw new TypeError(`${field} is pinned to the reviewed Protocol 27 Testnet deployment`);
+    }
+  }
+
   const source = { ...STELLAR_TESTNET_SMART_ACCOUNT, ...overrides };
   const required = [
     'rpcUrl',

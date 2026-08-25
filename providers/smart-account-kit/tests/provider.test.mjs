@@ -34,6 +34,32 @@ test('pins the reviewed upstream provider and Protocol 27 testnet deployment', (
   assert.equal(config.networkPassphrase, 'Test SDF Network ; September 2015');
 });
 
+test('rejects deployment identity overrides instead of mixing network identities', () => {
+  assert.throws(
+    () => smartAccountKitConfig({
+      networkPassphrase: 'Public Global Stellar Network ; September 2015',
+    }),
+    /pinned to the reviewed Protocol 27 Testnet deployment/,
+  );
+  assert.throws(
+    () => smartAccountKitConfig({ accountWasmHash: '00'.repeat(32) }),
+    /pinned to the reviewed Protocol 27 Testnet deployment/,
+  );
+  assert.throws(
+    () => smartAccountKitConfig({
+      webauthnVerifierAddress: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4',
+    }),
+    /pinned to the reviewed Protocol 27 Testnet deployment/,
+  );
+
+  const customRpc = smartAccountKitConfig({ rpcUrl: 'https://example.testnet.invalid' });
+  assert.equal(customRpc.rpcUrl, 'https://example.testnet.invalid');
+  assert.equal(
+    customRpc.networkPassphrase,
+    STELLAR_TESTNET_SMART_ACCOUNT.networkPassphrase,
+  );
+});
+
 test('restores and connects contract accounts without inventing an Ed25519 signer', async () => {
   const calls = [];
   const kit = fakeKit({

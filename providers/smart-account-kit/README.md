@@ -16,7 +16,7 @@ No `WalletUnlockKey`, Fresnica protected envelope, mnemonic or Stellar secret is
 
 ## Upstream pin
 
-The prototype is pinned to `smart-account-kit` **0.6.2**. The package is pre-1.0, so update the provider deliberately when the upstream API or deployed contracts change.
+The prototype is pinned to `smart-account-kit` **0.6.2**. The package is pre-1.0, so update the provider deliberately when the upstream API or deployed contracts change. Upstream currently warns that the SDK/demo/relayer integration has **not undergone an independent security audit**; this Fresnica provider is therefore a Testnet interoperability prototype, not a production/mainnet approval.
 
 The checked-in Testnet configuration mirrors the upstream Protocol 27 demo deployment published on 2026-07-09:
 
@@ -25,7 +25,7 @@ The checked-in Testnet configuration mirrors the upstream Protocol 27 demo deplo
 - WebAuthn verifier: `CC7EKIHQP3TN4CARQDND6CEOY2UXLWWC2X5GHTD5NLAT7BG5GPZIOM3F`
 - native XLM SAC: `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`
 
-The public testnet relayer is a fee payer, not a signer or custodian. Production use must make an explicit relayer/deployer decision.
+The public testnet relayer is a fee payer, not a signer or custodian. Production use must make an explicit relayer/deployer decision. The first provider also rejects overrides of the network passphrase, account WASM hash and verifier identities so an application cannot accidentally combine Mainnet transport/configuration with the reviewed Testnet deployment. Alternate Testnet RPC/relayer/storage/RP settings remain configurable.
 
 ## Provider surface
 

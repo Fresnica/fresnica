@@ -183,7 +183,7 @@ Do not assume a browser-only WebAuthn implementation is sufficient for React Nat
 
 ## Compatibility and release rules
 
-`smart-account-kit` is currently pre-1.0 and its package API may change. The first Fresnica provider prototype pins upstream package **0.6.2** and the upstream Protocol 27 Testnet deployment published on **2026-07-09**. Fresnica must separately pin/verify package versions and on-chain contract/verifier deployments for every release.
+`smart-account-kit` is currently pre-1.0 and its package API may change. The first Fresnica provider prototype pins upstream package **0.6.2** and the upstream Protocol 27 Testnet deployment published on **2026-07-09**. The upstream project currently states that its SDK/demo/relayer integration has not undergone an independent security audit, so this checkpoint is Testnet-only and is not evidence for production/mainnet enablement. Fresnica must separately pin/verify package versions and on-chain contract/verifier deployments for every release.
 
 Before production enablement, record at minimum:
 
