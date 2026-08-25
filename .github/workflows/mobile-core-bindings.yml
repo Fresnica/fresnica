@@ -7,6 +7,7 @@ on:
       - "bindings/mobile/src/**"
       - "bindings/mobile/uniffi.toml"
       - "bindings/mobile/uniffi-bindgen.rs"
+      - "sdk/rust/**"
       - "core/rust/**"
       - "spec/test-vectors/**"
       - ".github/workflows/mobile-core-bindings.yml"
@@ -16,6 +17,7 @@ on:
       - "bindings/mobile/src/**"
       - "bindings/mobile/uniffi.toml"
       - "bindings/mobile/uniffi-bindgen.rs"
+      - "sdk/rust/**"
       - "core/rust/**"
       - "spec/test-vectors/**"
       - ".github/workflows/mobile-core-bindings.yml"
@@ -33,6 +35,8 @@ jobs:
         working-directory: bindings/mobile
       - name: Test Rust Core
         run: cargo test --manifest-path core/rust/Cargo.toml
+      - name: Test universal SDK
+        run: cargo test --manifest-path sdk/rust/Cargo.toml
       - name: Test mobile facade
         run: cargo test
         working-directory: bindings/mobile
