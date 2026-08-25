@@ -137,7 +137,7 @@ archive_swift_framework() {
   archive_path="$3"
   derived_data="$4"
 
-  (
+  if ! (
     cd "$SWIFT_PACKAGE_DIR"
     xcodebuild archive \
       -scheme FresnicaSDK \
@@ -148,7 +148,12 @@ archive_swift_framework() {
       BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
       ONLY_ACTIVE_ARCH=NO \
       IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
-  )
+  ); then
+    echo "failed to archive FresnicaSDK for ${platform}" >&2
+    echo "if Xcode reports no matching generic iOS destination, install the iOS platform" >&2
+    echo "with Xcode > Settings > Components or: xcodebuild -downloadPlatform iOS" >&2
+    exit 1
+  fi
 
   framework="$archive_path.xcarchive/Products/usr/local/lib/FresnicaSDK.framework"
   if [ ! -d "$framework" ]; then
