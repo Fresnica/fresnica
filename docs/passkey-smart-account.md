@@ -183,7 +183,7 @@ Do not assume a browser-only WebAuthn implementation is sufficient for React Nat
 
 ## Compatibility and release rules
 
-`smart-account-kit` is currently pre-1.0 and its package API may change. Fresnica integration must pin exact versions and separately pin/verify the on-chain contract/verifier deployment it targets.
+`smart-account-kit` is currently pre-1.0 and its package API may change. The first Fresnica provider prototype pins upstream package **0.6.2** and the upstream Protocol 27 Testnet deployment published on **2026-07-09**. Fresnica must separately pin/verify package versions and on-chain contract/verifier deployments for every release.
 
 Before production enablement, record at minimum:
 
@@ -200,10 +200,10 @@ The upstream deterministic-deployer design documents an address-squatting residu
 ## Implementation sequence
 
 1. Keep the current classic `G...` software-signer path unchanged.
-2. Add a provider-neutral **contract smart-account capability** at the application/service boundary, not in `ProtectedSoftwareSigner`.
-3. Prototype `smart-account-kit` on Testnet with create/connect, transfer and recovery-signer flows.
+2. Add a provider-neutral **contract smart-account capability** at the application/service boundary, not in `ProtectedSoftwareSigner`. **Implemented:** `providers/smart-account-kit` provides the first pinned provider boundary with create/connect/discover and safe sign-and-submit orchestration.
+3. Run the provider against real Testnet WebAuthn in a browser and capture create/connect/sign-and-submit results.
 4. Persist passkey credential/provider metadata separately from protected Ed25519 signer records.
-5. Add conformance fixtures for smart-account transaction/auth XDR and account identity.
+5. Add conformance fixtures from real smart-account transaction/auth XDR, including context-rule identity.
 6. Only after the provider boundary is proven, decide which protocol-generic Soroban authorization helpers belong in Rust Core/SDK.
 7. Add platform-native Mobile passkey adapters against the same smart-account contract semantics.
 

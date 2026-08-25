@@ -102,7 +102,7 @@ Do not copy Mobile security assumptions blindly into browsers. Browser key prote
 
 Web may consume WASM directly. Add framework glue only where a real framework integration requires it.
 
-Passkey smart accounts are explicitly **not** a WebAuthn wrapper around `WalletUnlockKey`. `passkey-smart-account.md` defines them as `C...` contract accounts with provider/on-chain authorization. The first interoperability target is Stellar `smart-account-kit`; keep that integration outside protected Ed25519 signer records and outside Core platform-auth APIs.
+Passkey smart accounts are explicitly **not** a WebAuthn wrapper around `WalletUnlockKey`. `passkey-smart-account.md` defines them as `C...` contract accounts with provider/on-chain authorization. The first interoperability target is Stellar `smart-account-kit`; keep that integration outside protected Ed25519 signer records and outside Core platform-auth APIs. The first provider boundary is implemented under `providers/smart-account-kit`, pinned to upstream 0.6.2 plus the published 2026-07-09 Protocol 27 Testnet deployment. Local mock conformance is green and a localhost Vite smoke harness now exercises create/fund/discover/transfer against Testnet; real browser/WebAuthn execution and captured auth-XDR/context-rule fixtures remain pending.
 
 ## Framework Adapter Contract
 

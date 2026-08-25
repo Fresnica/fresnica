@@ -1,0 +1,23 @@
+{
+  "name": "@fresnica/smart-account-kit-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check:installed": "node scripts/check-installed.mjs",
+    "testnet:dev": "vite demo --host 127.0.0.1",
+    "testnet:build": "vite build demo"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "16.0.1",
+    "buffer": "6.0.3",
+    "smart-account-kit": "0.6.2"
+  },
+  "devDependencies": {
+    "vite": "8.0.5"
+  }
+}

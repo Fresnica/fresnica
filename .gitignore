@@ -13,3 +13,7 @@ bindings/wasm/build/
 .fresnica/
 *.sqlite3-shm
 *.sqlite3-wal
+
+# Node / local browser build output
+**/node_modules/
+providers/smart-account-kit/demo/dist/

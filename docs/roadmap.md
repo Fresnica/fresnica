@@ -161,7 +161,7 @@ Validated on macOS with the Rust + `wasm-bindgen` toolchain via `bindings/wasm/s
 - generated JS/TypeScript surface validation;
 - Node-hosted runtime conformance against shared transaction vectors.
 
-The passkey architecture is now defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. The next passkey work is a Testnet provider prototype and auth-XDR conformance, not an unlock-key API added to WASM.
+The passkey architecture is now defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary now lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally, deliberately delegates only the safe upstream `signAndSubmit` path, and includes a localhost browser smoke harness for create/fund/discover/native-XLM transfer. The next checkpoint is executing that harness with real WebAuthn/Testnet, followed by auth-XDR/context-rule fixtures; this is not an unlock-key API added to WASM.
 
 Web should normally consume the WASM SDK directly. Add a web-framework adapter only if a framework creates a real integration need.
 
