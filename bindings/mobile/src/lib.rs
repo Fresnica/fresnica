@@ -1,30 +1,24 @@
-//! Mobile-facing facade over `fresnica_core::CoreClientApi`.
+//! Mobile UniFFI compatibility facade over `fresnica_sdk::FresnicaSdk`.
 //!
-//! The Rust-facing surface remains platform-neutral. UniFFI exports this exact
-//! facade to Swift and Kotlin so native adapters do not reproduce Core crypto,
-//! signer identity checks, transaction hashing, signature verification, or
-//! error classification.
+//! The v0.1.0 Swift/Kotlin-facing surface remains stable while the semantic
+//! wallet/signing contract lives in the platform-neutral SDK. This crate owns
+//! only UniFFI DTO/error translation; it does not reproduce Core cryptography,
+//! signer identity checks, envelope parsing, unlock-key validation, transaction
+//! hashing, or signature verification.
 
 use std::{error::Error, fmt};
 
-use fresnica_core::{
-    ClientAccountKind, ClientApiError, ClientApiErrorCode, ClientProtectedSoftwareSigner,
-    CoreClientApi, ExportedSigningMaterial, WalletUnlockKey, CLIENT_API_VERSION,
+use fresnica_sdk::{
+    FresnicaSdk, SdkAccountKind, SdkError, SdkErrorCode, SdkExportedSigningMaterial,
+    SdkGeneratedMnemonic, SdkProtectedSoftwareSigner, SdkSigningMaterialKind,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use zeroize::{Zeroize, Zeroizing};
 
 uniffi::setup_scaffolding!();
 
 pub const MOBILE_BINDING_API_VERSION: u64 = 2;
 
-/// Stateless mobile entry point.
-///
-/// `CoreClientApi` currently carries no client session state; each operation
-/// creates a short-lived Core facade. Keeping the exported object stateless makes
-/// it naturally `Send + Sync`, as required by UniFFI, without imposing foreign
-/// threading requirements on Core protection-provider traits.
+/// Stateless compatibility entry point for the existing Mobile v0.1.0 API.
 #[derive(uniffi::Object)]
 pub struct MobileCoreApi;
 
@@ -35,8 +29,8 @@ impl Default for MobileCoreApi {
 }
 
 impl MobileCoreApi {
-    fn core(&self) -> CoreClientApi {
-        CoreClientApi::new()
+    fn sdk(&self) -> FresnicaSdk {
+        FresnicaSdk::new()
     }
 }
 
@@ -48,21 +42,22 @@ impl MobileCoreApi {
     }
 
     pub fn version(&self) -> MobileCoreVersion {
+        let sdk_version = self.sdk().version();
         MobileCoreVersion {
             mobile_binding_api_version: MOBILE_BINDING_API_VERSION,
-            core_client_api_version: CLIENT_API_VERSION,
+            core_client_api_version: sdk_version.core_client_api_version,
         }
     }
 
     pub fn parse_account(&self, address: String) -> Result<MobileAccountIdentity, MobileCoreError> {
         let identity = self
-            .core()
-            .parse_account(&address)
+            .sdk()
+            .parse_account(address)
             .map_err(MobileCoreError::from)?;
         Ok(MobileAccountIdentity {
             kind: match identity.kind {
-                ClientAccountKind::Classic => MobileAccountKind::Classic,
-                ClientAccountKind::Contract => MobileAccountKind::Contract,
+                SdkAccountKind::Classic => MobileAccountKind::Classic,
+                SdkAccountKind::Contract => MobileAccountKind::Contract,
             },
             address: identity.address,
             public_key: identity.public_key,
@@ -75,17 +70,10 @@ impl MobileCoreApi {
         passcode: String,
         expected_signer_public_key: Option<String>,
     ) -> Result<MobileProtectedSoftwareSigner, MobileCoreError> {
-        let secret = Zeroizing::new(secret);
-        let passcode = Zeroizing::new(passcode);
-        let protected = self
-            .core()
-            .protect_secret(
-                secret.as_str(),
-                passcode.as_str(),
-                expected_signer_public_key.as_deref(),
-            )
-            .map_err(MobileCoreError::from)?;
-        mobile_protected_signer(protected)
+        self.sdk()
+            .protect_secret(secret, passcode, expected_signer_public_key)
+            .map(mobile_protected_signer)
+            .map_err(MobileCoreError::from)
     }
 
     pub fn protect_mnemonic(
@@ -97,21 +85,17 @@ impl MobileCoreApi {
         passcode: String,
         expected_signer_public_key: Option<String>,
     ) -> Result<MobileProtectedSoftwareSigner, MobileCoreError> {
-        let mnemonic = Zeroizing::new(mnemonic);
-        let mnemonic_passphrase = Zeroizing::new(mnemonic_passphrase);
-        let passcode = Zeroizing::new(passcode);
-        let protected = self
-            .core()
+        self.sdk()
             .protect_mnemonic(
-                mnemonic.as_str(),
-                mnemonic_passphrase.as_str(),
-                binding_usize(index, "index")?,
-                language.as_deref(),
-                passcode.as_str(),
-                expected_signer_public_key.as_deref(),
+                mnemonic,
+                mnemonic_passphrase,
+                index,
+                language,
+                passcode,
+                expected_signer_public_key,
             )
-            .map_err(MobileCoreError::from)?;
-        mobile_protected_signer(protected)
+            .map(mobile_protected_signer)
+            .map_err(MobileCoreError::from)
     }
 
     pub fn generate_mnemonic(
@@ -122,24 +106,10 @@ impl MobileCoreApi {
         index: u32,
         passcode: String,
     ) -> Result<MobileGeneratedMnemonic, MobileCoreError> {
-        let mnemonic_passphrase = Zeroizing::new(mnemonic_passphrase);
-        let passcode = Zeroizing::new(passcode);
-        let generated = self
-            .core()
-            .generate_mnemonic(
-                &language,
-                binding_usize(strength, "strength")?,
-                mnemonic_passphrase.as_str(),
-                binding_usize(index, "index")?,
-                passcode.as_str(),
-            )
-            .map_err(MobileCoreError::from)?;
-        Ok(MobileGeneratedMnemonic {
-            signer: mobile_protected_signer(generated.signer)?,
-            mnemonic: generated.mnemonic.as_str().to_owned(),
-            language: generated.language,
-            index: binding_u32(generated.index, "index")?,
-        })
+        self.sdk()
+            .generate_mnemonic(language, strength, mnemonic_passphrase, index, passcode)
+            .map(mobile_generated_mnemonic)
+            .map_err(MobileCoreError::from)
     }
 
     pub fn reprotect(
@@ -149,19 +119,15 @@ impl MobileCoreApi {
         new_passcode: String,
         expected_signer_public_key: String,
     ) -> Result<MobileProtectedSoftwareSigner, MobileCoreError> {
-        let envelope = parse_envelope(&envelope_json)?;
-        let current_passcode = Zeroizing::new(current_passcode);
-        let new_passcode = Zeroizing::new(new_passcode);
-        let protected = self
-            .core()
+        self.sdk()
             .reprotect(
-                &envelope,
-                current_passcode.as_str(),
-                new_passcode.as_str(),
-                &expected_signer_public_key,
+                envelope_json,
+                current_passcode,
+                new_passcode,
+                expected_signer_public_key,
             )
-            .map_err(MobileCoreError::from)?;
-        mobile_protected_signer(protected)
+            .map(mobile_protected_signer)
+            .map_err(MobileCoreError::from)
     }
 
     pub fn derive_unlock_key(
@@ -170,13 +136,9 @@ impl MobileCoreApi {
         passcode: String,
         expected_signer_public_key: String,
     ) -> Result<Vec<u8>, MobileCoreError> {
-        let envelope = parse_envelope(&envelope_json)?;
-        let passcode = Zeroizing::new(passcode);
-        let key = self
-            .core()
-            .derive_unlock_key(&envelope, passcode.as_str(), &expected_signer_public_key)
-            .map_err(MobileCoreError::from)?;
-        Ok(key.as_bytes().to_vec())
+        self.sdk()
+            .derive_unlock_key(envelope_json, passcode, expected_signer_public_key)
+            .map_err(MobileCoreError::from)
     }
 
     pub fn validate_unlock_key(
@@ -185,10 +147,8 @@ impl MobileCoreApi {
         unlock_key: Vec<u8>,
         expected_signer_public_key: String,
     ) -> Result<(), MobileCoreError> {
-        let envelope = parse_envelope(&envelope_json)?;
-        let unlock_key = binding_unlock_key(unlock_key)?;
-        self.core()
-            .validate_unlock_key(&envelope, &unlock_key, &expected_signer_public_key)
+        self.sdk()
+            .validate_unlock_key(envelope_json, unlock_key, expected_signer_public_key)
             .map_err(MobileCoreError::from)
     }
 
@@ -200,15 +160,13 @@ impl MobileCoreApi {
         transaction_xdr: Vec<u8>,
         network_passphrase: String,
     ) -> Result<Vec<u8>, MobileCoreError> {
-        let envelope = parse_envelope(&envelope_json)?;
-        let unlock_key = binding_unlock_key(unlock_key)?;
-        self.core()
+        self.sdk()
             .sign_transaction_xdr(
-                &envelope,
-                &unlock_key,
-                &expected_signer_public_key,
-                &transaction_xdr,
-                &network_passphrase,
+                envelope_json,
+                unlock_key,
+                expected_signer_public_key,
+                transaction_xdr,
+                network_passphrase,
             )
             .map_err(MobileCoreError::from)
     }
@@ -219,39 +177,10 @@ impl MobileCoreApi {
         fresh_passcode: String,
         expected_signer_public_key: String,
     ) -> Result<MobileExportedSigningMaterial, MobileCoreError> {
-        let envelope = parse_envelope(&envelope_json)?;
-        let fresh_passcode = Zeroizing::new(fresh_passcode);
-        let material = self
-            .core()
-            .reveal(
-                &envelope,
-                fresh_passcode.as_str(),
-                &expected_signer_public_key,
-            )
-            .map_err(MobileCoreError::from)?;
-        match material {
-            ExportedSigningMaterial::Secret { secret } => Ok(MobileExportedSigningMaterial {
-                kind: MobileSigningMaterialKind::Secret,
-                secret: Some(secret.as_str().to_owned()),
-                mnemonic: None,
-                mnemonic_passphrase: None,
-                index: None,
-                language: None,
-            }),
-            ExportedSigningMaterial::Mnemonic {
-                mnemonic,
-                mnemonic_passphrase,
-                index,
-                language,
-            } => Ok(MobileExportedSigningMaterial {
-                kind: MobileSigningMaterialKind::Mnemonic,
-                secret: None,
-                mnemonic: Some(mnemonic.as_str().to_owned()),
-                mnemonic_passphrase: Some(mnemonic_passphrase.as_str().to_owned()),
-                index: Some(binding_u32(index, "index")?),
-                language: Some(language),
-            }),
-        }
+        self.sdk()
+            .reveal(envelope_json, fresh_passcode, expected_signer_public_key)
+            .map(mobile_exported_signing_material)
+            .map_err(MobileCoreError::from)
     }
 
     pub fn prepare_ed25519_signing(
@@ -260,11 +189,11 @@ impl MobileCoreApi {
         network_passphrase: String,
     ) -> Result<MobileEd25519SigningRequest, MobileCoreError> {
         let request = self
-            .core()
-            .prepare_ed25519_signing(&transaction_xdr, &network_passphrase)
+            .sdk()
+            .prepare_ed25519_signing(transaction_xdr, network_passphrase)
             .map_err(MobileCoreError::from)?;
         Ok(MobileEd25519SigningRequest {
-            transaction_hash: request.transaction_hash.to_vec(),
+            transaction_hash: request.transaction_hash,
             transaction_xdr: request.transaction_xdr,
             network_passphrase: request.network_passphrase,
         })
@@ -277,12 +206,12 @@ impl MobileCoreApi {
         signer_public_key: String,
         signature: Vec<u8>,
     ) -> Result<Vec<u8>, MobileCoreError> {
-        self.core()
+        self.sdk()
             .apply_ed25519_signature(
-                &transaction_xdr,
-                &network_passphrase,
-                &signer_public_key,
-                &signature,
+                transaction_xdr,
+                network_passphrase,
+                signer_public_key,
+                signature,
             )
             .map_err(MobileCoreError::from)
     }
@@ -431,77 +360,52 @@ impl fmt::Display for MobileCoreError {
 
 impl Error for MobileCoreError {}
 
-impl From<ClientApiError> for MobileCoreError {
-    fn from(error: ClientApiError) -> Self {
-        let code = match error.code() {
-            ClientApiErrorCode::InvalidInput => MobileCoreErrorCode::InvalidInput,
-            ClientApiErrorCode::InvalidPasscode => MobileCoreErrorCode::InvalidPasscode,
-            ClientApiErrorCode::InvalidUnlockKey => MobileCoreErrorCode::InvalidUnlockKey,
-            ClientApiErrorCode::InvalidProtectedData => MobileCoreErrorCode::InvalidProtectedData,
-            ClientApiErrorCode::IdentityMismatch => MobileCoreErrorCode::IdentityMismatch,
-            ClientApiErrorCode::InvalidTransaction => MobileCoreErrorCode::InvalidTransaction,
-            ClientApiErrorCode::CoreError => MobileCoreErrorCode::CoreError,
+impl From<SdkError> for MobileCoreError {
+    fn from(error: SdkError) -> Self {
+        let code = match error.code {
+            SdkErrorCode::InvalidInput => MobileCoreErrorCode::InvalidInput,
+            SdkErrorCode::InvalidPasscode => MobileCoreErrorCode::InvalidPasscode,
+            SdkErrorCode::InvalidUnlockKey => MobileCoreErrorCode::InvalidUnlockKey,
+            SdkErrorCode::InvalidProtectedData => MobileCoreErrorCode::InvalidProtectedData,
+            SdkErrorCode::IdentityMismatch => MobileCoreErrorCode::IdentityMismatch,
+            SdkErrorCode::InvalidTransaction => MobileCoreErrorCode::InvalidTransaction,
+            SdkErrorCode::CoreError => MobileCoreErrorCode::CoreError,
             _ => MobileCoreErrorCode::CoreError,
         };
-        Self::new(code, error.message())
+        Self::new(code, error.message)
     }
 }
 
-fn mobile_protected_signer(
-    protected: ClientProtectedSoftwareSigner,
-) -> Result<MobileProtectedSoftwareSigner, MobileCoreError> {
-    let envelope_json = serde_json::to_string(&protected.envelope).map_err(|error| {
-        MobileCoreError::new(
-            MobileCoreErrorCode::CoreError,
-            format!("unable to serialize protected signer envelope: {error}"),
-        )
-    })?;
-    Ok(MobileProtectedSoftwareSigner {
+fn mobile_protected_signer(protected: SdkProtectedSoftwareSigner) -> MobileProtectedSoftwareSigner {
+    MobileProtectedSoftwareSigner {
         signer_public_key: protected.signer_public_key,
-        envelope_json,
-    })
-}
-
-fn parse_envelope(envelope_json: &str) -> Result<Value, MobileCoreError> {
-    serde_json::from_str(envelope_json).map_err(|_| {
-        MobileCoreError::new(
-            MobileCoreErrorCode::InvalidProtectedData,
-            "protected signer envelope is not valid JSON",
-        )
-    })
-}
-
-fn binding_unlock_key(bytes: Vec<u8>) -> Result<WalletUnlockKey, MobileCoreError> {
-    let bytes = Zeroizing::new(bytes);
-    if bytes.len() != 32 {
-        return Err(MobileCoreError::new(
-            MobileCoreErrorCode::InvalidUnlockKey,
-            "wallet unlock key must be exactly 32 bytes",
-        ));
+        envelope_json: protected.envelope_json,
     }
-    let mut key_bytes = [0u8; 32];
-    key_bytes.copy_from_slice(bytes.as_slice());
-    let key = WalletUnlockKey::from_bytes(key_bytes);
-    key_bytes.zeroize();
-    Ok(key)
 }
 
-fn binding_usize(value: u32, field: &'static str) -> Result<usize, MobileCoreError> {
-    usize::try_from(value).map_err(|_| {
-        MobileCoreError::new(
-            MobileCoreErrorCode::InvalidInput,
-            format!("{field} is outside the supported range"),
-        )
-    })
+fn mobile_generated_mnemonic(generated: SdkGeneratedMnemonic) -> MobileGeneratedMnemonic {
+    MobileGeneratedMnemonic {
+        signer: mobile_protected_signer(generated.signer),
+        mnemonic: generated.mnemonic,
+        language: generated.language,
+        index: generated.index,
+    }
 }
 
-fn binding_u32(value: usize, field: &'static str) -> Result<u32, MobileCoreError> {
-    u32::try_from(value).map_err(|_| {
-        MobileCoreError::new(
-            MobileCoreErrorCode::InvalidProtectedData,
-            format!("{field} is outside the mobile binding range"),
-        )
-    })
+fn mobile_exported_signing_material(
+    material: SdkExportedSigningMaterial,
+) -> MobileExportedSigningMaterial {
+    MobileExportedSigningMaterial {
+        kind: match material.kind {
+            SdkSigningMaterialKind::Secret => MobileSigningMaterialKind::Secret,
+            SdkSigningMaterialKind::Mnemonic => MobileSigningMaterialKind::Mnemonic,
+        },
+        secret: material.secret,
+        mnemonic: material.mnemonic,
+        mnemonic_passphrase: material.mnemonic_passphrase,
+        index: material.index,
+        language: material.language,
+    }
 }
 
 #[cfg(test)]
@@ -548,7 +452,10 @@ mod tests {
             version.mobile_binding_api_version,
             MOBILE_BINDING_API_VERSION
         );
-        assert_eq!(version.core_client_api_version, CLIENT_API_VERSION);
+        assert_eq!(
+            version.core_client_api_version,
+            FresnicaSdk::new().version().core_client_api_version
+        );
 
         let classic = api.parse_account(CLASSIC.to_owned()).unwrap();
         assert_eq!(classic.kind, MobileAccountKind::Classic);
