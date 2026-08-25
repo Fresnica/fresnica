@@ -11,12 +11,30 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
-for tool in cargo rustup lipo xcodebuild; do
+for tool in cargo rustup xcrun lipo xcodebuild; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "$tool is required" >&2
     exit 1
   fi
 done
+
+# CommandLineTools only ships the macOS SDK. Prefer a full Xcode installation
+# for this process without changing the user's global xcode-select setting.
+if ! xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then
+  if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  fi
+fi
+
+if ! IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)"; then
+  echo "full Xcode with the iPhoneOS SDK is required" >&2
+  echo "set DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer and retry" >&2
+  exit 1
+fi
+if ! SIMULATOR_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null)"; then
+  echo "full Xcode with the iPhoneSimulator SDK is required" >&2
+  exit 1
+fi
 
 rustup target add \
   aarch64-apple-ios \
@@ -34,9 +52,9 @@ mkdir -p \
 cd "$CRATE_DIR"
 export IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
 
-cargo build --release --target aarch64-apple-ios
-cargo build --release --target aarch64-apple-ios-sim
-cargo build --release --target x86_64-apple-ios
+SDKROOT="$IOS_SDK" cargo build --release --target aarch64-apple-ios
+SDKROOT="$SIMULATOR_SDK" cargo build --release --target aarch64-apple-ios-sim
+SDKROOT="$SIMULATOR_SDK" cargo build --release --target x86_64-apple-ios
 
 cp target/aarch64-apple-ios/release/libfresnica_native_sdk.a \
   "$OUTPUT_DIR/device/libfresnica_native_sdk.a"

@@ -18,6 +18,24 @@ for tool in cargo rustup xcrun xcodebuild; do
   fi
 done
 
+# CommandLineTools only ships the macOS SDK. Prefer a full Xcode installation
+# for this process without changing the user's global xcode-select setting.
+if ! xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then
+  if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  fi
+fi
+
+if ! IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)"; then
+  echo "full Xcode with the iPhoneOS SDK is required" >&2
+  echo "set DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer and retry" >&2
+  exit 1
+fi
+if ! SIMULATOR_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null)"; then
+  echo "full Xcode with the iPhoneSimulator SDK is required" >&2
+  exit 1
+fi
+
 bash "$SCRIPT_DIR/build-apple.sh" "$OUTPUT_DIR"
 
 SWIFT_SOURCE="$OUTPUT_DIR/generated-swift/FresnicaSDK.swift"
