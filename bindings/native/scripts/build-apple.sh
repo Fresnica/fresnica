@@ -28,7 +28,8 @@ mkdir -p \
   "$OUTPUT_DIR/device" \
   "$OUTPUT_DIR/simulator" \
   "$OUTPUT_DIR/generated-swift" \
-  "$OUTPUT_DIR/headers"
+  "$OUTPUT_DIR/headers" \
+  "$OUTPUT_DIR/platform-security"
 
 cd "$CRATE_DIR"
 export IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
@@ -69,6 +70,8 @@ fi
 
 cp "$FFI_HEADER" "$OUTPUT_DIR/headers/FresnicaSDKFFI.h"
 cp "$FFI_MODULEMAP" "$OUTPUT_DIR/headers/module.modulemap"
+cp "$CRATE_DIR/platform/apple/FresnicaWalletUnlockKeyStore.swift" "$OUTPUT_DIR/platform-security/"
+cp "$CRATE_DIR/platform/apple/FresnicaSignerAuthorization.swift" "$OUTPUT_DIR/platform-security/"
 
 xcodebuild -create-xcframework \
   -library "$OUTPUT_DIR/device/libfresnica_native_sdk.a" \
@@ -78,5 +81,91 @@ xcodebuild -create-xcframework \
   -output "$OUTPUT_DIR/FresnicaSDKFFI.xcframework"
 
 test -d "$OUTPUT_DIR/FresnicaSDKFFI.xcframework"
+
+# Build an importable Swift framework above the low-level FFI XCFramework. The temporary
+# Swift package is a packaging mechanism only; consumers receive compiled XCFrameworks and
+# never run Rust or UniFFI generation.
+SWIFT_PACKAGE_DIR="$OUTPUT_DIR/swift-package"
+mkdir -p "$SWIFT_PACKAGE_DIR/Sources/FresnicaSDK"
+cp "$SWIFT_SOURCE" "$SWIFT_PACKAGE_DIR/Sources/FresnicaSDK/FresnicaSDK.swift"
+cp "$OUTPUT_DIR/platform-security/FresnicaWalletUnlockKeyStore.swift" \
+  "$SWIFT_PACKAGE_DIR/Sources/FresnicaSDK/"
+cp "$OUTPUT_DIR/platform-security/FresnicaSignerAuthorization.swift" \
+  "$SWIFT_PACKAGE_DIR/Sources/FresnicaSDK/"
+cat > "$SWIFT_PACKAGE_DIR/Package.swift" <<'SWIFT_PACKAGE'
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "FresnicaSDK",
+    platforms: [.iOS(.v13)],
+    products: [
+        .library(name: "FresnicaSDK", type: .dynamic, targets: ["FresnicaSDK"]),
+    ],
+    targets: [
+        .binaryTarget(name: "FresnicaSDKFFI", path: "../FresnicaSDKFFI.xcframework"),
+        .target(
+            name: "FresnicaSDK",
+            dependencies: ["FresnicaSDKFFI"],
+            path: "Sources/FresnicaSDK"
+        ),
+    ]
+)
+SWIFT_PACKAGE
+
+archive_swift_framework() {
+  platform="$1"
+  release_folder="$2"
+  archive_path="$3"
+  derived_data="$4"
+
+  (
+    cd "$SWIFT_PACKAGE_DIR"
+    xcodebuild archive \
+      -scheme FresnicaSDK \
+      -destination "generic/platform=${platform}" \
+      -archivePath "$archive_path" \
+      -derivedDataPath "$derived_data" \
+      SKIP_INSTALL=NO \
+      BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+      ONLY_ACTIVE_ARCH=NO \
+      IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
+  )
+
+  framework="$archive_path.xcarchive/Products/usr/local/lib/FresnicaSDK.framework"
+  if [ ! -d "$framework" ]; then
+    echo "missing archived FresnicaSDK.framework for $platform" >&2
+    exit 1
+  fi
+
+  modules="$derived_data/Build/Intermediates.noindex/ArchiveIntermediates/FresnicaSDK/BuildProductsPath/$release_folder/FresnicaSDK.swiftmodule"
+  if [ ! -d "$modules" ]; then
+    echo "missing archived FresnicaSDK Swift modules for $platform" >&2
+    exit 1
+  fi
+  mkdir -p "$framework/Modules"
+  rm -rf "$framework/Modules/FresnicaSDK.swiftmodule"
+  cp -R "$modules" "$framework/Modules/FresnicaSDK.swiftmodule"
+}
+
+APPLE_ARCHIVES="$OUTPUT_DIR/apple-archives"
+archive_swift_framework \
+  "iOS" \
+  "Release-iphoneos" \
+  "$APPLE_ARCHIVES/device" \
+  "$APPLE_ARCHIVES/device-derived"
+archive_swift_framework \
+  "iOS Simulator" \
+  "Release-iphonesimulator" \
+  "$APPLE_ARCHIVES/simulator" \
+  "$APPLE_ARCHIVES/simulator-derived"
+
+xcodebuild -create-xcframework \
+  -framework "$APPLE_ARCHIVES/device.xcarchive/Products/usr/local/lib/FresnicaSDK.framework" \
+  -framework "$APPLE_ARCHIVES/simulator.xcarchive/Products/usr/local/lib/FresnicaSDK.framework" \
+  -output "$OUTPUT_DIR/FresnicaSDK.xcframework"
+
+test -d "$OUTPUT_DIR/FresnicaSDK.xcframework"
+rm -rf "$SWIFT_PACKAGE_DIR" "$APPLE_ARCHIVES"
 
 printf 'Apple Native SDK package ready at %s\n' "$OUTPUT_DIR"

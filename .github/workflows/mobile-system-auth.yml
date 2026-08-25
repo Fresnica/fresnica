@@ -1,12 +1,7 @@
 name: Mobile system auth
 
 on:
-  push:
-    paths:
-      - "bindings/mobile/platform/android/src/main/java/com/fresnica/core/security/WalletUnlockKeyStore.java"
-      - "bindings/mobile/platform/apple/FresnicaWalletUnlockKeyStore.swift"
-      - "docs/mobile-system-auth.md"
-      - ".github/workflows/mobile-system-auth.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "bindings/mobile/platform/android/src/main/java/com/fresnica/core/security/WalletUnlockKeyStore.java"

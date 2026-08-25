@@ -1,0 +1,42 @@
+name: Web WASM SDK
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "bindings/wasm/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/wasm-sdk.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check SDK and WASM formatting
+        run: |
+          cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
+          cargo fmt --manifest-path bindings/wasm/Cargo.toml -- --check
+      - name: Test universal SDK
+        run: cargo test --manifest-path sdk/rust/Cargo.toml
+      - name: Validate browser API security boundary
+        run: node bindings/wasm/tests/boundary.mjs
+      - name: Check WASM target
+        run: cargo check --manifest-path bindings/wasm/Cargo.toml --target wasm32-unknown-unknown
+      - name: Install matching wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+      - name: Build Web package
+        run: bash bindings/wasm/scripts/build-web.sh
+      - name: Validate generated Web surface
+        run: node bindings/wasm/tests/generated-surface.mjs bindings/wasm/build/web
+      - name: Run browser-package conformance vector in Node
+        run: node bindings/wasm/tests/runtime-conformance.mjs bindings/wasm/build/web

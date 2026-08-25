@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "framework": "react-native",
+  "adapterSourceVersion": "0.1.0",
+  "fresnicaNativeSdkVersion": "0.1.0",
+  "nativeBindingApiVersion": 1,
+  "jsModuleName": "FresnicaCore",
+  "androidHostDependencies": [
+    "com.facebook.react:react-android:<frameworkVersion>",
+    "androidx.biometric:biometric:1.1.0",
+    "androidx.core:core:1.12.0",
+    "net.java.dev.jna:jna:5.12.1@aar",
+    "androidx.annotation:annotation:1.8.2"
+  ],
+  "appleHostLinkerFlags": [
+    "-ObjC"
+  ]
+}

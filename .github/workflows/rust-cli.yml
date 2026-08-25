@@ -1,14 +1,7 @@
 name: Rust CLI
 
 on:
-  push:
-    paths:
-      - "clients/rust-cli/**"
-      - "core/rust/**"
-      - "reference/python/fresnica/storage.py"
-      - "reference/python/fresnica/wallet_backup.py"
-      - "reference/python/tests/test_rust_cli_compat.py"
-      - ".github/workflows/rust-cli.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "clients/rust-cli/**"

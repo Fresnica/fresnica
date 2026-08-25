@@ -27,7 +27,7 @@ fresnica-sdk                  <- stable semantic contract
 3. mnemonic generation;
 4. passcode re-protection;
 5. verified `WalletUnlockKey` derivation and validation;
-6. protected software-signer transaction signing;
+6. protected software-signer transaction signing with either a verified native `WalletUnlockKey` or the composite fresh-passcode path;
 7. explicit Reveal / Export;
 8. external Ed25519 prepare/apply signing.
 
@@ -69,7 +69,9 @@ Native packaging layers may orchestrate platform authorization around SDK operat
 
 Framework adapters must not expose `WalletUnlockKey` or raw routine signing primitives to JavaScript/Dart merely for convenience.
 
-WASM/browser support must preserve semantic compatibility where appropriate, but browser key protection and authorization require a separate reviewed security design rather than copying the native `WalletUnlockKey` model.
+For browser/WASM software signing, SDK API v2 adds `sign_transaction_xdr_with_passcode(...)`: Core derives and verifies the unlock key and signs within one Rust call, so the raw `WalletUnlockKey` never crosses into JavaScript. Native clients may continue using the explicit unlock-key path behind reviewed platform secure storage/system authentication.
+
+Browser key protection and authorization remain a separate security model rather than a copy of the native `WalletUnlockKey` model.
 
 ## Validation
 

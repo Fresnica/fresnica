@@ -8,10 +8,11 @@ This is the compact continuation document for Fresnica. It records the current a
 
 - Repository: `manran/fresnica`
 - Default branch: `main`
-- Verified `main` before this handoff update: `71aefb56c7f7482a9b8fd45f5997fa8fb65042a3`
-- PR #87 published `mobile-sdk-v0.1.0` as an integration-stable pre-1.0 Mobile SDK baseline.
-- PR #88 established the finalized Native-SDK/framework-adapter integration contract.
-- `mobile-sdk-v0.1.0` is transitional packaging: it proves the native/security boundary but still contains React Native-specific integration that future Native SDK binaries should not contain.
+- Verified `main` before this handoff update: `e9f6182e78db3fd4288b038323cdba2581531c2e` (PR #92).
+- PR #90 introduced the platform-neutral `fresnica-sdk` semantic contract.
+- PR #91 converted the Mobile v0.1.0 UniFFI facade into a compatibility wrapper over `fresnica-sdk`.
+- PR #92 introduced the generalized `fresnica-native-sdk` UniFFI layer plus framework-neutral Android AAR and Apple package/XCFramework generation.
+- `mobile-sdk-v0.1.0` remains a transitional compatibility baseline; new native consumers should target `fresnica-native-sdk`.
 
 Do not treat a SHA in this handoff as the permanent head. Verify `main` and current CI before writing.
 
@@ -31,7 +32,7 @@ Rust Core
   -> Mobile / Desktop / Web wallet experience
 ```
 
-The immediate priority is **not** to continue building the actual React Native product inside this repository. First generalize the Core-facing SDK boundary so Mobile, Desktop and Web can share one set of wallet/crypto semantics.
+The immediate priority is **not** to continue building the actual React Native product inside this repository. The universal semantic contract now exists; current work is to finish native platform packaging/security support, then build the canonical one-time framework-adapter path and WASM boundary.
 
 ## Target Layering
 
@@ -62,7 +63,7 @@ The shared contract is semantic, not a requirement that every target use the sam
 
 ## Universal SDK Rules
 
-The current `bindings/mobile` work is the starting point, not the final naming/boundary. The next SDK phase should generalize the existing facade instead of creating separate Mobile and Desktop crypto APIs.
+The platform-neutral `sdk/rust` contract is now the semantic owner above Rust Core. `bindings/mobile` is a compatibility facade for the v0.1.0 Mobile surface; `bindings/native` is the generalized UniFFI/native binding layer. Do not create separate Mobile and Desktop crypto semantics.
 
 The SDK contract should own:
 
@@ -80,15 +81,18 @@ The SDK contract should **not** absorb application persistence, framework lifecy
 
 Application projects should consume **compiled platform SDK content**. Ordinary application builds must not compile Rust Core or run UniFFI generation.
 
-Target platform outputs:
+Current platform outputs:
 
-- Android: compiled AAR
-- Apple: compiled XCFramework/package
-- Windows: compiled native library/package
-- Linux: compiled native library/package
-- macOS: compiled framework/native library/package
+- Android: complete direct-consumer AAR
+- Apple: Rust FFI XCFramework plus an implemented importable `FresnicaSDK.xcframework` archive/package step; real macOS/Xcode validation of the compiled public module is still pending
 
-A native application can use its platform SDK directly without React Native/Flutter/etc.
+Pending desktop outputs:
+
+- Windows: compiled native library/package plus a defined direct-consumer API surface
+- Linux: compiled native library/package plus a defined direct-consumer API surface
+- macOS: compiled framework/native library/package plus a defined direct-consumer API surface
+
+Android native applications can use the AAR directly without React Native/Flutter/etc. The Apple direct-consumer package path is implemented but remains pending real macOS/Xcode validation. Do not describe a bare desktop UniFFI `.dll`/`.so` as a complete public SDK until its supported direct-consumer language/API surface is defined.
 
 ### WASM / Web rule
 
@@ -119,7 +123,7 @@ normal app build
     -> no adapter-source rebuild
 ```
 
-For Mobile, React Native is the first full adapter target. Flutter/Desktop adapters should follow the same architecture when implemented.
+For Mobile, React Native is the first adapter target. Canonical Android/Apple adapter source now lives under `adapters/react-native` and targets the generalized Native SDK. Both platforms have one-time consumer build commands plus compatibility manifest/rebuild checks. The Apple path compiles only framework glue against the importable `FresnicaSDK` module; real macOS/Xcode validation is still pending. Flutter/Desktop adapters should follow the same architecture when implemented.
 
 An adapter may perform argument/result conversion, Promise/Future/callback mapping, thread dispatch and framework registration. It must not own cryptography, envelope mutation, signer identity verification, transaction signing logic or native key-protection policy.
 
@@ -343,14 +347,18 @@ Normal user terminology is **Manage Assets**. New Fresnica-created trustlines cu
 
 Do not rewrite existing user trustline limits automatically and do not change this marker without an explicit product decision.
 
+## CI policy
+
+Validation workflows are PR/manual only so branch pushes and merges to `main` do not duplicate expensive builds. The Mobile SDK release workflow remains the exception: a release-marker change on `main` may publish the explicit release. Heavy Android/Apple packaging should be run only when the relevant Native SDK/platform boundary changes.
+
 ## Immediate Next Work
 
-The next coherent implementation batch should be:
+The next coherent implementation batches are:
 
-1. **Generalize the SDK facade**: refactor Mobile-oriented naming/boundaries into a universal SDK contract while preserving Core API/security semantics.
-2. **Define native-only release packaging**: future Android/Apple packages must stop embedding framework-specific adapter code; establish Windows/Linux/macOS target shapes.
-3. **RN adapter build path**: keep canonical RN adapter source in Fresnica, provide one-time consumer build tooling, emit adapter binaries + compatibility manifest, and ensure normal Mobile builds do not rebuild it.
-4. **WASM/Web boundary**: define WASM API/package and separately review browser secret/key authorization semantics.
+1. **Validate Apple binary packaging**: run the new compiled `FresnicaSDK.xcframework` and static `FresnicaRNAdapter.xcframework` paths on real macOS/Xcode; keep SDK-owned Swift/security code out of framework adapters.
+2. **Keep the RN adapter contract stable**: Android and Apple now have one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
+3. **Define desktop Native SDK surfaces**: define Windows/Linux/macOS direct-consumer language/API shapes before publishing desktop binaries.
+4. **WASM/Web boundary**: the filtered fresh-passcode WASM API is implemented and has passed `wasm32-unknown-unknown` compilation, generated-package surface validation, and Node-hosted shared-vector runtime conformance on macOS. Keep persistent WebAuthn/passkey authorization as a separate design.
 5. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
 6. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
 7. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.

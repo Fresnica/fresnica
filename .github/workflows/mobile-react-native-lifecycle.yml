@@ -1,10 +1,7 @@
 name: Mobile React Native lifecycle
 
 on:
-  push:
-    paths:
-      - "bindings/mobile/react-native/**"
-      - ".github/workflows/mobile-react-native-lifecycle.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "bindings/mobile/react-native/**"

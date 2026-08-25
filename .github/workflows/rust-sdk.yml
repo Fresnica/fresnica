@@ -1,12 +1,7 @@
 name: Rust SDK
 
 on:
-  push:
-    paths:
-      - "sdk/rust/**"
-      - "core/rust/**"
-      - "spec/test-vectors/**"
-      - ".github/workflows/rust-sdk.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "sdk/rust/**"

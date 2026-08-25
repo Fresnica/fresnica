@@ -1,16 +1,7 @@
 name: Mobile Core bindings
 
 on:
-  push:
-    paths:
-      - "bindings/mobile/Cargo.toml"
-      - "bindings/mobile/src/**"
-      - "bindings/mobile/uniffi.toml"
-      - "bindings/mobile/uniffi-bindgen.rs"
-      - "sdk/rust/**"
-      - "core/rust/**"
-      - "spec/test-vectors/**"
-      - ".github/workflows/mobile-core-bindings.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "bindings/mobile/Cargo.toml"

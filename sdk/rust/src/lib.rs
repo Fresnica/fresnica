@@ -16,7 +16,7 @@ use serde_json::Value;
 use zeroize::{Zeroize, Zeroizing};
 
 /// Version of the platform-neutral Fresnica SDK semantic contract.
-pub const SDK_API_VERSION: u64 = 1;
+pub const SDK_API_VERSION: u64 = 2;
 
 /// Stateless platform-neutral entry point.
 ///
@@ -209,6 +209,33 @@ impl FresnicaSdk {
                 &network_passphrase,
             )
             .map_err(SdkError::from)
+    }
+
+    /// Sign with a fresh application passcode without exposing `WalletUnlockKey`
+    /// material outside Rust. This is the routine signing path for environments
+    /// such as browsers that cannot provide a reviewed native secure-key store.
+    pub fn sign_transaction_xdr_with_passcode(
+        &self,
+        envelope_json: String,
+        passcode: String,
+        expected_signer_public_key: String,
+        transaction_xdr: Vec<u8>,
+        network_passphrase: String,
+    ) -> Result<Vec<u8>, SdkError> {
+        let envelope = parse_envelope(&envelope_json)?;
+        let passcode = Zeroizing::new(passcode);
+        let core = self.core();
+        let unlock_key = core
+            .derive_unlock_key(&envelope, passcode.as_str(), &expected_signer_public_key)
+            .map_err(SdkError::from)?;
+        core.sign_transaction_xdr(
+            &envelope,
+            &unlock_key,
+            &expected_signer_public_key,
+            &transaction_xdr,
+            &network_passphrase,
+        )
+        .map_err(SdkError::from)
     }
 
     /// Explicitly declassify recovery material using a fresh application passcode.
@@ -567,11 +594,33 @@ mod tests {
                 protected.envelope_json.clone(),
                 unlock_key.clone(),
                 public_key.to_owned(),
-                unsigned,
+                unsigned.clone(),
                 network.to_owned(),
             )
             .unwrap();
         assert_eq!(signed, expected_signed);
+
+        let passcode_signed = sdk
+            .sign_transaction_xdr_with_passcode(
+                protected.envelope_json.clone(),
+                "old-passcode".to_owned(),
+                public_key.to_owned(),
+                unsigned,
+                network.to_owned(),
+            )
+            .unwrap();
+        assert_eq!(passcode_signed, expected_signed);
+
+        let passcode_error = sdk
+            .sign_transaction_xdr_with_passcode(
+                protected.envelope_json.clone(),
+                "wrong-passcode".to_owned(),
+                public_key.to_owned(),
+                Vec::new(),
+                network.to_owned(),
+            )
+            .unwrap_err();
+        assert_eq!(passcode_error.code, SdkErrorCode::InvalidPasscode);
 
         let revealed = sdk
             .reveal(

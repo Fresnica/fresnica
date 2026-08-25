@@ -91,9 +91,9 @@ Completed foundation:
 
 This is the current priority.
 
-### 4.1 Extract a platform-neutral SDK contract
+### 4.1 Extract a platform-neutral SDK contract - COMPLETED
 
-Refactor the current Mobile-oriented facade into a **general SDK surface** suitable for Mobile, Desktop and other native consumers without duplicating Core behavior.
+The platform-neutral `fresnica-sdk` contract is now the semantic owner above Rust Core, and the Mobile v0.1.0 facade is a compatibility wrapper over it.
 
 Target layering:
 
@@ -116,21 +116,28 @@ Stable SDK API / DTO / errors / conformance contract
 
 The shared contract includes wallet/signing semantics, DTOs, errors, API versions and test vectors. Platform security/storage details do not belong in the Core contract.
 
-### 4.2 Native SDK binaries
+### 4.2 Native SDK binaries - IN PROGRESS
 
-Fresnica should publish **compiled platform SDK content**, not require application projects to rebuild Rust/UniFFI during ordinary builds.
+The generalized `fresnica-native-sdk` UniFFI layer, Android AAR packaging and Apple Rust-FFI package are implemented. Android/Apple package paths also carry reusable native signer-authorization helpers. The Apple build now additionally archives those SDK-owned Swift pieces into an importable `FresnicaSDK.xcframework`; that new packaging step still needs a real macOS/Xcode validation run before 4.2 is called complete. Fresnica should publish **compiled platform SDK content**, not require application projects to rebuild Rust/UniFFI during ordinary builds.
 
-Target outputs include:
+Current native outputs:
 
 ```text
-Android  -> compiled AAR
-Apple    -> compiled XCFramework/package
-Windows  -> compiled native library/package
-Linux    -> compiled native library/package
-macOS    -> compiled framework/native library/package
+Android  -> complete direct-consumer AAR
+Apple    -> FFI XCFramework + compiled `FresnicaSDK.xcframework` build path (macOS validation pending)
 ```
 
-A native application may consume the platform SDK directly with no framework adapter.
+The Apple direct-consumer module build path is implemented, but the resulting `FresnicaSDK.xcframework` still needs real macOS/Xcode validation before the Native SDK binary boundary is called complete. The React Native one-time Apple build path now compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that module; it does not absorb SDK-owned Swift/security source. Both new Apple XCFramework paths still require a real Xcode validation run.
+
+Remaining desktop outputs:
+
+```text
+Windows  -> compiled native library/package + defined direct-consumer API surface
+Linux    -> compiled native library/package + defined direct-consumer API surface
+macOS    -> compiled framework/native library/package + defined direct-consumer API surface
+```
+
+Android native applications may consume the AAR directly. The Apple direct-consumer packaging path is implemented and awaits real Xcode validation. Desktop packaging must first define the corresponding supported language/API surface; a bare UniFFI `.dll`/`.so` is not by itself a complete public SDK.
 
 Platform-specific signer authorization remains outside the pure Core contract, for example:
 
@@ -139,11 +146,22 @@ Platform-specific signer authorization remains outside the pure Core contract, f
 - Windows DPAPI / Windows Hello integration where appropriate
 - Linux Secret Service/libsecret integration where appropriate
 
-### 4.3 WASM / Web
+### 4.3 WASM / Web - IMPLEMENTED / VALIDATED
 
-Add a WASM-facing SDK path that preserves the same Core semantics where technically appropriate.
+The first browser boundary is implemented as `fresnica-wasm-sdk` over the universal SDK. It intentionally filters the native unlock-key surface rather than mirroring Mobile/Native APIs mechanically.
 
-Do **not** assume the Mobile `WalletUnlockKey`/Keychain model can be copied into browsers. Web key protection, browser storage and authorization require a separate reviewed security design.
+Browser routine software signing uses `signTransactionXdrWithPasscode(...)`: the fresh passcode enters Rust, Core derives/verifies the `WalletUnlockKey`, signs, and drops the key without returning it to JavaScript. `deriveUnlockKey`, `validateUnlockKey`, and raw unlock-key signing are not Web exports. External Ed25519 prepare/apply remains available.
+
+The final WASM package, not `fresnica-core`/`fresnica-sdk`, opts into `getrandom`'s JavaScript/Web Crypto backend. A source-boundary test and generated-TypeScript-surface test enforce the filtered API.
+
+Validated on macOS with the Rust + `wasm-bindgen` toolchain via `bindings/wasm/scripts/validate-local.sh`:
+
+- `wasm32-unknown-unknown` target compile/check;
+- release Web/WASM build and generated ES-module package;
+- generated JS/TypeScript surface validation;
+- Node-hosted runtime conformance against shared transaction vectors.
+
+The remaining Web security work is intentionally separate from this SDK checkpoint: design any persistent WebAuthn/passkey authorization model before adding browser-persistent authorization.
 
 Web should normally consume the WASM SDK directly. Add a web-framework adapter only if a framework creates a real integration need.
 
@@ -166,11 +184,11 @@ normal application builds
     -> do not rebuild adapter source
 ```
 
-React Native is the first fully implemented adapter target.
+React Native is the first adapter target. Canonical Android/Apple adapter source now targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The new Apple Native SDK and adapter XCFramework paths remain pending real macOS/Xcode validation as described in 4.2.
 
 Planned adapter boundary:
 
-- React Native: implement canonical source + build tooling now
+- React Native: validate the Apple Native SDK + adapter XCFramework path on macOS/Xcode, then treat Android/Apple one-time adapter builds as the canonical reference
 - Flutter Mobile/Desktop: reserve and document the same contract; implement when needed
 - Desktop frameworks such as Electron/Node, Qt or .NET: reserve the extension boundary; implement based on product choice
 

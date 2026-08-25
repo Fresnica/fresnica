@@ -82,6 +82,28 @@
 - [x] External Ed25519 prepare/apply signing boundary
 - [x] Native Rust CLI direct-link client
 
+## Universal / Native SDK
+
+- [x] Platform-neutral `fresnica-sdk` semantic contract
+- [x] Mobile v0.1.0 compatibility facade delegates to `fresnica-sdk`
+- [x] Generalized `fresnica-native-sdk` UniFFI binding
+- [x] Android Native SDK AAR without framework adapter code
+- [x] Apple Native SDK Rust FFI XCFramework/package without framework adapter code
+- [ ] Validate compiled importable `FresnicaSDK.xcframework` packaging on macOS (build path implemented)
+- [x] Android Keystore/native signer-authorization helpers in Native SDK package
+- [x] Apple Keychain/LocalAuthentication signer-authorization helpers in Native SDK package
+- [ ] Windows/Linux/macOS direct-consumer package/API shapes
+- [x] Canonical React Native adapter source targets `fresnica-native-sdk` instead of the transitional Mobile facade
+- [x] React Native Android one-time adapter build entry point + compatibility manifest/rebuild diagnostics
+- [x] Apple one-time React Native adapter binary build path targets compiled `FresnicaSDK`
+- [ ] Validate Apple Native SDK + React Native adapter XCFrameworks on macOS/Xcode
+- [x] WASM/Web API filtering and fresh-passcode routine-signing security boundary
+- [x] WASM source-boundary and generated-package surface tests
+- [x] WASM target/package compile validation
+- [x] Browser-package runtime/shared-vector conformance harness
+- [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
+- [ ] Persistent WebAuthn/passkey authorization design (separate review)
+
 ## Mobile Binding
 
 - [x] FFI-neutral mobile facade crate (`bindings/mobile`)

@@ -1,11 +1,7 @@
 name: Python reference
 
 on:
-  push:
-    paths:
-      - "reference/python/**"
-      - "spec/test-vectors/**"
-      - ".github/workflows/python-reference.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "reference/python/**"

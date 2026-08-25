@@ -1,15 +1,7 @@
 name: Rust core
 
 on:
-  push:
-    paths:
-      - "core/rust/**"
-      - "reference/python/fresnica/manager.py"
-      - "reference/python/fresnica/rust_core_client.py"
-      - "reference/python/fresnica/signer.py"
-      - "reference/python/tests/test_rust_core_client.py"
-      - "spec/test-vectors/**"
-      - ".github/workflows/rust-core.yml"
+  workflow_dispatch:
   pull_request:
     paths:
       - "core/rust/**"

@@ -1,0 +1,15 @@
+{
+  "name": "@fresnica/react-native-adapter-source",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tooling/test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "bin": {
+    "fresnica-adapter": "./tooling/fresnica-adapter.mjs"
+  }
+}

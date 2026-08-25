@@ -42,7 +42,7 @@ Consumer project
 - generated/native platform API used by adapters;
 - Android native SDK binary;
 - Apple native SDK binary;
-- Keychain/Keystore and native signer-authorization implementation;
+- Keychain/Keystore and native signer-authorization implementation, shipped as native platform support rather than framework glue;
 - stable error categories and API-version reporting;
 - canonical React Native adapter source;
 - future canonical Flutter/other framework adapter source;
@@ -87,7 +87,8 @@ It may contain:
 - framework lifecycle glue;
 - thread/queue dispatch required by the framework;
 - framework registration/autolinking glue;
-- stable Fresnica error conversion.
+- stable Fresnica error conversion;
+- platform UI/lifecycle glue required to drive an SDK-owned authorization primitive (for example authenticating the exact Android `Cipher` returned by the Native SDK helper).
 
 It must not own or duplicate:
 
@@ -97,7 +98,7 @@ It must not own or duplicate:
 - protected-envelope parsing/mutation;
 - transaction hashing/signing logic;
 - WalletUnlockKey handling policy;
-- Keychain/Keystore security policy.
+- Keychain/Keystore security policy or credential storage implementation.
 
 The rule is:
 

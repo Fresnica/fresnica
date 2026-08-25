@@ -4,9 +4,10 @@ __pycache__/
 .venv/
 *.egg-info/
 
-# Rust / generated mobile build output
+# Rust / generated binding build output
 **/target/
 bindings/mobile/build/
+bindings/wasm/build/
 
 # Local Fresnica runtime data
 .fresnica/
