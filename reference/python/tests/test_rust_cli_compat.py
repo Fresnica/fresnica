@@ -53,7 +53,7 @@ def test_rust_cli_reads_python_wallet_storage_and_writes_python_backup(rust_cli,
     assert "testnet" in listed
 
     info = _run(rust_cli, home, "info", "--wallet", "python-wallet")
-    assert "Core:       Rust (direct link)" in info
+    assert "SDK/Core:   Rust (direct link)" in info
     assert "Fresnica passcode envelope v1" in info
     assert PUBLIC in info
 
