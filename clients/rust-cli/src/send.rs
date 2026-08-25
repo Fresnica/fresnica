@@ -1,18 +1,19 @@
 use std::str::FromStr;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 use stellar_xdr::{
-    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, CreateAccountOp,
-    MuxedAccount, OperationBody, PaymentOp, PublicKey,
+    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, CreateAccountOp, Hash,
+    Memo, MuxedAccount, OperationBody, PaymentOp, PublicKey, StringM,
 };
 
 use crate::contacts::resolve_destination;
 use crate::horizon::LedgerParameters;
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction_flow::{
-    account_sequence, balance_stroops, build_single_operation_envelope, confirm_submission,
-    format_stroops, minimum_balance_stroops, network_client, parse_positive_stroops,
-    resolve_signing_wallet, sign_and_submit,
+    account_sequence, balance_stroops, build_single_operation_envelope_with_memo,
+    confirm_submission, format_stroops, minimum_balance_stroops, network_client,
+    parse_positive_stroops, resolve_signing_wallet, sign_and_submit,
 };
 
 pub fn command_send(
@@ -22,15 +23,106 @@ pub fn command_send(
 ) -> Result<(), String> {
     let request = SendRequest::parse(arguments)?;
     let record = resolve_signing_wallet(storage, network, request.wallet.as_deref())?;
-    let asset = PaymentAsset::parse(&request.asset)?;
-    let amount = parse_positive_stroops(&request.amount)?;
     let resolved = resolve_destination(storage, &request.destination, request.memo.as_deref())?;
-    let destination = AccountId::from_str(&resolved.address)
-        .map_err(|_| "destination must be a Classic Stellar G address or local contact name".to_owned())?;
+    review_and_submit_payment(
+        &record,
+        network,
+        &request.amount,
+        &request.asset,
+        &resolved.address,
+        resolved.contact_name.as_deref(),
+        PaymentMemo::from_text(resolved.memo.as_deref()),
+        request.yes,
+    )
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PaymentMemo {
+    None,
+    Text(String),
+    Id(u64),
+    Hash([u8; 32]),
+}
+
+impl PaymentMemo {
+    fn from_text(value: Option<&str>) -> Self {
+        match value.filter(|value| !value.is_empty()) {
+            Some(value) => Self::Text(value.to_owned()),
+            None => Self::None,
+        }
+    }
+
+    pub(crate) fn from_anchor_fields(
+        memo_type: Option<&str>,
+        memo: Option<&str>,
+    ) -> Result<Self, String> {
+        match (memo_type, memo) {
+            (None, None) => Ok(Self::None),
+            (Some(_), None) | (None, Some(_)) => {
+                Err("anchor withdrawal memo_type and memo must be supplied together".to_owned())
+            }
+            (Some("text"), Some(value)) => Ok(Self::Text(value.to_owned())),
+            (Some("id"), Some(value)) => value
+                .parse::<u64>()
+                .map(Self::Id)
+                .map_err(|_| "anchor withdrawal id memo must be an unsigned 64-bit integer".to_owned()),
+            (Some("hash"), Some(value)) => {
+                let decoded = STANDARD
+                    .decode(value)
+                    .map_err(|_| "anchor withdrawal hash memo must be valid base64".to_owned())?;
+                let hash: [u8; 32] = decoded.try_into().map_err(|_| {
+                    "anchor withdrawal hash memo must decode to exactly 32 bytes".to_owned()
+                })?;
+                Ok(Self::Hash(hash))
+            }
+            (Some(other), Some(_)) => Err(format!(
+                "unsupported anchor withdrawal memo type: {other}; expected text, id, or hash"
+            )),
+        }
+    }
+
+    fn to_xdr(&self) -> Result<Memo, String> {
+        match self {
+            Self::None => Ok(Memo::None),
+            Self::Text(value) => Ok(Memo::Text(
+                StringM::<28>::try_from(value.as_str())
+                    .map_err(|_| "text memo must be at most 28 bytes".to_owned())?,
+            )),
+            Self::Id(value) => Ok(Memo::Id(*value)),
+            Self::Hash(value) => Ok(Memo::Hash(Hash(*value))),
+        }
+    }
+
+    fn review_text(&self) -> Option<(&'static str, String)> {
+        match self {
+            Self::None => None,
+            Self::Text(value) => Some(("text", value.clone())),
+            Self::Id(value) => Some(("id", value.to_string())),
+            Self::Hash(value) => Some(("hash", STANDARD.encode(value))),
+        }
+    }
+}
+
+pub(crate) fn review_and_submit_payment(
+    record: &WalletRecord,
+    network: &str,
+    amount_text: &str,
+    asset_text: &str,
+    destination_address: &str,
+    contact_name: Option<&str>,
+    memo: PaymentMemo,
+    yes: bool,
+) -> Result<(), String> {
+    let asset = PaymentAsset::parse(asset_text)?;
+    let amount = parse_positive_stroops(amount_text)?;
+    let destination = AccountId::from_str(destination_address)
+        .map_err(|_| "destination must be a Classic Stellar G address".to_owned())?;
+    let memo_xdr = memo.to_xdr()?;
 
     let horizon = network_client(network)?;
     let account = horizon.get_account(&record.address)?;
-    let destination_exists = horizon.account_exists(&resolved.address)?;
+    let destination_exists = horizon.account_exists(destination_address)?;
     if !destination_exists && !asset.is_native() {
         return Err(
             "Destination account does not exist. Only XLM can create a new Stellar account; issued assets require an existing account and trustline."
@@ -53,30 +145,30 @@ pub fn command_send(
     }
 
     let body = payment_body(destination, &asset, amount, !destination_exists)?;
-    let mut envelope = build_single_operation_envelope(
+    let mut envelope = build_single_operation_envelope_with_memo(
         &record.address,
         body,
         account_sequence(&account)?,
         ledger.base_fee_in_stroops,
-        resolved.memo.as_deref(),
+        memo_xdr,
     )?;
 
     render_review(
-        &record,
-        &resolved.address,
-        resolved.contact_name.as_deref(),
+        record,
+        destination_address,
+        contact_name,
         &asset,
         amount,
         ledger.base_fee_in_stroops,
         !destination_exists,
-        resolved.memo.as_deref(),
+        &memo,
     );
-    if !request.yes && !confirm_submission()? {
+    if !yes && !confirm_submission()? {
         println!("Transaction cancelled.");
         return Ok(());
     }
 
-    sign_and_submit(&record, network, &mut envelope, &horizon)
+    sign_and_submit(record, network, &mut envelope, &horizon)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,7 +396,7 @@ fn render_review(
     amount: i64,
     base_fee: u32,
     create_destination: bool,
-    memo: Option<&str>,
+    memo: &PaymentMemo,
 ) {
     println!("Review transaction");
     println!(
@@ -324,8 +416,8 @@ fn render_review(
     println!("Amount:    {} {}", format_stroops(amount), asset.display());
     println!("Fee:       {} XLM", format_stroops(i64::from(base_fee)));
     println!("Network:   {}", record.network);
-    if let Some(memo) = memo.filter(|memo| !memo.is_empty()) {
-        println!("Memo:      {memo}");
+    if let Some((memo_type, value)) = memo.review_text() {
+        println!("Memo:      {value} ({memo_type})");
     }
 }
 
@@ -388,6 +480,37 @@ mod tests {
             payment_body(destination, &PaymentAsset::Native, 10_000_000, true).unwrap(),
             OperationBody::CreateAccount(_)
         ));
+    }
+
+
+    #[test]
+    fn anchor_payment_memo_supports_text_id_and_hash() {
+        let text = PaymentMemo::from_anchor_fields(Some("text"), Some("anchor")).unwrap();
+        assert!(matches!(text.to_xdr().unwrap(), Memo::Text(_)));
+
+        let id = PaymentMemo::from_anchor_fields(Some("id"), Some("42")).unwrap();
+        assert_eq!(id, PaymentMemo::Id(42));
+        assert_eq!(id.to_xdr().unwrap(), Memo::Id(42));
+
+        let bytes = [7_u8; 32];
+        let encoded = STANDARD.encode(bytes);
+        let hash = PaymentMemo::from_anchor_fields(Some("hash"), Some(&encoded)).unwrap();
+        assert_eq!(hash, PaymentMemo::Hash(bytes));
+        assert_eq!(hash.to_xdr().unwrap(), Memo::Hash(Hash(bytes)));
+    }
+
+    #[test]
+    fn anchor_payment_memo_rejects_malformed_values() {
+        assert!(PaymentMemo::from_anchor_fields(Some("id"), None).is_err());
+        assert!(PaymentMemo::from_anchor_fields(None, Some("42")).is_err());
+        assert!(PaymentMemo::from_anchor_fields(Some("id"), Some("-1")).is_err());
+        assert!(PaymentMemo::from_anchor_fields(Some("hash"), Some("not-base64")).is_err());
+        assert!(PaymentMemo::from_anchor_fields(
+            Some("hash"),
+            Some(&STANDARD.encode([1_u8; 31]))
+        )
+        .is_err());
+        assert!(PaymentMemo::Text("x".repeat(29)).to_xdr().is_err());
     }
 
     #[test]

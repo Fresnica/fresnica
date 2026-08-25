@@ -87,7 +87,8 @@
 - [x] Native Rust CLI SEP-10/SEP-45 authentication metadata discovery and G/C capability classification
 - [x] Native Rust CLI verified SEP-10 challenge/session boundary before authenticated anchor execution
 - [x] Native Rust CLI SEP-24-preferred / SEP-6-fallback deposit and withdraw initiation
-- [ ] Native Rust CLI reviewed withdrawal payment handoff and anchor transaction-status tracking
+- [x] Native Rust CLI reviewed withdrawal payment handoff and anchor transaction-status tracking
+- [ ] Native Rust CLI SEP-12 customer-information handoff for anchor KYC/update states
 
 ## Universal / Native SDK
 
