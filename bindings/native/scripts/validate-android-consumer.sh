@@ -21,11 +21,12 @@ export FRESNICA_NATIVE_AAR="$AAR"
 
 "$GRADLE" -p "$CONSUMER_DIR" clean assembleRelease --stacktrace
 
-OUTPUT="$(find "$CONSUMER_DIR/build/outputs/aar" -type f -name '*release.aar' -print -quit)"
+OUTPUT="$(find "$CONSUMER_DIR/build/outputs/apk/release" -type f -name '*release.apk' -print -quit)"
 if [ -z "$OUTPUT" ] || [ ! -s "$OUTPUT" ]; then
-  echo "standalone Android consumer smoke AAR was not produced" >&2
+  echo "standalone Android consumer smoke APK was not produced" >&2
   exit 1
 fi
 
 printf 'Fresnica Android raw-AAR consumer validation: OK\n'
 printf '  Native SDK AAR: %s\n' "$AAR"
+printf '  Consumer APK: %s\n' "$OUTPUT"
