@@ -131,6 +131,8 @@ Do not authenticate first and then allow application code to replace the reviewe
 
 `smart-account-kit` Protocol-27 authorization binds context-rule IDs into the digest. Fresnica should preserve that property rather than reducing the flow to a generic "passkey succeeded" boolean.
 
+The reviewed Protocol-27 WebAuthn verifier also requires authenticator UP and UV flags. Upstream `smart-account-kit` 0.6.2 requests `userVerification: "preferred"`, which can produce UV=0 and is rejected by verifier error 3117. The Fresnica provider therefore injects a `@simplewebauthn/browser` 13.3.0 adapter that forces `userVerification: "required"` for registration, discovery and signing. This is a provider-level interoperability fix; no passkey material enters Core or the `WalletUnlockKey` path.
+
 ## Relayer is not signer custody
 
 A relayer/fee payer may pay transaction fees, but it is not the user's passkey signer and must not be modeled as account custody.

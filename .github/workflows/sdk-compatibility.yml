@@ -19,6 +19,7 @@ on:
       - "adapters/react-native/adapter-contract.json"
       - "providers/smart-account-kit/package.json"
       - "providers/smart-account-kit/src/config.mjs"
+      - "providers/smart-account-kit/src/webauthn.mjs"
       - "providers/smart-account-kit/src/conformance-recorder.mjs"
       - ".github/workflows/sdk-compatibility.yml"
 

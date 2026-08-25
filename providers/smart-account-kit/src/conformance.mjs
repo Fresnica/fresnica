@@ -140,6 +140,19 @@ function authDigest(networkPassphrase, entry, expiration, contextRuleIds) {
   };
 }
 
+function requireAuthenticatorFlags(authenticatorData) {
+  if (authenticatorData.length < 37) {
+    throw new Error('WebAuthn authenticatorData must be at least 37 bytes');
+  }
+  const flags = authenticatorData[32];
+  if ((flags & 0x01) === 0) {
+    throw new Error('WebAuthn authenticator User Present (UP) flag is not set');
+  }
+  if ((flags & 0x04) === 0) {
+    throw new Error('WebAuthn authenticator User Verified (UV) flag is not set');
+  }
+}
+
 async function verifyP256Signature(publicKey, webAuthn) {
   if (!globalThis.crypto?.subtle) {
     throw new Error('Web Crypto subtle API is required for fixture validation');
@@ -150,6 +163,8 @@ async function verifyP256Signature(publicKey, webAuthn) {
   if (webAuthn.signature.length !== 64) {
     throw new Error('WebAuthn compact P-256 signature must be 64 bytes');
   }
+
+  requireAuthenticatorFlags(webAuthn.authenticatorData);
 
   const clientDataHash = Buffer.from(await crypto.subtle.digest('SHA-256', webAuthn.clientData));
   const signedData = Buffer.concat([webAuthn.authenticatorData, clientDataHash]);

@@ -366,6 +366,8 @@ Validation workflows are PR/manual only so branch pushes and merges to `main` do
 
 `providers/smart-account-kit` now has a real-Testnet auth-XDR recorder/verifier path. The browser smoke harness captures only the public relayer `func/auth` payload for a confirmed transfer, verifies the Protocol-27 signature payload/auth digest, extracts `context_rule_ids`, checks the WebAuthn challenge, and verifies the compact P-256 signature from the on-chain External signer key data. It then enables fixture download. The CLI verifier is `npm run fixture:verify -- <fixture.json>`.
 
+Real-browser validation exposed upstream `smart-account-kit` 0.6.2 requesting WebAuthn `userVerification: "preferred"` while the deployed verifier rejects UV=0 (3117). Fresnica now injects a required-UV WebAuthn adapter and the fixture verifier checks both UP and UV flags. Re-run the real Testnet transfer after this checkpoint before checking in a fixture.
+
 No real fixture has been checked in yet because this environment cannot perform a genuine browser WebAuthn ceremony. The next real-browser Testnet run should export the fixture and then add it under `spec/test-vectors/` only after both in-page and CLI verification pass.
 
 ## Immediate Next Work

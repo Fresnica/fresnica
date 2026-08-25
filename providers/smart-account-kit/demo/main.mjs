@@ -69,6 +69,7 @@ document.querySelector('#create').addEventListener('click', (event) => run(event
     submit: true,
     autoFund: true,
     nickname: 'Fresnica passkey',
+    authenticatorSelection: { userVerification: 'required' },
   });
   log('Created', result);
 }));

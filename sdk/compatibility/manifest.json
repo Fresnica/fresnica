@@ -36,7 +36,8 @@
       "upstreamVersion": "0.6.2",
       "fixtureSchema": "fresnica-smart-account-auth-v1",
       "network": "testnet",
-      "deploymentDate": "2026-07-09"
+      "deploymentDate": "2026-07-09",
+      "webAuthnBrowserVersion": "13.3.0"
     }
   }
 }

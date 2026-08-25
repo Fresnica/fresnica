@@ -43,6 +43,8 @@ There is intentionally no wrapper for upstream `kit.sign()`: current `smart-acco
 
 Raw WebAuthn registration/authentication responses and passkey public-key material are not returned by the normalized provider lifecycle API. The provider exposes the credential ID only as the external signer reference needed to reconnect/discover smart accounts.
 
+The pinned Protocol 27 WebAuthn verifier requires both User Present (UP) and User Verified (UV) authenticator flags. Upstream `smart-account-kit` 0.6.2 currently requests `userVerification: "preferred"` for registration, discovery authentication and transaction signing, which may legally return an assertion with UV=0 and then fail on-chain with verifier error 3117. Fresnica injects a WebAuthn adapter that tightens every ceremony to `userVerification: "required"`; it does not weaken or bypass verifier checks.
+
 ## Local contract tests
 
 These tests need only Node 22 and use an injected fake kit:
@@ -85,6 +87,7 @@ After a confirmed transfer, the smoke page now captures the exact public `func` 
 - checks that the WebAuthn `clientDataJSON.challenge` equals that digest;
 - extracts the passkey P-256 public key from the External signer `keyData`;
 - verifies the compact WebAuthn P-256 signature over `authenticatorData || SHA256(clientDataJSON)`.
+- requires the WebAuthn authenticator UP and UV flags before accepting the fixture.
 
 The captured WebAuthn assertion is public transaction authorization material that is already carried in the signed auth entry; the fixture recorder does not capture authenticator private keys, mnemonic/secret material, Fresnica `WalletUnlockKey`, or unrelated browser requests.
 

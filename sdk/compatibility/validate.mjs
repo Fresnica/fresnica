@@ -101,6 +101,7 @@ const actual = {
     smartAccountKit: {
       packageVersion: smartAccountProviderPackage.version,
       upstreamVersion: smartAccountConfig.SMART_ACCOUNT_KIT_VERSION,
+      webAuthnBrowserVersion: smartAccountProviderPackage.dependencies['@simplewebauthn/browser'],
       fixtureSchema: smartAccountRecorder.SMART_ACCOUNT_AUTH_FIXTURE_SCHEMA,
       network: smartAccountConfig.STELLAR_TESTNET_SMART_ACCOUNT.network,
       deploymentDate: smartAccountConfig.STELLAR_TESTNET_SMART_ACCOUNT.deploymentDate,
