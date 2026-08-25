@@ -51,7 +51,11 @@ pub struct AnchorCapabilities {
     pub sep6_url: Option<String>,
     pub sep24_url: Option<String>,
     pub web_auth_url: Option<String>,
+    pub web_auth_for_contracts_url: Option<String>,
     pub signing_key: Option<String>,
+    pub web_auth_contract_id: Option<String>,
+    pub sep10_auth: bool,
+    pub sep45_auth: bool,
     pub kyc_url: Option<String>,
     pub direct_payment_url: Option<String>,
     pub sep6_deposit: bool,
@@ -133,6 +137,9 @@ fn command_discover(network: &str, arguments: &[String]) -> Result<(), String> {
     if let Some(url) = &capabilities.web_auth_url {
         println!("SEP-10:     {url}");
     }
+    if let Some(url) = &capabilities.web_auth_for_contracts_url {
+        println!("SEP-45:     {url}");
+    }
     if let Some(url) = &capabilities.kyc_url {
         println!("KYC:        {url}");
     }
@@ -166,7 +173,11 @@ where
             sep6_url: None,
             sep24_url: None,
             web_auth_url: None,
+            web_auth_for_contracts_url: None,
             signing_key: None,
+            web_auth_contract_id: None,
+            sep10_auth: false,
+            sep45_auth: false,
             kyc_url: None,
             direct_payment_url: None,
             sep6_deposit: false,
@@ -182,7 +193,10 @@ where
     let sep6_url = endpoint(&document, "TRANSFER_SERVER")?;
     let sep24_url = endpoint(&document, "TRANSFER_SERVER_SEP0024")?;
     let web_auth_url = endpoint(&document, "WEB_AUTH_ENDPOINT")?;
-    let signing_key = text(&document, "SIGNING_KEY");
+    let web_auth_for_contracts_url = endpoint(&document, "WEB_AUTH_FOR_CONTRACTS_ENDPOINT")?;
+    let signing_key = account_identifier(&document, "SIGNING_KEY", SdkAccountKind::Classic)?;
+    let web_auth_contract_id =
+        account_identifier(&document, "WEB_AUTH_CONTRACT_ID", SdkAccountKind::Contract)?;
     let kyc_url = endpoint(&document, "KYC_SERVER")?;
     let direct_payment_url = endpoint(&document, "DIRECT_PAYMENT_SERVER")?;
     let mut warnings = Vec::new();
@@ -219,9 +233,27 @@ where
         }
     }
 
-    if (sep24_deposit || sep24_withdraw) && (web_auth_url.is_none() || signing_key.is_none()) {
+    let sep10_ready = web_auth_url.is_some() && signing_key.is_some();
+    let sep45_ready = web_auth_for_contracts_url.is_some()
+        && web_auth_contract_id.is_some()
+        && signing_key.is_some();
+    let sep6_requires_auth = [&sep6_deposit_info, &sep6_withdraw_info]
+        .into_iter()
+        .any(|info| {
+            info.get("authentication_required")
+                .and_then(JsonValue::as_bool)
+                .unwrap_or(false)
+        });
+
+    if sep6_requires_auth && !sep10_ready && !sep45_ready {
         warnings.push(
-            "SEP-24 is advertised but this Classic-account client has incomplete SEP-10 metadata"
+            "SEP-6 authentication is required but no complete SEP-10/SEP-45 metadata is available"
+                .to_owned(),
+        );
+    }
+    if (sep24_deposit || sep24_withdraw) && !sep10_ready && !sep45_ready {
+        warnings.push(
+            "SEP-24 is advertised but no complete SEP-10/SEP-45 authentication metadata is available"
                 .to_owned(),
         );
     }
@@ -231,7 +263,11 @@ where
         sep6_url,
         sep24_url,
         web_auth_url,
+        web_auth_for_contracts_url,
         signing_key,
+        web_auth_contract_id,
+        sep10_auth: sep10_ready,
+        sep45_auth: sep45_ready,
         kyc_url,
         direct_payment_url,
         sep6_deposit,
@@ -272,6 +308,27 @@ fn endpoint(document: &TomlValue, key: &str) -> Result<Option<String>, String> {
         ));
     }
     Ok(Some(value))
+}
+
+fn account_identifier(
+    document: &TomlValue,
+    key: &str,
+    expected_kind: SdkAccountKind,
+) -> Result<Option<String>, String> {
+    let Some(value) = text(document, key) else {
+        return Ok(None);
+    };
+    let identity = FresnicaSdk::new()
+        .parse_account(value)
+        .map_err(|_| format!("{key} must be a valid Stellar account identifier"))?;
+    if identity.kind != expected_kind {
+        let kind = match expected_kind {
+            SdkAccountKind::Classic => "Classic G address",
+            SdkAccountKind::Contract => "Contract C address",
+        };
+        return Err(format!("{key} must be a {kind}"));
+    }
+    Ok(Some(identity.address))
 }
 
 fn text(document: &TomlValue, key: &str) -> Option<String> {
@@ -363,6 +420,7 @@ mod tests {
     use super::*;
 
     const ISSUER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const CONTRACT: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 
     fn asset() -> IssuedAsset {
         IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap()
@@ -381,7 +439,9 @@ mod tests {
             r#"TRANSFER_SERVER = "https://anchor.example/sep6"
 TRANSFER_SERVER_SEP0024 = "https://anchor.example/sep24"
 WEB_AUTH_ENDPOINT = "https://anchor.example/auth"
+WEB_AUTH_FOR_CONTRACTS_ENDPOINT = "https://anchor.example/sep45/auth"
 SIGNING_KEY = "{ISSUER}"
+WEB_AUTH_CONTRACT_ID = "{CONTRACT}"
 
 [[CURRENCIES]]
 code = "USD"
@@ -409,6 +469,13 @@ issuer = "{ISSUER}"
         assert_eq!(capabilities.sep6_withdraw_info["enabled"], false);
         assert!(capabilities.sep24_deposit);
         assert!(capabilities.sep24_withdraw);
+        assert_eq!(
+            capabilities.web_auth_for_contracts_url.as_deref(),
+            Some("https://anchor.example/sep45/auth")
+        );
+        assert_eq!(capabilities.web_auth_contract_id.as_deref(), Some(CONTRACT));
+        assert!(capabilities.sep10_auth);
+        assert!(capabilities.sep45_auth);
         assert!(capabilities.warnings.is_empty());
     }
 
@@ -442,6 +509,64 @@ code = "USD"
         .unwrap();
         assert_eq!(capabilities.sep6_url.as_deref(), Some("https://anchor.example/sep6"));
         assert_eq!(capabilities.warnings, vec!["SEP-6 /info unavailable: offline"]);
+    }
+
+    #[test]
+    fn authentication_identifiers_are_account_kind_checked() {
+        let valid: TomlValue = toml::from_str(&format!(
+            r#"SIGNING_KEY = "{ISSUER}"
+WEB_AUTH_CONTRACT_ID = "{CONTRACT}""#
+        ))
+        .unwrap();
+        assert_eq!(
+            account_identifier(&valid, "SIGNING_KEY", SdkAccountKind::Classic)
+                .unwrap()
+                .as_deref(),
+            Some(ISSUER)
+        );
+        assert_eq!(
+            account_identifier(&valid, "WEB_AUTH_CONTRACT_ID", SdkAccountKind::Contract)
+                .unwrap()
+                .as_deref(),
+            Some(CONTRACT)
+        );
+
+        assert!(account_identifier(&valid, "SIGNING_KEY", SdkAccountKind::Contract).is_err());
+        assert!(account_identifier(
+            &valid,
+            "WEB_AUTH_CONTRACT_ID",
+            SdkAccountKind::Classic
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sep24_accepts_complete_sep45_metadata_without_sep10() {
+        let document = format!(
+            r#"TRANSFER_SERVER_SEP0024 = "https://anchor.example/sep24"
+WEB_AUTH_FOR_CONTRACTS_ENDPOINT = "https://anchor.example/sep45/auth"
+SIGNING_KEY = "{ISSUER}"
+WEB_AUTH_CONTRACT_ID = "{CONTRACT}"
+[[CURRENCIES]]
+code = "USD"
+issuer = "{ISSUER}"
+"#
+        );
+        let capabilities = capabilities_from_document(&asset(), "anchor.example", &document, |url| {
+            assert_eq!(url, "https://anchor.example/sep24/info");
+            Ok(serde_json::json!({
+                "deposit": {"USD": {"enabled": true}},
+                "withdraw": {"USD": {"enabled": true}}
+            }))
+        })
+        .unwrap();
+
+        assert!(capabilities.sep24_deposit);
+        assert!(capabilities.sep24_withdraw);
+        assert!(capabilities.web_auth_url.is_none());
+        assert!(!capabilities.sep10_auth);
+        assert!(capabilities.sep45_auth);
+        assert!(capabilities.warnings.is_empty());
     }
 
     #[test]
