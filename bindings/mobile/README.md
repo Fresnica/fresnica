@@ -1,10 +1,10 @@
 # Fresnica Mobile Core
 
-`fresnica-mobile-core` is the mobile-facing layer above `fresnica-core::CoreClientApi`.
+`fresnica-mobile-core` is the transitional Mobile v0.1.0 UniFFI compatibility facade above the platform-neutral `fresnica-sdk` contract.
 
-The domain/API surface remains platform-neutral. Swift and Kotlin bindings are generated from this same Rust facade with **UniFFI 0.32.x**. Native React Native modules then wrap the generated Swift/Kotlin API.
+Swift and Kotlin bindings are generated from this Rust facade with **UniFFI 0.32.x**. The public Mobile API remains stable while wallet/signing semantics move out of the Mobile-specific layer and into `fresnica-sdk`.
 
-Fresnica deliberately does **not** bind Rust directly to React Native JSI/TurboModule and does not use UniFFI's experimental Kotlin-JNI backend. Xaman's retained native infrastructure is based on conventional Objective-C/Java React Native modules, and Fresnica can replace the crypto/vault authority without coupling Core to the JavaScript runtime.
+Fresnica deliberately does **not** bind Rust directly to React Native JSI/TurboModule and does not use UniFFI's experimental Kotlin-JNI backend. React Native modules wrap the generated native Swift/Kotlin API instead.
 
 ## Boundary
 
@@ -17,31 +17,34 @@ Swift / Kotlin
         |
 stable UniFFI-generated bindings
         |
-fresnica-mobile-core        <- this crate
+fresnica-mobile-core        <- compatibility binding only
+        |
+fresnica-sdk                <- shared semantic SDK contract
         |
 fresnica-core::CoreClientApi
         |
 Core crypto / signer / transaction primitives
 ```
 
-The Swift/Kotlin generation choice is implementation glue. Account, signer, protection, and signing semantics remain defined below it.
+The Mobile facade owns UniFFI DTO/error translation only. It does not reproduce Core cryptography, signer identity checks, protected-envelope parsing, unlock-key validation, transaction hashing, or signature verification.
 
-## Rules
+## Compatibility rules
 
+- `MOBILE_BINDING_API_VERSION` remains `2` for the Mobile v0.1.0 surface.
+- Existing Swift/Kotlin type and method names remain unchanged.
 - Account identity and signer identity remain separate.
-- Mobile receives Core protected envelopes as opaque JSON strings. It must not inspect or edit their fields.
-- Binding-facing numeric values use fixed-width integers rather than Rust `usize`.
+- Protected signer envelopes remain opaque JSON strings outside SDK/Core.
 - Transaction XDR, signatures, transaction hashes, and unlock keys cross this layer as byte arrays rather than base64 text.
-- Sensitive string inputs are accepted as owned values and wrapped in zeroizing Rust storage immediately after entry.
-- `WalletUnlockKey` must be exactly 32 bytes and is converted back to the Core redacted key type before use.
-- Reveal/export remains a distinct passcode-only declassification operation.
+- Secret/mnemonic/passcode zeroization and protected-envelope validation are performed below this compatibility layer by `fresnica-sdk` / Core.
+- `WalletUnlockKey` remains routine native-signing material only; it does not authorize Reveal/Export.
+- Reveal/export remains a distinct fresh-passcode declassification operation.
 - External/hardware signers use `prepare_ed25519_signing` and `apply_ed25519_signature`; no Rust callback crosses the mobile boundary.
-- Stable Core error categories are preserved by `MobileCoreError` / `MobileCoreErrorCode`.
-- `MobileCoreApi` is stateless. Each call creates a short-lived `CoreClientApi`; no unlocked signer or secret-bearing Core session is retained between FFI calls.
+- Stable SDK/Core error categories are preserved by `MobileCoreError` / `MobileCoreErrorCode`.
+- `MobileCoreApi` is stateless and retains no unlocked signer or secret-bearing session between FFI calls.
 
 ## Surface
 
-`MobileCoreApi` exposes:
+`MobileCoreApi` preserves the existing eleven operations:
 
 1. `parse_account`
 2. `protect_secret`
@@ -55,21 +58,19 @@ The Swift/Kotlin generation choice is implementation glue. Account, signer, prot
 10. `prepare_ed25519_signing`
 11. `apply_ed25519_signature`
 
-`MOBILE_BINDING_API_VERSION` versions this boundary separately from `CLIENT_API_VERSION` in Rust Core.
+The Mobile binding version remains independent from both the universal SDK API version and the Rust Core client API version.
 
 ## UniFFI
 
 The crate uses proc-macro definitions directly in Rust rather than duplicating the API in a UDL file.
-
-The crate builds all forms needed by the next packaging step:
 
 ```toml
 crate-type = ["lib", "cdylib", "staticlib"]
 ```
 
 - `cdylib` is used for host/library-mode generation and Android shared libraries.
-- `staticlib` is required for the future iOS XCFramework packaging path.
-- normal `lib` output keeps Rust tests and direct Rust consumers straightforward.
+- `staticlib` is used by Apple packaging.
+- normal `lib` output keeps Rust tests straightforward.
 
 Generate host bindings after building the library:
 
@@ -98,11 +99,11 @@ Configuration lives in `uniffi.toml`:
 
 ## Sensitive generated records
 
-UniFFI records are ordinary Swift/Kotlin value types. Some returned records intentionally contain plaintext only during explicit import/generation/reveal flows, for example `MobileGeneratedMnemonic` and `MobileExportedSigningMaterial`.
+UniFFI records are ordinary Swift/Kotlin value types. Some returned records intentionally contain plaintext only during explicit generation/reveal flows, for example `MobileGeneratedMnemonic` and `MobileExportedSigningMaterial`.
 
 Platform code MUST NOT log, stringify for diagnostics, persist, serialize into React Native navigation state, or send these records to telemetry. Kotlin data-class `toString()` in particular must not be used on secret-bearing records.
 
-Routine signing does not return these records. It crosses the native boundary using only:
+Routine signing crosses the native boundary using only:
 
 - opaque encrypted envelope;
 - 32-byte `WalletUnlockKey` released by platform authorization;
@@ -122,16 +123,14 @@ It does not own:
 - React Native / JavaScript state;
 - passcode UI or application session policy.
 
-Those remain mobile/platform responsibilities as defined in `docs/mobile-core-contract.md`.
+Those remain application/platform responsibilities.
 
 ## Validation
 
-The Rust facade tests every operation family against the same Core semantics used by the Python reference, including the shared transaction-signing vector under `spec/test-vectors/transaction-signing-v1.json`.
-
-Run:
+The compatibility facade re-runs the same operation families and shared transaction-signing vector used by the universal SDK and Core:
 
 ```sh
 cargo test --manifest-path bindings/mobile/Cargo.toml
 ```
 
-GitHub Actions additionally builds the FFI library and generates both Kotlin and Swift bindings from the compiled library metadata so proc-macro/API drift fails CI.
+GitHub Actions additionally tests Core and `fresnica-sdk`, builds the FFI library, and generates Kotlin and Swift bindings from compiled library metadata so dependency, proc-macro, and API drift fail CI.
