@@ -37,6 +37,8 @@ Usage:
   fresnica [--home PATH] [--network mainnet|testnet] dex offers [--wallet NAME] [--limit N] [--json]
   fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]
   fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]
+  fresnica [--home PATH] [--network mainnet|testnet] anchor deposit CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] anchor withdraw CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]
   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
 
 Network commands:
@@ -46,7 +48,7 @@ Network commands:
   send                          Review, sign through Fresnica SDK/Core, and submit a payment
   trust                         Add, change, or remove an issued-asset trustline
   dex                           Read and trade on the Stellar DEX
-  anchor                        Discover anchor capabilities and establish SEP-10 sessions
+  anchor                        Discover anchor capabilities and start SEP-24/SEP-6 transfers
 
 Contact commands:
   list
