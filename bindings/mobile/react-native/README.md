@@ -1,23 +1,90 @@
 # React Native Core module
 
-`FresnicaCore` is the thin React Native surface over the native software-signer authorization services.
-It is intentionally smaller than the full UniFFI `MobileCoreApi`: routine React Native code must not
-receive `WalletUnlockKey` bytes, native biometric `Cipher` objects, or one-shot signing sessions.
+`FresnicaCore` is the high-level React Native surface over the mobile Core facade and the native
+software-signer authorization services. It deliberately does **not** mirror every UniFFI method.
+In particular, React Native never receives `WalletUnlockKey` bytes, biometric `Cipher` objects,
+one-shot signing sessions, or the raw unlock-key signing methods.
 
 ## JavaScript surface
 
-The Android and Apple modules expose the same promise-based methods:
+Android and Apple expose the same promise-based methods.
+
+### Account and protected signer lifecycle
+
+```text
+parseAccount(address)
+  -> { kind, address, publicKey }
+
+protectSecret(secret, appPasscode, expectedSignerPublicKey?)
+  -> { signerPublicKey, envelopeJson }
+
+protectMnemonic(
+  mnemonic,
+  mnemonicPassphrase,
+  index,
+  language?,
+  appPasscode,
+  expectedSignerPublicKey?,
+)
+  -> { signerPublicKey, envelopeJson }
+
+generateMnemonic(language, strength, mnemonicPassphrase, index, appPasscode)
+  -> {
+       signer: { signerPublicKey, envelopeJson },
+       mnemonic,
+       language,
+       index,
+     }
+
+reprotect(envelopeJson, currentPasscode, newPasscode, expectedSignerPublicKey)
+  -> { signerPublicKey, envelopeJson }
+
+reveal(envelopeJson, freshAppPasscode, expectedSignerPublicKey)
+  -> {
+       kind: "secret" | "mnemonic",
+       secret?,
+       mnemonic?,
+       mnemonicPassphrase?,
+       index?,
+       language?,
+     }
+```
+
+`expectedSignerPublicKey` is the identity check used when attaching signing material to an existing
+account/signer record. A mismatch is a Core `identity-mismatch`, not a client-side string comparison.
+
+`reprotect` changes the protected envelope and therefore invalidates any previously derived
+`WalletUnlockKey`. The caller must first persist the new envelope atomically, then remove/re-enroll
+system authentication. This method intentionally does not delete the Keychain/Keystore record before
+the client has committed the new envelope.
+
+### External Ed25519 signing
+
+```text
+prepareEd25519Signing(transactionXdrBase64, networkPassphrase)
+  -> { transactionHashBase64, transactionXdrBase64, networkPassphrase }
+
+applyEd25519Signature(
+  transactionXdrBase64,
+  networkPassphrase,
+  signerPublicKey,
+  signatureBase64,
+)
+  -> signedXdrBase64
+```
+
+The external provider receives the public signing request and returns a 64-byte Ed25519 signature.
+Core recomputes the transaction hash, verifies the signature against `signerPublicKey`, and only then
+appends it to the envelope. No private key or `WalletUnlockKey` is involved.
+
+### Protected software signing
 
 ```text
 canEnrollSystemAuth() -> boolean
 hasSystemAuth(expectedSignerPublicKey) -> boolean
 removeSystemAuth(expectedSignerPublicKey) -> true
 
-enrollSystemAuth(
-  envelopeJson,
-  appPasscode,
-  expectedSignerPublicKey,
-) -> true
+enrollSystemAuth(envelopeJson, appPasscode, expectedSignerPublicKey) -> true
 
 signWithSystemAuth(
   envelopeJson,
@@ -36,11 +103,30 @@ signWithPasscode(
 ) -> signedXdrBase64
 ```
 
-Only public/reviewed transaction XDR, opaque protected signer envelopes, signer identity, network
-passphrase and an explicitly entered app passcode cross JavaScript/native. The per-signer unlock key
-never does.
+Routine software signing remains native-only. `deriveUnlockKey`, `validateUnlockKey`, and raw
+`signTransactionXdr` exist in UniFFI for native platform code but are intentionally absent from the
+React Native module.
 
-Stable Core error categories are preserved where applicable:
+## Plaintext boundary
+
+Signing material may cross React Native only in the already-defined exceptional lifecycle cases:
+
+- initial secret or mnemonic import;
+- one-time mnemonic generation/backup display;
+- explicit Reveal / Export after a fresh app passcode.
+
+It must not be persisted as React Native state, logged, sent to analytics, or reused for routine
+signing. Native code cannot reliably zero immutable JavaScript/Swift/Kotlin strings after they have
+crossed the bridge, which is why this boundary stays exceptional.
+
+Transaction XDR and signatures use base64 at the React Native boundary. Native adapters reject empty
+or malformed base64 before calling Core; Ed25519 signatures must decode to exactly 64 bytes. Numeric
+mnemonic `index` and `strength` inputs must be finite unsigned 32-bit integers. Core remains
+authoritative for mnemonic language/strength semantics, Stellar identities, protected data and XDR.
+
+## Error categories
+
+Stable Core errors are preserved:
 
 - `invalid-input`
 - `invalid-passcode`
@@ -61,28 +147,21 @@ Platform authorization adds:
 - `system-auth-error`
 - `native-error`
 
-## Android / Xaman host
+## Android host integration
 
 The AAR contains `com.fresnica.core.reactnative.FresnicaCoreModule` and
-`FresnicaCorePackage`. Xaman's current `ApplicationLoader` already manually registers local
-`ReactPackage` implementations, so the integration is one additional package registration next to
-its existing `SecurityPackage`.
+`FresnicaCorePackage`. A React Native host registers the package alongside its other local
+`ReactPackage` implementations.
 
 The module owns `BiometricPrompt` and authenticates the exact enrollment/decrypt `Cipher` created by
-`WalletUnlockKeyStore`. On prompt cancellation it explicitly destroys the pending native session.
+`WalletUnlockKeyStore`. Prompt cancellation explicitly destroys the pending native session.
 
-## Apple / Xaman host
+## Apple host integration
 
-`FresnicaCoreModule.swift` owns the high-level native service. `FresnicaCoreModule.m` contains only
-`RCT_EXTERN_MODULE` declarations, matching Xaman's existing Objective-C React Native bridge style.
-Add both files, `FresnicaSignerAuthorization.swift`, `FresnicaWalletUnlockKeyStore.swift`, the
-generated `FresnicaCore.swift`, and `FresnicaCoreFFI.xcframework` to the application target.
+`FresnicaCoreModule.swift` owns the high-level Core/native service. `FresnicaCoreModule.m` contains
+only `RCT_EXTERN_MODULE` declarations. Add both files, `FresnicaSignerAuthorization.swift`,
+`FresnicaWalletUnlockKeyStore.swift`, generated `FresnicaCore.swift`, and
+`FresnicaCoreFFI.xcframework` to the application target.
 
 Keychain access performs the actual Face ID / Touch ID operation that releases a per-signer
 `WalletUnlockKey`; a separate biometric-success flag is never treated as signing authorization.
-
-## Boundary
-
-This module is for protected local software signing. Hardware/external signers continue to use the
-Core `prepare_ed25519_signing` / provider / `apply_ed25519_signature` flow and should get their own
-provider orchestration rather than being forced through this module's Keychain/Keystore path.

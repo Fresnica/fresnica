@@ -4,20 +4,231 @@ import Security
 public typealias FresnicaPromiseResolveBlock = @convention(block) (Any?) -> Void
 public typealias FresnicaPromiseRejectBlock = @convention(block) (String?, String?, NSError?) -> Void
 
-/// React Native-facing Apple module. It deliberately exposes only high-level signing actions.
-/// WalletUnlockKey bytes and Keychain data never cross this boundary.
+/// High-level React Native surface for Fresnica Core.
+///
+/// Routine protected-software signing remains native-only. WalletUnlockKey bytes, biometric state
+/// and one-shot authorization objects never cross this boundary. Secret-bearing strings cross only
+/// for explicit import, one-time mnemonic generation, or explicit Reveal / Export.
 @objc(FresnicaCoreModule)
 public final class FresnicaCoreModule: NSObject {
+    private let core: MobileCoreApiProtocol
     private let authorization: FresnicaSignerAuthorization
 
     public override init() {
-        authorization = FresnicaSignerAuthorization()
+        let mobileCore = MobileCoreApi()
+        core = mobileCore
+        authorization = FresnicaSignerAuthorization(core: mobileCore)
         super.init()
     }
 
     @objc public static func requiresMainQueueSetup() -> Bool {
         false
     }
+
+    // MARK: - Wallet / signer lifecycle
+
+    @objc(parseAccount:resolver:rejecter:)
+    public func parseAccount(
+        _ address: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard requireNonBlank(address, field: "address", reject: reject) else { return }
+        do {
+            resolve(accountIdentityDictionary(try core.parseAccount(address: address)))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(protectSecret:appPasscode:expectedSignerPublicKey:resolver:rejecter:)
+    public func protectSecret(
+        _ secret: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String?,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            resolve(protectedSignerDictionary(try core.protectSecret(
+                secret: secret,
+                passcode: appPasscode,
+                expectedSignerPublicKey: expectedSignerPublicKey
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(protectMnemonic:mnemonicPassphrase:index:language:appPasscode:expectedSignerPublicKey:resolver:rejecter:)
+    public func protectMnemonic(
+        _ mnemonic: String,
+        mnemonicPassphrase: String,
+        index: NSNumber,
+        language: String?,
+        appPasscode: String,
+        expectedSignerPublicKey: String?,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard let parsedIndex = uint32(index, field: "index", reject: reject) else { return }
+        do {
+            resolve(protectedSignerDictionary(try core.protectMnemonic(
+                mnemonic: mnemonic,
+                mnemonicPassphrase: mnemonicPassphrase,
+                index: parsedIndex,
+                language: language,
+                passcode: appPasscode,
+                expectedSignerPublicKey: expectedSignerPublicKey
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(generateMnemonic:strength:mnemonicPassphrase:index:appPasscode:resolver:rejecter:)
+    public func generateMnemonic(
+        _ language: String,
+        strength: NSNumber,
+        mnemonicPassphrase: String,
+        index: NSNumber,
+        appPasscode: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard requireNonBlank(language, field: "language", reject: reject) else { return }
+        guard let parsedStrength = uint32(strength, field: "strength", reject: reject) else { return }
+        guard let parsedIndex = uint32(index, field: "index", reject: reject) else { return }
+        do {
+            resolve(generatedMnemonicDictionary(try core.generateMnemonic(
+                language: language,
+                strength: parsedStrength,
+                mnemonicPassphrase: mnemonicPassphrase,
+                index: parsedIndex,
+                passcode: appPasscode
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(reprotect:currentPasscode:newPasscode:expectedSignerPublicKey:resolver:rejecter:)
+    public func reprotect(
+        _ envelopeJson: String,
+        currentPasscode: String,
+        newPasscode: String,
+        expectedSignerPublicKey: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            resolve(protectedSignerDictionary(try core.reprotect(
+                envelopeJson: envelopeJson,
+                currentPasscode: currentPasscode,
+                newPasscode: newPasscode,
+                expectedSignerPublicKey: expectedSignerPublicKey
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(reveal:freshAppPasscode:expectedSignerPublicKey:resolver:rejecter:)
+    public func reveal(
+        _ envelopeJson: String,
+        freshAppPasscode: String,
+        expectedSignerPublicKey: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            resolve(exportedMaterialDictionary(try core.reveal(
+                envelopeJson: envelopeJson,
+                freshPasscode: freshAppPasscode,
+                expectedSignerPublicKey: expectedSignerPublicKey
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    // MARK: - External Ed25519 signer boundary
+
+    @objc(prepareEd25519Signing:networkPassphrase:resolver:rejecter:)
+    public func prepareEd25519Signing(
+        _ transactionXdrBase64: String,
+        networkPassphrase: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard requireNonBlank(networkPassphrase, field: "networkPassphrase", reject: reject) else { return }
+        guard var transactionXdr = decodeBase64(
+            transactionXdrBase64,
+            field: "transactionXdrBase64",
+            reject: reject
+        ) else { return }
+        defer { wipe(&transactionXdr) }
+
+        do {
+            let request = try core.prepareEd25519Signing(
+                transactionXdr: transactionXdr,
+                networkPassphrase: networkPassphrase
+            )
+            resolve([
+                "transactionHashBase64": request.transactionHash.base64EncodedString(),
+                "transactionXdrBase64": request.transactionXdr.base64EncodedString(),
+                "networkPassphrase": request.networkPassphrase,
+            ])
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(applyEd25519Signature:networkPassphrase:signerPublicKey:signatureBase64:resolver:rejecter:)
+    public func applyEd25519Signature(
+        _ transactionXdrBase64: String,
+        networkPassphrase: String,
+        signerPublicKey: String,
+        signatureBase64: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard requireNonBlank(networkPassphrase, field: "networkPassphrase", reject: reject) else { return }
+        guard requireNonBlank(signerPublicKey, field: "signerPublicKey", reject: reject) else { return }
+        guard var transactionXdr = decodeBase64(
+            transactionXdrBase64,
+            field: "transactionXdrBase64",
+            reject: reject
+        ) else { return }
+        guard var signature = decodeBase64(
+            signatureBase64,
+            field: "signatureBase64",
+            exactLength: Self.ed25519SignatureBytes,
+            reject: reject
+        ) else {
+            wipe(&transactionXdr)
+            return
+        }
+        defer {
+            wipe(&transactionXdr)
+            wipe(&signature)
+        }
+
+        do {
+            var signed = try core.applyEd25519Signature(
+                transactionXdr: transactionXdr,
+                networkPassphrase: networkPassphrase,
+                signerPublicKey: signerPublicKey,
+                signature: signature
+            )
+            defer { wipe(&signed) }
+            resolve(signed.base64EncodedString())
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    // MARK: - Native-only protected software signing
 
     @objc(canEnrollSystemAuth:rejecter:)
     public func canEnrollSystemAuth(
@@ -86,10 +297,15 @@ public final class FresnicaCoreModule: NSObject {
         resolver resolve: @escaping FresnicaPromiseResolveBlock,
         rejecter reject: @escaping FresnicaPromiseRejectBlock
     ) {
-        guard let transactionXdr = Data(base64Encoded: transactionXdrBase64) else {
-            rejectInput("transactionXdrBase64 is not valid base64", reject)
-            return
-        }
+        guard requireNonBlank(networkPassphrase, field: "networkPassphrase", reject: reject) else { return }
+        guard requireNonBlank(reason, field: "reason", reject: reject) else { return }
+        guard var transactionXdr = decodeBase64(
+            transactionXdrBase64,
+            field: "transactionXdrBase64",
+            reject: reject
+        ) else { return }
+        defer { wipe(&transactionXdr) }
+
         do {
             var signed = try authorization.signWithSystemAuth(
                 envelopeJson: envelopeJson,
@@ -115,10 +331,14 @@ public final class FresnicaCoreModule: NSObject {
         resolver resolve: @escaping FresnicaPromiseResolveBlock,
         rejecter reject: @escaping FresnicaPromiseRejectBlock
     ) {
-        guard let transactionXdr = Data(base64Encoded: transactionXdrBase64) else {
-            rejectInput("transactionXdrBase64 is not valid base64", reject)
-            return
-        }
+        guard requireNonBlank(networkPassphrase, field: "networkPassphrase", reject: reject) else { return }
+        guard var transactionXdr = decodeBase64(
+            transactionXdrBase64,
+            field: "transactionXdrBase64",
+            reject: reject
+        ) else { return }
+        defer { wipe(&transactionXdr) }
+
         do {
             var signed = try authorization.signWithPasscode(
                 envelopeJson: envelopeJson,
@@ -132,6 +352,94 @@ public final class FresnicaCoreModule: NSObject {
         } catch {
             rejectNativeError(error, with: reject)
         }
+    }
+
+    // MARK: - JS DTO conversion
+
+    private func accountIdentityDictionary(_ value: MobileAccountIdentity) -> [String: Any] {
+        [
+            "kind": value.kind == .classic ? "classic" : "contract",
+            "address": value.address,
+            "publicKey": value.publicKey as Any? ?? NSNull(),
+        ]
+    }
+
+    private func protectedSignerDictionary(_ value: MobileProtectedSoftwareSigner) -> [String: Any] {
+        [
+            "signerPublicKey": value.signerPublicKey,
+            "envelopeJson": value.envelopeJson,
+        ]
+    }
+
+    private func generatedMnemonicDictionary(_ value: MobileGeneratedMnemonic) -> [String: Any] {
+        [
+            "signer": protectedSignerDictionary(value.signer),
+            "mnemonic": value.mnemonic,
+            "language": value.language,
+            "index": NSNumber(value: value.index),
+        ]
+    }
+
+    private func exportedMaterialDictionary(_ value: MobileExportedSigningMaterial) -> [String: Any] {
+        [
+            "kind": value.kind == .secret ? "secret" : "mnemonic",
+            "secret": value.secret as Any? ?? NSNull(),
+            "mnemonic": value.mnemonic as Any? ?? NSNull(),
+            "mnemonicPassphrase": value.mnemonicPassphrase as Any? ?? NSNull(),
+            "index": value.index.map { NSNumber(value: $0) } as Any? ?? NSNull(),
+            "language": value.language as Any? ?? NSNull(),
+        ]
+    }
+
+    // MARK: - Input validation / errors
+
+    private func requireNonBlank(
+        _ value: String,
+        field: String,
+        reject: FresnicaPromiseRejectBlock
+    ) -> Bool {
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            rejectInput("\(field) must not be blank", reject)
+            return false
+        }
+        return true
+    }
+
+    private func uint32(
+        _ number: NSNumber,
+        field: String,
+        reject: FresnicaPromiseRejectBlock
+    ) -> UInt32? {
+        let value = number.doubleValue
+        guard value.isFinite,
+              value >= 0,
+              value <= Double(UInt32.max),
+              value.rounded(.towardZero) == value else {
+            rejectInput("\(field) must be an unsigned 32-bit integer", reject)
+            return nil
+        }
+        return UInt32(value)
+    }
+
+    private func decodeBase64(
+        _ text: String,
+        field: String,
+        exactLength: Int? = nil,
+        reject: FresnicaPromiseRejectBlock
+    ) -> Data? {
+        guard !text.isEmpty else {
+            rejectInput("\(field) must not be empty", reject)
+            return nil
+        }
+        guard let data = Data(base64Encoded: text, options: []), !data.isEmpty else {
+            rejectInput("\(field) is not valid non-empty base64", reject)
+            return nil
+        }
+        if let exactLength, data.count != exactLength {
+            rejectInput("\(field) must decode to exactly \(exactLength) bytes", reject)
+            return nil
+        }
+        return data
     }
 
     private func rejectInput(
@@ -210,4 +518,6 @@ public final class FresnicaCoreModule: NSObject {
         data.resetBytes(in: 0..<data.count)
         data.removeAll(keepingCapacity: false)
     }
+
+    private static let ed25519SignatureBytes = 64
 }

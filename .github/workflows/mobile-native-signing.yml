@@ -56,6 +56,15 @@ jobs:
           jar tf /tmp/fresnica-classes.jar > /tmp/fresnica-classes.txt
           grep -q 'com/fresnica/core/reactnative/FresnicaCoreModule.class' /tmp/fresnica-classes.txt
           grep -q 'com/fresnica/core/reactnative/FresnicaCorePackage.class' /tmp/fresnica-classes.txt
+      - name: Validate React Native lifecycle boundary
+        run: |
+          MODULE="bindings/mobile/platform/android/src/main/kotlin/com/fresnica/core/reactnative/FresnicaCoreModule.kt"
+          for method in parseAccount protectSecret protectMnemonic generateMnemonic reprotect reveal prepareEd25519Signing applyEd25519Signature; do
+            grep -q "fun ${method}" "$MODULE"
+          done
+          ! grep -q 'fun deriveUnlockKey' "$MODULE"
+          ! grep -q 'fun validateUnlockKey' "$MODULE"
+          ! grep -q 'fun signTransactionXdr' "$MODULE"
       - uses: actions/upload-artifact@v4
         with:
           name: fresnica-mobile-android-aar
@@ -85,6 +94,13 @@ jobs:
             bindings/mobile/platform/apple/FresnicaCoreModule.swift
       - name: Validate React Native Objective-C shim
         run: |
-          grep -q 'RCT_EXTERN_MODULE(FresnicaCoreModule' bindings/mobile/platform/apple/FresnicaCoreModule.m
-          grep -q 'signWithSystemAuth' bindings/mobile/platform/apple/FresnicaCoreModule.m
-          grep -q 'signWithPasscode' bindings/mobile/platform/apple/FresnicaCoreModule.m
+          SHIM="bindings/mobile/platform/apple/FresnicaCoreModule.m"
+          MODULE="bindings/mobile/platform/apple/FresnicaCoreModule.swift"
+          grep -q 'RCT_EXTERN_MODULE(FresnicaCoreModule' "$SHIM"
+          for method in parseAccount protectSecret protectMnemonic generateMnemonic reprotect reveal prepareEd25519Signing applyEd25519Signature signWithSystemAuth signWithPasscode; do
+            grep -q "$method" "$SHIM"
+            grep -q "@objc(${method}" "$MODULE"
+          done
+          ! grep -q '@objc(deriveUnlockKey' "$MODULE"
+          ! grep -q '@objc(validateUnlockKey' "$MODULE"
+          ! grep -q '@objc(signTransactionXdr' "$MODULE"
