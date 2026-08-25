@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: main-bundle
@@ -42,6 +43,7 @@ jobs:
           test -z "$(git -C "$verify_dir/repo" status --porcelain)"
 
       - name: Upload main bundle
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: fresnica-main-bundle
@@ -49,3 +51,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+      - name: Publish bundle locator
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          BUNDLE_ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          test -n "$BUNDLE_ARTIFACT_ID"
+          test -n "$BUNDLE_ARTIFACT_URL"
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=success \
+            -f context=main-bundle \
+            -f description="artifact-id=${BUNDLE_ARTIFACT_ID}; run-id=${GITHUB_RUN_ID}" \
+            -f target_url="$BUNDLE_ARTIFACT_URL"
