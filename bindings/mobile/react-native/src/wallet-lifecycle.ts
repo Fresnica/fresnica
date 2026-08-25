@@ -26,6 +26,12 @@ export interface FresnicaCoreLifecycleBridge {
     appPasscode: string,
     expectedSignerPublicKey: string,
   ): Promise<NativeProtectedSoftwareSigner>;
+  reprotect(
+    envelopeJson: string,
+    currentPasscode: string,
+    newPasscode: string,
+    expectedSignerPublicKey: string,
+  ): Promise<NativeProtectedSoftwareSigner>;
   hasSystemAuth(expectedSignerPublicKey: string): Promise<boolean>;
   removeSystemAuth(expectedSignerPublicKey: string): Promise<true>;
 }
@@ -67,6 +73,7 @@ export interface WalletStoreTransaction extends WalletStoreReader {
 
 export interface WalletStore {
   getAccount(accountId: string): Promise<AccountRecord | null>;
+  listProtectedSoftwareSigners(): Promise<readonly ProtectedSoftwareSignerRecord[]>;
   listSignerReferencesForAccount(accountId: string): Promise<readonly AccountSignerReference[]>;
   transaction<T>(work: (transaction: WalletStoreTransaction) => T): Promise<T>;
 }
@@ -79,7 +86,8 @@ export type WalletLifecycleErrorCode =
   | "account-not-watch-only"
   | "unsupported-account-kind"
   | "record-id-collision"
-  | "account-changed";
+  | "account-changed"
+  | "signer-changed";
 
 export class WalletLifecycleError extends Error {
   readonly code: WalletLifecycleErrorCode;
@@ -116,6 +124,12 @@ export interface DowngradeResult {
   pendingSystemAuthCleanup: readonly string[];
 }
 
+export interface ReprotectAllResult {
+  updatedSignerIds: readonly string[];
+  systemAuthReenrollment: readonly string[];
+  pendingSystemAuthCleanup: readonly string[];
+}
+
 interface WatchOnlySnapshot {
   account: AccountRecord;
 }
@@ -124,6 +138,11 @@ interface DowngradeCommit {
   account: AccountRecord;
   removedSignerIds: string[];
   orphanedSignerPublicKeys: string[];
+}
+
+interface StagedReprotect {
+  before: ProtectedSoftwareSignerRecord;
+  after: ProtectedSoftwareSignerRecord;
 }
 
 /**
@@ -209,6 +228,72 @@ export class WalletLifecycleCoordinator {
       snapshot.account.address,
     );
     return this.attachProtectedSigner(snapshot, protectedSigner);
+  }
+
+  /**
+   * Re-protects every local protected-software signer before committing any new envelope.
+   *
+   * All Core work is staged first. The database swap is then one WalletStore transaction. Only
+   * after that commit succeeds are stale system-auth unlock keys removed. A failed cleanup is
+   * reported for retry and never rolls signer envelopes back to the old passcode.
+   */
+  async reprotectAllProtectedSigners(
+    currentPasscode: string,
+    newPasscode: string,
+  ): Promise<ReprotectAllResult> {
+    const before = [...(await this.store.listProtectedSoftwareSigners())];
+    const staged: StagedReprotect[] = [];
+
+    for (const signer of before) {
+      const protectedSigner = await this.core.reprotect(
+        signer.envelopeJson,
+        currentPasscode,
+        newPasscode,
+        signer.signerPublicKey,
+      );
+      staged.push({
+        before: signer,
+        after: {
+          ...signer,
+          signerPublicKey: protectedSigner.signerPublicKey,
+          envelopeJson: protectedSigner.envelopeJson,
+        },
+      });
+    }
+
+    await this.store.transaction((transaction) => {
+      for (const item of staged) {
+        const current = transaction.getSigner(item.before.id);
+        if (current === null || !sameSigner(current, item.before)) {
+          throw new WalletLifecycleError(
+            "signer-changed",
+            `Signer changed while passcode rotation was being staged: ${item.before.id}`,
+          );
+        }
+      }
+      for (const item of staged) {
+        transaction.putSigner(item.after);
+      }
+    });
+
+    const systemAuthReenrollment: string[] = [];
+    const pendingSystemAuthCleanup: string[] = [];
+    for (const signerPublicKey of unique(staged.map((item) => item.after.signerPublicKey))) {
+      try {
+        if (await this.core.hasSystemAuth(signerPublicKey)) {
+          await this.core.removeSystemAuth(signerPublicKey);
+          systemAuthReenrollment.push(signerPublicKey);
+        }
+      } catch {
+        pendingSystemAuthCleanup.push(signerPublicKey);
+      }
+    }
+
+    return {
+      updatedSignerIds: staged.map((item) => item.after.id),
+      systemAuthReenrollment,
+      pendingSystemAuthCleanup,
+    };
   }
 
   async downgradeToWatchOnly(accountId: string): Promise<DowngradeResult> {
@@ -346,6 +431,18 @@ function sameAccountIdentity(left: AccountRecord, right: AccountRecord): boolean
     left.address === right.address &&
     left.kind === right.kind &&
     left.network === right.network
+  );
+}
+
+function sameSigner(
+  left: ProtectedSoftwareSignerRecord,
+  right: ProtectedSoftwareSignerRecord,
+): boolean {
+  return (
+    left.id === right.id &&
+    left.kind === right.kind &&
+    left.signerPublicKey === right.signerPublicKey &&
+    left.envelopeJson === right.envelopeJson
   );
 }
 

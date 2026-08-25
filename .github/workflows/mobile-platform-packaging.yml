@@ -3,15 +3,21 @@ name: Mobile platform packaging
 on:
   push:
     paths:
-      - "bindings/mobile/**"
+      - "bindings/mobile/Cargo.toml"
+      - "bindings/mobile/src/**"
+      - "bindings/mobile/uniffi.toml"
+      - "bindings/mobile/uniffi-bindgen.rs"
+      - "bindings/mobile/scripts/**"
       - "core/rust/**"
-      - "spec/test-vectors/**"
       - ".github/workflows/mobile-platform-packaging.yml"
   pull_request:
     paths:
-      - "bindings/mobile/**"
+      - "bindings/mobile/Cargo.toml"
+      - "bindings/mobile/src/**"
+      - "bindings/mobile/uniffi.toml"
+      - "bindings/mobile/uniffi-bindgen.rs"
+      - "bindings/mobile/scripts/**"
       - "core/rust/**"
-      - "spec/test-vectors/**"
       - ".github/workflows/mobile-platform-packaging.yml"
 
 jobs:

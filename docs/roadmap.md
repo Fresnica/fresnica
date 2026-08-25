@@ -65,18 +65,24 @@ Implemented in the Python reference and increasingly ported to the native Rust C
 - Per-signer user-auth-bound `WalletUnlockKey` storage on Android and Apple
 - Core-backed native software-signer enrollment and biometric signing coordinators
 - Thin React Native protected-signing bridge with no unlock-key exposure to JavaScript
+- React Native wallet lifecycle facade for import/generate/reprotect/reveal/external signing
+- Storage-neutral AccountRecord / SignerRecord lifecycle coordinator
+- Watch-only upgrade/downgrade with stable account identity
+- Realm-ready Account / Signer / reference schemas and WalletStore adapter
+- Staged/atomic app-passcode re-protection across protected software signers
+- CI isolation so React Native/persistence changes do not rebuild Rust bindings or four native ABIs
 
 ### Current
 
 - Xaman-derived mobile host integration for the `FresnicaCore` React Native module
-- Fresnica AccountRecord / SignerRecord persistence in the mobile Realm/client layer
-- Watch-only account lifecycle using signer attachment rather than account/private-key coupling
+- Connect the host application's Realm instance to `RealmWalletStore`
+- Account list/create/import/watch-only UX over the new Account/Signer model
 
 ### Next
 
-1. Integrate Fresnica AccountRecord / SignerRecord persistence without reusing Xaman secret cryptography.
-2. Add mobile watch-only upgrade/downgrade while preserving stable account identity and metadata.
-3. Add staged/atomic app-passcode rotation across all protected software signers.
+1. Wire the host-owned Realm configuration, migration boundary and `RealmWalletStore` into the mobile app shell.
+2. Add create/import/generate account workflows that persist AccountRecord and SignerRecord atomically.
+3. Connect passcode rotation results to the actual app settings flow and system-auth re-enrollment UX.
 4. Add explicit mobile Reveal / Export handling with a fresh app passcode.
 5. Add a first real hardware signer transport using the existing external Ed25519 prepare/apply API.
 6. Continue desktop client work against the same Core/mobile-neutral facade where applicable.
@@ -85,12 +91,12 @@ Implemented in the Python reference and increasingly ported to the native Rust C
 
 Target product work after native security/module integration:
 
-- Fresnica account/signer Realm schema
 - Xaman-derived navigation and account management adaptation
+- host Realm configuration/migration integration
 - system-auth enrollment and recovery fallback
 - software signing with no private key or unlock key crossing React Native for routine use
 - explicit Reveal / Export flow
-- passcode rotation with staged/atomic re-protection
+- passcode rotation UI with post-commit system-auth re-enrollment
 - hardware/external signer UX
 - migration policy before first public wallet release
 
