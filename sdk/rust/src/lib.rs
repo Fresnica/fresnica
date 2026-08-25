@@ -662,7 +662,8 @@ mod tests {
                 "passcode".to_owned(),
                 Some(OTHER_CLASSIC.to_owned()),
             )
-            .unwrap_err();
+            .err()
+            .unwrap();
         assert_eq!(mismatch.code, SdkErrorCode::IdentityMismatch);
         assert_eq!(
             serde_json::to_value(&mismatch).unwrap()["code"],
