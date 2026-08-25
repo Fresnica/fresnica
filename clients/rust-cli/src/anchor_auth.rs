@@ -173,7 +173,7 @@ mod tests {
             CLIENT,
             HOME_DOMAIN,
             "auth.example.com",
-            MAINNET,
+            TESTNET,
             now,
         )
     }
@@ -194,7 +194,7 @@ mod tests {
             CLIENT,
             HOME_DOMAIN,
             "auth.example.com",
-            TESTNET,
+            MAINNET,
             1_597_691_000,
         );
         assert!(result.is_err());
@@ -208,7 +208,7 @@ mod tests {
             SERVER,
             HOME_DOMAIN,
             "auth.example.com",
-            MAINNET,
+            TESTNET,
             1_597_691_000,
         );
         assert!(result.is_err());
@@ -227,7 +227,7 @@ mod tests {
             CLIENT,
             "attacker.example",
             "auth.example.com",
-            MAINNET,
+            TESTNET,
             1_597_691_000,
         );
         assert!(result.is_err());
