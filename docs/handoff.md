@@ -1,248 +1,368 @@
 # Fresnica Project Handoff
 
-Updated: 2026-08-24
+Updated: 2026-08-25
 
-This document is the compact handoff for continuing Fresnica development. It summarizes the current product model, architecture boundaries, recent decisions, invariants that should not regress, and the remaining larger work.
+This is the compact continuation document for Fresnica. It records the current architecture, product invariants, SDK direction, Mobile handoff boundary and the next major work. Read `roadmap.md` together with this file before starting a new phase.
 
 ## Repository State
 
 - Repository: `manran/fresnica`
 - Default branch: `main`
-- Runtime baseline summarized here: `28195df6e276ddbb3160f56a661a2ab75099006c` (PR #40)
-- Latest runtime PR: #40, **Adopt retained history cache model**
-- Handoff document introduced by docs-only PR #41
-- Open PRs at the time of this handoff: none
-- Latest full Python reference CI: **235 passed, 3 skipped**
+- Verified `main` before this handoff update: `71aefb56c7f7482a9b8fd45f5997fa8fb65042a3`
+- PR #87 published `mobile-sdk-v0.1.0` as an integration-stable pre-1.0 Mobile SDK baseline.
+- PR #88 established the finalized Native-SDK/framework-adapter integration contract.
+- `mobile-sdk-v0.1.0` is transitional packaging: it proves the native/security boundary but still contains React Native-specific integration that future Native SDK binaries should not contain.
 
-Do not treat a SHA written in a handoff document as the current branch head: verify `main` before starting new work.
+Do not treat a SHA in this handoff as the permanent head. Verify `main` and current CI before writing.
 
-The Python implementation is still the behavior/reference implementation. Future Rust Core work should port stable wallet/runtime semantics rather than inventing a second product model.
+## Current Strategic Direction
 
-## Development Model
+The project is now **SDK-first and multi-platform**.
 
-Fresnica should remain deliberately layered:
-
-```text
-CLI / TUI
-    |
-Wallet-oriented services and workflows
-    |
-Stellar adapter / stellar-sdk
-    |
-Stellar network / Horizon / anchor protocols
-```
-
-Important boundary rules:
-
-- Prefer official `stellar-sdk` primitives for protocol behavior instead of reimplementing Stellar encoding, signing, transaction, memo, or stream semantics.
-- UI code should orchestrate services and present state; protocol selection and response interpretation should live below Textual.
-- Wallet identity/secrets, user preferences, and chain-derived caches remain separate storage concerns.
-- All chain-derived cache identities must remain scoped by Stellar network.
-- Full asset identity is authoritative: classic issued assets are `CODE:GISSUER`, never code-only.
-- Changes should be validated with the locked uv environment: `uv sync --locked`, then `uv run pytest -q`.
-
-See `architecture.md`, `storage.md`, `services.md`, and `decision-log.md` for the durable architecture record.
-
-## Wallet / Runtime
-
-Implemented and stable in the Python reference:
-
-- mnemonic and secret-key wallets
-- watch-only wallets
-- encrypted signing material
-- wallet create/import/list/use/delete and backup/export workflows
-- lock/unlock lifecycle
-- software signer and verified external Ed25519 signer abstraction
-- per-network runtime service composition
-- SQLite chain-data cache
-- persistent UI settings
-- contacts/address book
-
-Watch-only wallets may inspect balances, activity, offers, and market data but must never enter signing flows.
-
-Hardware transport adapters remain unimplemented.
-
-## History Model
-
-PR #40 replaced the short-lived bounded catch-up design from PR #39.
-
-Default behavior:
-
-- retain the newest **2,000 Horizon operations per account and network**
-- when the local cache is empty, start at the current Horizon head and page **backwards** until 2,000 operations are cached or Horizon is exhausted
-- once a cache exists, synchronize only **forward** from the newest local paging token to the current Horizon head
-- there is **no fixed incremental page-count cap**
-- as newer operations arrive, trim the oldest cached rows so normal local storage remains bounded
-
-`Keep full history locally` is a persisted boolean opt-in:
-
-- disables trimming
-- still synchronizes new operations forward from the newest local cursor
-- also backfills older operations still exposed by the connected Horizon instance
-- cannot reconstruct records already pruned upstream
-- disabling the option returns the cache to the newest 2,000 operations on the next synchronization
-
-History UI behavior:
-
-- `M Older` reveals more already-cached activities; it does not independently fetch an older Horizon page
-- `F Full history` toggles the full-history preference and synchronizes
-- `/` filters the locally loaded History view
-- suspicious claimable activity is visible by default and may be hidden explicitly
-- UTC/local time is a persisted presentation preference
-
-Do **not** reintroduce `SyncResult(caught_up)` or the former `5 x 200` History catch-up product model.
-
-Authoritative detail: `history-cache.md` and `decision-log.md`.
-
-## SDEX / DEX
-
-The current DEX is a wallet-oriented SDEX terminal, not a separate exchange engine.
-
-Stable behavior:
-
-- market identity uses full asset identities and is scoped by network + wallet
-- Starred and Recent markets persist locally
-- Popular discovery reuses the ranked StellarExpert asset catalogue
-- held-asset pair ordering follows the Fex-derived ranking model
-- the pair picker defaults focus directly to the market table
-- `F` switches to the Favorites/Starred list; `Space` toggles the current pair star
-- the live pair screen supports `W` pair swap and guards stale REST/SSE results by pair/revision
-- current pair REST data remains the complete fallback; SSE augments realtime book/trade updates
-- order book presentation is:
+The near-term sequence is:
 
 ```text
-Amount | BID Price || ASK Price | Amount
+Rust Core
+  -> stable universal SDK contract
+  -> compiled Native SDKs / WASM package
+  -> canonical framework adapter source
+  -> one-time consumer-side adapter compilation
+  -> reusable wallet functional coverage / SEP alignment
+  -> Mobile / Desktop / Web wallet experience
 ```
 
-- BID/BUY is the left book, ASK/SELL is the right book
-- BID amount normalization to BASE uses exact Horizon `price_r`; do not replace it with code-only or inverse-price shortcuts
-- book rendering uses non-focusable Rich grids
-- `BID · BUY` and `ASK · SELL` use full-width tinted section strips
-- live pair screen defaults focus to `Your open offers`
-- price presentation uses fixed Stellar 7-decimal semantics; sub-display nonzero values must not render as false zero
-- immediately created and fully filled synthetic offers are presented as `Immediate` while retaining their raw synthetic IDs
-- timezone toggling is local presentation state and must not trigger a network refresh
+The immediate priority is **not** to continue building the actual React Native product inside this repository. First generalize the Core-facing SDK boundary so Mobile, Desktop and Web can share one set of wallet/crypto semantics.
 
-Account synchronization work from PR #38 also remains in force:
+## Target Layering
 
-- account offers are fully paged before replacing the local snapshot
-- account fill synchronization may be bounded internally, but partial state is explicit in the DEX UI (`fill sync partial · R continue`)
+```text
+                         Rust Core
+                            |
+                            v
+               Stable SDK API / DTO / errors
+                    /                 \
+                   /                   \
+          Native SDK binaries          WASM SDK
+      Android / Apple / Win /          Web/browser
+          Linux / macOS                   |
+                   |                      |
+             native application       web application
+                   |
+          framework adapter source
+       RN / Flutter / Electron / ...
+                   |
+        compile once in consumer env
+                   |
+          generated adapter binary
+                   |
+             product application
+```
 
-## Assets / Trustlines
+The shared contract is semantic, not a requirement that every target use the same binary format.
 
-User-facing terminology is **Manage Assets**. Protocol/domain naming such as ChangeTrust and trustline limits remains valid internally.
+## Universal SDK Rules
 
-Normal TUI behavior:
+The current `bindings/mobile` work is the starting point, not the final naming/boundary. The next SDK phase should generalize the existing facade instead of creating separate Mobile and Desktop crypto APIs.
 
-- Add and Remove are exposed
-- Set limit is intentionally hidden from the normal Manage Assets shortcut surface, while the underlying capability remains available internally/through lower-level flows
-- asset selection uses the shared Asset Picker
-- `/` live filtering is shared across Asset Picker, market selection, contacts, Manage Assets, and History
+The SDK contract should own:
 
-Curated asset discovery for the asset picker uses the same three external sources as Fex:
+- stable wallet/signer operations backed by `CoreClientApi`;
+- DTOs and stable error categories;
+- Account / Signer identity semantics;
+- protected software signer envelope semantics;
+- transaction hash/signature semantics;
+- API version reporting;
+- shared conformance vectors/tests.
 
-- Lobstr
-- Soroswap
-- StellarExpert
+The SDK contract should **not** absorb application persistence, framework lifecycle or arbitrary platform UI behavior.
 
-This is a separate curated cache from DEX Popular ranking. Do not merge the two concepts: DEX Popular should retain ranked-market ordering semantics.
+### Native SDK release rule
 
-Classic assets are deduplicated by full `CODE:GISSUER` identity. Soroban contract-only entries are not trustline candidates.
+Application projects should consume **compiled platform SDK content**. Ordinary application builds must not compile Rust Core or run UniFFI generation.
 
-### Fresnica trustline marker
+Target platform outputs:
 
-New Fresnica-created trustlines use the visible default limit:
+- Android: compiled AAR
+- Apple: compiled XCFramework/package
+- Windows: compiled native library/package
+- Linux: compiled native library/package
+- macOS: compiled framework/native library/package
+
+A native application can use its platform SDK directly without React Native/Flutter/etc.
+
+### WASM / Web rule
+
+Web should receive a WASM-facing SDK preserving the same Core semantics where appropriate.
+
+Do not copy Mobile security assumptions blindly into browsers. Browser key protection/storage/authorization needs an explicit security design; `WalletUnlockKey` + Keychain/Keystore behavior is not automatically the Web model.
+
+Web may consume WASM directly. Add framework glue only where a real framework integration requires it.
+
+## Framework Adapter Contract
+
+Authoritative document: `mobile-framework-adapter-contract.md`.
+
+Fresnica owns and publishes **canonical adapter source/reference implementation**. The framework adapter is not part of the Native SDK binary.
+
+Consumer behavior is fixed as:
+
+```text
+first integration
+or framework/binding incompatibility
+    -> compile canonical adapter once against consumer framework/toolchain
+    -> store/version generated adapter binary + compatibility manifest
+
+normal app build
+    -> link Native SDK binary
+    -> link generated adapter binary
+    -> no Rust/Core rebuild
+    -> no adapter-source rebuild
+```
+
+For Mobile, React Native is the first full adapter target. Flutter/Desktop adapters should follow the same architecture when implemented.
+
+An adapter may perform argument/result conversion, Promise/Future/callback mapping, thread dispatch and framework registration. It must not own cryptography, envelope mutation, signer identity verification, transaction signing logic or native key-protection policy.
+
+Rule:
+
+> **Adapter = mechanical framework glue. SDK/Core = security authority.**
+
+## Core and Signer Model - Do Not Regress
+
+The established model is:
+
+> Wallet/Account is the on-chain identity the user observes/operates. Signer is a currently available signing capability. They are not the same object and the relationship is not necessarily one-to-one.
+
+Consequences:
+
+- a classic account `GABC...` may use signer `GDEF...` under Stellar signer/threshold rules;
+- the master-key case commonly has account and signer identities equal, but that is not a universal invariant;
+- a watch-only account has no local signer capability and requires no passcode, mnemonic, secret or protected envelope;
+- watch-only identity parsing still goes through Core/SDK;
+- direct master-key watch-only upgrade must identity-check the supplied secret/mnemonic against the expected account `G...`;
+- `C...` is an account/contract identity, not an Ed25519 public key;
+- do not pretend an arbitrary `S...` directly owns a `C...` account; contract/passkey authorization is a separate future auth model.
+
+For application persistence, the durable conceptual graph remains:
+
+```text
+AccountRecord
+  identity/address/network/product metadata
+
+SignerRecord
+  signer public identity
+  signer kind/provider metadata
+  protected envelope when applicable
+
+AccountSignerReference
+  account <-> signer relationship
+```
+
+Watch-only is derived from absence of an applicable local signer reference, not a second drifting wallet-type truth.
+
+## Secret and Native Authorization Boundaries
+
+Rust Core remains authoritative for:
+
+- secret/mnemonic validation and derivation;
+- signer identity;
+- protection/envelope cryptography;
+- passcode re-protection;
+- transaction hashing/signing;
+- external Ed25519 signature verification;
+- stable crypto/error semantics.
+
+Client/platform code owns:
+
+- persistence;
+- application lock/session state;
+- Keychain/Keystore/platform credential lifecycle;
+- network/Horizon state;
+- ledger signer weights/threshold authorization;
+- product UX.
+
+Security invariants:
+
+- routine protected-software signing remains native-only;
+- `WalletUnlockKey` does not enter JavaScript/Dart;
+- raw low-level `signTransactionXdr` is not exposed to normal framework code;
+- Reveal/Export requires a fresh Fresnica app passcode, not stored system-auth material;
+- protected signer envelopes are opaque to application code;
+- plaintext secret/mnemonic is exceptional and ephemeral: import, one-time generation/backup, explicit Reveal/Export only;
+- plaintext recovery material must not be persisted in Realm/application state/logs/analytics.
+
+## Mobile Status and Repository Boundary
+
+The independent Mobile product should not be implemented further inside `fresnica`.
+
+`fresnica` owns:
+
+- Rust Core;
+- universal SDK contract/facade;
+- compiled native platform SDK release machinery;
+- platform-native signer authorization/security adapters where part of the SDK layer;
+- canonical framework adapter source/build tooling;
+- conformance tests/vectors;
+- SDK documentation.
+
+Future `fresnica-mobile` owns:
+
+- React Native application;
+- navigation/screens/product state;
+- actual Realm configuration/migrations;
+- Account/Signer persistence;
+- network/Horizon integration;
+- create/import/watch-only UX;
+- passcode/settings UX;
+- Reveal/Export UX;
+- hardware signer UX.
+
+PR #81-#84 application-side TypeScript remains migration/reference material until the independent Mobile project absorbs the required behavior. See `mobile-app-migration-pr81-pr84.md`.
+
+The future Mobile onboarding order is:
+
+1. pin React Native version;
+2. pin Fresnica Native SDK / Binding API;
+3. compile the canonical RN adapter once in the Mobile environment;
+4. store adapter binaries + compatibility manifest;
+5. prove a smoke operation such as `parseAccount`;
+6. then absorb Account/Signer/Realm/provisioning/passcode/export application flows.
+
+## Desktop Direction
+
+Desktop is no longer a separate architecture problem. It should use the same universal SDK contract.
+
+Native desktop apps consume Windows/Linux/macOS Native SDK binaries directly. Framework-based apps use thin adapters when needed, for example Electron/Node, Flutter Desktop, Qt or .NET.
+
+Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Windows Hello and Linux Secret Service/libsecret where appropriate. These implementations must preserve the same signer/security contract instead of reimplementing Core crypto.
+
+## Rust CLI and Possible Rust TUI
+
+The Rust CLI is substantially implemented and should remain a reference native client for Core/SDK behavior.
+
+A Rust TUI is worth considering after the universal SDK boundary is clear. Its role should be engineering-focused:
+
+- SDK integration proving ground;
+- wallet-flow playground;
+- debugging/diagnostics;
+- native reference UI between CLI and final GUI clients.
+
+Do not create a second wallet/service architecture for the Rust TUI. It should consume the same reusable wallet/SDK layers.
+
+## Python Wallet Reference
+
+The Python implementation remains valuable for stable wallet behavior and UX/reference semantics, including:
+
+- mnemonic/secret/watch-only wallets;
+- encrypted signing material;
+- wallet lifecycle and backup/export;
+- balance/portfolio;
+- transaction send/review/submit;
+- history/cache;
+- contacts;
+- assets/trustlines;
+- SDEX;
+- anchor transfer workflows;
+- Textual TUI behavior.
+
+It should continue to provide behavior examples/test vectors where Rust functionality has not yet fully replaced it. It is no longer a reason to keep new architecture Python-specific.
+
+## Stellar / Wallet Functional Direction
+
+Continue filling wallet fundamentals while SDK work proceeds. Reusable wallet behavior should live below final Mobile/Desktop/Web UI.
+
+Priority domains:
+
+- account/signer/watch-only lifecycle;
+- balances and reserve/liability-aware availability;
+- payments/transaction review;
+- assets/trustlines;
+- history/activity;
+- contacts;
+- SDEX offers/markets;
+- network configuration;
+- hardware/external signers;
+- anchor/SEP workflows.
+
+Use official Stellar SDK/protocol primitives rather than duplicating encoding/signing/transaction behavior.
+
+Full asset identity remains authoritative: classic issued assets are `CODE:GISSUER`, never code-only, and chain-derived state remains scoped by Stellar network.
+
+## SEP / Anchor Policy
+
+The anchor separation remains:
+
+- `AnchorService`: protocol/transport operations such as SEP-1, SEP-10, SEP-6, SEP-24;
+- `AnchorTransferService`: wallet-facing protocol selection, field planning and response interpretation.
+
+Current reference behavior:
+
+- usable SEP-24 deposit/withdraw is supported;
+- SEP-6 deposit/withdraw is supported;
+- usable SEP-24 is preferred, SEP-6 is fallback;
+- SEP-10 uses official Stellar signing/verification semantics;
+- memo text/id/hash/return-hash is handled through the reviewed transfer path;
+- KYC-required responses are surfaced;
+- full generic SEP-12 collection is not yet implemented.
+
+Policy going forward:
+
+> Follow Stellar SEP standards and official ecosystem behavior where applicable; do not invent product-specific protocol substitutes merely to make a UI flow appear complete.
+
+SEP-12 or other SEPs should be added when product requirements justify them and should remain protocol/service behavior below the UI.
+
+## Existing Wallet Product Invariants
+
+These Python/reference behaviors remain valid unless explicitly redesigned.
+
+### History
+
+- normal local cache retains the newest 2,000 Horizon operations per account/network;
+- empty-cache initialization pages backward from current head;
+- existing cache synchronizes forward from newest local paging token;
+- full-history opt-in disables trimming and may backfill older records still retained upstream;
+- History presentation is derived from cached raw operations so metadata/contact changes can redraw without rebuilding cache.
+
+Do not reintroduce the old fixed `5 x 200` catch-up model.
+
+### SDEX / DEX
+
+- DEX is a wallet-oriented SDEX terminal, not a separate exchange engine;
+- market identity uses full assets and network/wallet scope;
+- current pair data has REST fallback and SSE augmentation;
+- BID/BUY is left, ASK/SELL is right;
+- order book presentation is `Amount | BID Price || ASK Price | Amount`;
+- BID amount normalization uses exact Horizon `price_r`;
+- Stellar price display keeps fixed 7-decimal semantics without rendering nonzero values as false zero.
+
+### Trustlines
+
+Normal user terminology is **Manage Assets**. New Fresnica-created trustlines currently use the visible marker limit:
 
 `708269837873.6765`
 
-This is an intentional Fresnica marker chosen for later ecosystem measurement. It is below the Stellar maximum and should remain visible in explicit creation/review flows. DEX automatic receiving-trustline creation also uses it.
+Do not rewrite existing user trustline limits automatically and do not change this marker without an explicit product decision.
 
-Do not forcibly rewrite existing trustline limits during edit/remove flows, and do not change this marker without an explicit product decision.
+## Immediate Next Work
 
-## Anchor Transfers
+The next coherent implementation batch should be:
 
-Anchor work is split into two layers:
-
-- `AnchorService`: SEP transport/protocol operations such as SEP-1, SEP-10, SEP-6, SEP-24
-- `AnchorTransferService`: wallet-facing protocol selection, field planning, response interpretation, and transfer workflow projection
-
-Current behavior:
-
-- actionable SEP-24 deposit/withdraw is supported when capability metadata is complete
-- SEP-6 deposit/withdraw is also supported
-- usable SEP-24 is preferred; SEP-6 is the fallback when SEP-24 is unavailable
-- SEP-10 authentication uses `stellar-sdk` verification/signing semantics
-- Stellar memo types text/id/hash/return-hash are supported through the reviewed transfer pipeline
-- anchor capability cache is scoped by network + exact asset + normalized home domain
-- fchain.io XRP's unstructured SEP-6 response forms are handled explicitly
-- SEP-6 KYC-required responses are detected and surfaced, but a full generic SEP-12 KYC collection workflow is **not** implemented yet
-
-Full SEP-12 remains a legitimate future feature; do not silently treat KYC-required transfers as ready.
-
-## Activity / Contacts UX
-
-Current History/activity presentation includes:
-
-- transaction-level grouping derived from cached raw Horizon operations
-- contact labels as `Name · short-address`
-- cached issuer home-domain labels when available
-- explicit contract-call and asset-balance-change summaries
-- classic clawback summaries
-- narrow suspicious-claimable classification rather than broad dust filtering
-- wrapping, scrollable activity details
-
-Presentation should remain derived from raw cached operations so newly added contacts and metadata can redraw existing History without rebuilding the underlying cache.
-
-## Recent Merge Sequence
-
-The recent coherent UX/architecture run is:
-
-- **#29** Improve DEX market discovery and realtime UX
-- **#30** Refine activity presentation and suspicious claimables
-- **#31** Make asset details and anchor workflows actionable
-- **#32** Align DEX TUI with Fex market UX
-- **#33** Polish DEX market presentation
-- **#34** Refine contacts, anchor cache, history and DEX UX
-- **#35** Improve DEX market focus and Fresnica trustline defaults
-- **#36** Refine DEX focus and asset management
-- **#37** Add SEP-6 transfers and list search
-- **#38** Complete SDEX account synchronization
-- **#39** Separate anchor workflow and bound history catch-up
-- **#40** Adopt retained history cache model
-- **#41** Add current project handoff (documentation only)
-
-Only the History catch-up portion of #39 was superseded by #40. The AnchorTransferService boundary and network-scoped anchor capability cache introduced in #39 remain current.
-
-## Validation / Working Practice
-
-Before writing:
-
-1. Re-read current `main`; do not assume this handoff's runtime baseline SHA is still current.
-2. Prefer a coherent batch over isolated cosmetic commits when changes share one product decision.
-3. Keep protocol behavior in services/adapters and presentation behavior in CLI/TUI modules.
-4. Reuse existing models/helpers rather than creating parallel concepts.
-5. Run the **full** Python reference suite with the locked uv environment.
-6. Inspect the final diff before merge; temporary patch scripts/workflows used for isolated CI must not remain in the final PR.
-
-The repository has previously used temporary GitHub Actions patch workflows when the local execution environment could not reach GitHub. Those helpers are implementation tooling only and must be removed before the final merge.
-
-## Remaining Larger Work
-
-Known larger items rather than immediate regressions:
-
-- hardware transport adapters
-- full generic SEP-12/KYC collection if Fresnica is to own that anchor workflow
-- Rust Fresnica Core
-- mobile bindings
-- desktop application
-- stable SDK API
-
-The Python reference should continue to define behavior and test vectors until those semantics are stable enough to port.
+1. **Generalize the SDK facade**: refactor Mobile-oriented naming/boundaries into a universal SDK contract while preserving Core API/security semantics.
+2. **Define native-only release packaging**: future Android/Apple packages must stop embedding framework-specific adapter code; establish Windows/Linux/macOS target shapes.
+3. **RN adapter build path**: keep canonical RN adapter source in Fresnica, provide one-time consumer build tooling, emit adapter binaries + compatibility manifest, and ensure normal Mobile builds do not rebuild it.
+4. **WASM/Web boundary**: define WASM API/package and separately review browser secret/key authorization semantics.
+5. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
+6. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
+7. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.
+8. **Product UX later**: once the above foundation is stable, concentrate effort on Mobile first, then Desktop/Web according to product priorities.
 
 ## Start Here Next Session
 
-1. Verify `main` HEAD and CI status.
-2. Read `decision-log.md` for decisions that supersede older implementations.
-3. Read `history-cache.md` before touching History synchronization.
-4. Preserve the DEX, asset identity, trustline marker, and anchor boundaries above unless the product decision itself is intentionally being changed.
-5. Check `tasks.md` and `roadmap.md` for the broad remaining phase work.
+1. Verify `main` HEAD and relevant CI/release status.
+2. Read `roadmap.md` for phase order.
+3. Read `mobile-framework-adapter-contract.md` before changing Native SDK or RN packaging.
+4. Read `mobile-app-migration-pr81-pr84.md` before starting the independent Mobile application.
+5. Read `client-core-security.md` and `mobile-core-contract.md` before changing signer/passcode/system-auth boundaries.
+6. Preserve Account != Signer, `C...` identity semantics, native-only routine signing and fresh-passcode-only Reveal/Export.
+7. Treat `mobile-sdk-v0.1.0` as a transitional baseline, not the final multi-platform SDK layout.
+8. Do not start product-specific Desktop/Web framework code until the universal SDK contract has a stable shape.
