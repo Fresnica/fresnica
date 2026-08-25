@@ -8,10 +8,12 @@ This is the compact continuation document for Fresnica. It records the current a
 
 - Repository: `manran/fresnica`
 - Default branch: `main`
-- Verified `main` before this handoff update: `e9f6182e78db3fd4288b038323cdba2581531c2e` (PR #92).
+- Verified `main` before this handoff update: `89b20e79ed045fecef94051ec99a5ecb6eab692f` (PR #95).
 - PR #90 introduced the platform-neutral `fresnica-sdk` semantic contract.
 - PR #91 converted the Mobile v0.1.0 UniFFI facade into a compatibility wrapper over `fresnica-sdk`.
 - PR #92 introduced the generalized `fresnica-native-sdk` UniFFI layer plus framework-neutral Android AAR and Apple package/XCFramework generation.
+- Subsequent SDK/platform validation completed the WASM package, smart-account Testnet conformance vector, Apple/macOS Native SDK validation and the React Native 0.87 Apple consumer gate.
+- PR #95 hardened the Rust CLI validation path: the SDK-boundary guard is portable on the GitHub Ubuntu runner, the Horizon submission mock consumes complete request bodies, Rust unit tests pass 52/52, the release binary builds, and Python/Rust CLI compatibility passes 5/5.
 - `mobile-sdk-v0.1.0` remains a transitional compatibility baseline; new native consumers should target `fresnica-native-sdk`.
 
 Do not treat a SHA in this handoff as the permanent head. Verify `main` and current CI before writing.
@@ -253,6 +255,7 @@ Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Wi
 
 The Rust CLI is substantially implemented and should remain a reference native client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths now consume `fresnica-sdk`; direct Core use is limited to low-level Rust transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
+The Phase 5 reference-client path now starts absorbing anchor behavior as well: `anchor discover CODE:GISSUER` resolves the issuer `home_domain`, loads SEP-1 `stellar.toml`, verifies exact asset identity and probes SEP-6 / SEP-24 `/info`. This is capability discovery only; authenticated SEP-10/SEP-45 transfer execution has not been moved into the Rust client yet.
 
 A Rust TUI is worth considering after the universal SDK boundary is clear. Its role should be engineering-focused:
 
@@ -311,8 +314,9 @@ The anchor separation remains:
 
 Current reference behavior:
 
-- usable SEP-24 deposit/withdraw is supported;
-- SEP-6 deposit/withdraw is supported;
+- usable SEP-24 deposit/withdraw is supported in the Python reference;
+- SEP-6 deposit/withdraw is supported in the Python reference;
+- Rust CLI now covers SEP-1 + SEP-6/SEP-24 capability discovery while preserving full `CODE:GISSUER` identity;
 - usable SEP-24 is preferred, SEP-6 is fallback;
 - SEP-10 uses official Stellar signing/verification semantics;
 - memo text/id/hash/return-hash is handled through the reviewed transfer path;
