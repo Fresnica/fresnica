@@ -1,0 +1,158 @@
+many = capabilities.clone();
++        many.sep6_deposit_info = serde_json::json!({
++            "enabled": true,
++            "funding_methods": ["WIRE", "ACH"]
++        });
++        assert_eq!(
++            sep6_request_fields(&many, AnchorTransferKind::Deposit, &BTreeMap::new()).unwrap_err(),
++            "SEP-6 deposit requires a funding method; pass --field funding_method=VALUE"
++        );
++    }
++
++    #[test]
++    fn sep6_request_binds_asset_account_and_user_fields() {
++        let mut fields = BTreeMap::new();
++        fields.insert("funding_method".to_owned(), "WIRE".to_owned());
++        fields.insert("amount".to_owned(), "5".to_owned());
++        let url = sep6_request_url(
++            "https://anchor.example/sep6/",
++            AnchorTransferKind::Withdraw,
++            &asset(),
++            ISSUER,
++            &fields,
++        )
++        .unwrap();
++        let pairs = url.query_pairs().collect::<BTreeMap<_, _>>();
++        assert_eq!(url.path(), "/sep6/withdraw");
++        assert_eq!(pairs.get("asset_code").map(|value| value.as_ref()), Some("USD"));
++        assert_eq!(pairs.get("account").map(|value| value.as_ref()), Some(ISSUER));
++        assert_eq!(
++            pairs.get("funding_method").map(|value| value.as_ref()),
++            Some("WIRE")
++        );
++        assert_eq!(pairs.get("amount").map(|value| value.as_ref()), Some("5"));
++    }
++
++    #[test]
++    fn sep24_interactive_response_requires_expected_type_and_safe_url() {
++        let result = parse_sep24_interactive_response(&serde_json::json!({
++            "type": "interactive_customer_info_needed",
++            "url": "https://anchor.example/interactive/123",
++            "id": "transfer-123"
++        }))
++        .unwrap();
++        assert_eq!(result.url, "https://anchor.example/interactive/123");
++        assert_eq!(result.transaction_id.as_deref(), Some("transfer-123"));
++
++        assert!(parse_sep24_interactive_response(&serde_json::json!({
++            "type": "wrong",
++            "url": "https://anchor.example/interactive/123"
++        }))
++        .is_err());
++        assert!(parse_sep24_interactive_response(&serde_json::json!({
++            "type": "interactive_customer_info_needed",
++            "url": "http://anchor.example/interactive/123"
++        }))
++        .is_err());
++    }
++
+     #[test]
+     fn anchor_endpoints_require_https_without_credentials() {
+         let insecure: TomlValue = toml::from_str(
+diff --git a/clients/rust-cli/src/main.rs b/clients/rust-cli/src/main.rs
+index eb075c7..30880d7 100644
+--- a/clients/rust-cli/src/main.rs
++++ b/clients/rust-cli/src/main.rs
+@@ -37,6 +37,8 @@ Usage:
+   fresnica [--home PATH] [--network mainnet|testnet] dex offers [--wallet NAME] [--limit N] [--json]
+   fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]
+   fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]
++  fresnica [--home PATH] [--network mainnet|testnet] anchor deposit CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]
++  fresnica [--home PATH] [--network mainnet|testnet] anchor withdraw CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]
+   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
+ 
+ Network commands:
+@@ -46,7 +48,7 @@ Network commands:
+   send                          Review, sign through Fresnica SDK/Core, and submit a payment
+   trust                         Add, change, or remove an issued-asset trustline
+   dex                           Read and trade on the Stellar DEX
+-  anchor                        Discover anchor capabilities and establish SEP-10 sessions
++  anchor                        Discover anchor capabilities and start SEP-24/SEP-6 transfers
+ 
+ Contact commands:
+   list
+diff --git a/docs/anchor-authentication.md b/docs/anchor-authentication.md
+index a37fde8..3ad7f06 100644
+--- a/docs/anchor-authentication.md
++++ b/docs/anchor-authentication.md
+@@ -15,7 +15,15 @@ The Rust CLI `anchor discover CODE:GISSUER` now discovers and validates:
+ - SEP-45 `WEB_AUTH_FOR_CONTRACTS_ENDPOINT`, Contract `C...` `WEB_AUTH_CONTRACT_ID`, and `SIGNING_KEY`;
+ - whether authenticated SEP-6/SEP-24 use has at least one complete SEP-10 or SEP-45 metadata path.
+ 
+-Discovery is metadata/capability work only. It does **not** sign an authentication challenge, obtain a JWT, or execute an authenticated deposit/withdraw request.
++The Rust CLI also implements the Classic-account SEP-10 session path:
++
++- `anchor auth CODE:GISSUER [--wallet NAME]` requests and verifies a challenge before signing it through the Fresnica SDK/Core boundary, exchanges it for a JWT, and immediately discards that JWT after the diagnostic command completes;
++- `anchor deposit|withdraw CODE:GISSUER ...` prefers a usable SEP-24 flow and falls back to SEP-6;
++- SEP-24 interactive requests use `multipart/form-data` and a fresh in-memory SEP-10 token;
++- SEP-6 only authenticates when the selected asset's `/info.authentication_required` is true;
++- JWT values are held only in zeroizing in-memory strings and are never printed, persisted, logged, or passed through CLI arguments.
++
++Transfer execution in the Rust CLI is currently Classic `G...` / SEP-10 only. SEP-45 metadata is discovered but contract-account authentication execution is intentionally still separate.
+ 
+ ## Authentication model
+ 
+@@ -28,7 +36,7 @@ SEP-10 and SEP-45 are parallel authorization mechanisms. SEP-45 does not replace
+ 
+ ## Layer ownership
+ 
+-The next implementation must preserve these boundaries:
++The implementation preserves these boundaries:
+ 
+ ### Anchor service / protocol layer
+ 
+@@ -61,22 +69,18 @@ Owns only command/UX orchestration and user authorization prompts. It must not s
+ 
+ ## Next implementation slice
+ 
+-For SEP-10, add a verifier before any signing API is invoked. At minimum it must reject a challenge unless all required SEP-10 properties are valid, including:
++The current transfer command stops at the protocol-defined next action:
+ 
+-- expected server signing key signature;
+-- zero sequence number;
+-- valid time bounds;
+-- expected client account;
+-- first ManageData operation and `<home_domain> auth` key;
+-- expected `web_auth_domain` semantics when present;
+-- allowed operation/source-account constraints.
++- SEP-24 returns a validated interactive URL (and transaction id when supplied);
++- SEP-6 returns the anchor's structured deposit/withdraw instructions, including KYC-required responses;
++- Fresnica does **not** automatically send the Stellar withdrawal payment from an anchor response in this slice.
+ 
+-Only after verification may Fresnica sign the challenge through the existing SDK signing boundary and POST it for a token.
++The next withdrawal slice should translate verified SEP-6 withdrawal instructions into the existing reviewed payment path, require normal human transaction review/confirmation, and add anchor transaction-status lookup. It must not introduce a second signing path.
+ 
+-SEP-45 should remain a separate contract-account path because its Soroban authorization-entry verification/signing semantics are different from classic SEP-10 transaction signing.
++SEP-45 remains a separate contract-account path because its Soroban authorization-entry verification/signing semantics differ from Classic SEP-10 transaction signing.
+ 
+ ## Current blockers / non-blockers
+ 
+-- SEP-10 verifier/session work is unblocked and is the next anchor slice.
++- Classic SEP-10 verifier/session and initial SEP-24/SEP-6 transfer initiation are implemented in the Rust reference client.
+ - SEP-45 metadata discovery is complete; SEP-45 execution still requires a dedicated contract-auth provider/verification path.
+ - Ledger transport remains independent and must not be forced through a lossy XDR v28/v27 conversion merely to close a checklist item.
+diff --git a/docs/tasks.md b/docs/tasks.md
+index b97884e..6ea2b7b 100644
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+@@ -85,7 +85,9 @@
+ - [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
+ - [x] Native Rust CLI SEP-1 + SEP-6/SEP-24 anchor capability discovery (`anchor discover CODE:GISSUER`)
+ - [x] Native Rust CLI SEP-10/SEP-45 authentication metadata discovery and G/C capability classification
+-- [ ] Native Rust CLI verified anchor authentication/session boundary before SEP-6/SEP-24 authenticated execution
++- [x] Native Rust CLI verified SEP-10 challenge/session boundary before authenticated anchor execution
++- [x] Native Rust CLI SEP-24-preferred / SEP-6-fallback deposit and withdraw initiation
++- [ ] Native Rust CLI reviewed withdrawal payment handoff and anchor transaction-status tracking
+ 
+ ## Universal / Native SDK
+ 
