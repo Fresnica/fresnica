@@ -49,7 +49,7 @@ A Ledger provider should prefer the device's full Stellar transaction-signing op
 As reviewed on 2026-08-25:
 
 - Fresnica uses `stellar-xdr = 28.0.0` in the Rust CLI/current transaction layer.
-- the latest published `stellar-ledger` release found is `27.0.0`, which depends on `stellar-xdr 27.0.0`;
+- the current Stellar CLI workspace is `27.1.0`, including `stellar-ledger 27.1.0`, but it still consumes `stellar-xdr 27.0.0`;
 - Ledger's current LedgerJS -> Device Management Kit migration documentation says Stellar does not yet have a chain-specific DMK signer kit; chains without a signer kit can use lower-level DMK commands;
 - the existing JavaScript `@ledgerhq/hw-app-str` package remains an available Stellar application API, but it is part of the older LedgerJS family being migrated.
 

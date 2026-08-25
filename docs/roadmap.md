@@ -226,7 +226,7 @@ Priority areas:
 - network configuration
 - hardware/external signer transport
 
-The provider-neutral Core prepare/apply boundary is already sufficient for hardware wallets. Ledger is the first provider candidate, but its implementation is deliberately gated: Fresnica currently uses `stellar-xdr 28.0.0` while the latest reviewed `stellar-ledger` package is still on XDR 27, and Ledger has not yet published a Stellar-specific DMK signer kit. Do not add a lossy XDR-version conversion or move HID/BLE/WebHID into Core merely to close the checklist; see `hardware-signer.md`.
+The provider-neutral Core prepare/apply boundary is already sufficient for hardware wallets. Ledger is the first provider candidate, but its implementation is deliberately gated: Fresnica currently uses `stellar-xdr 28.0.0` while the current reviewed Stellar CLI workspace provides `stellar-ledger 27.1.0` on `stellar-xdr 27.0.0`, and Ledger has not yet published a Stellar-specific DMK signer kit. Do not add a lossy XDR-version conversion or move HID/BLE/WebHID into Core merely to close the checklist; see `hardware-signer.md`.
 - anchor workflows
 
 ### SEP policy
