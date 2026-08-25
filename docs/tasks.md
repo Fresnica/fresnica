@@ -83,6 +83,7 @@
 - [x] External Ed25519 prepare/apply signing boundary
 - [x] Native Rust CLI direct SDK/Core reference client
 - [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
+- [x] Native Rust CLI SEP-1 + SEP-6/SEP-24 anchor capability discovery (`anchor discover CODE:GISSUER`)
 
 ## Universal / Native SDK
 
@@ -151,6 +152,7 @@
 
 - [x] Unit tests for storage, encryption, cache, CLI parsing, availability, runtime, and transfer orchestration
 - [x] GitHub Actions test workflow
+- [x] Rust CLI SDK-boundary guard + unit/release/Python-compat CI validation
 - [x] Real Horizon integration tests on Testnet
 - [x] Cross-language test vectors for Rust Core
 - [x] Rust Core / Python process conformance coverage
