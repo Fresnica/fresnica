@@ -1,0 +1,249 @@
+name: Mobile SDK release
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/mobile-sdk-release.yml"
+      - "releases/mobile-sdk-v*.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "releases/mobile-sdk-v*.json"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SDK version to publish, without mobile-sdk-v prefix"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+      tag: ${{ steps.contract.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release contract
+        id: contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mobile_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' bindings/mobile/Cargo.toml | head -n 1)"
+          core_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' core/rust/Cargo.toml | head -n 1)"
+          mobile_api="$(sed -n 's/^pub const MOBILE_BINDING_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' bindings/mobile/src/lib.rs)"
+          core_api="$(sed -n 's/^pub const CLIENT_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' core/rust/src/client_api.rs)"
+
+          test -n "$mobile_version"
+          test -n "$core_version"
+          test -n "$mobile_api"
+          test -n "$core_api"
+          test "$mobile_version" = "$core_version"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="$mobile_version"
+          fi
+
+          test "$version" = "$mobile_version"
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "invalid SDK version: $version" >&2; exit 1 ;;
+          esac
+
+          marker="releases/mobile-sdk-v${version}.json"
+          test -s "$marker"
+          test "$(jq -r '.kind' "$marker")" = "fresnica-mobile-sdk-release"
+          test "$(jq -r '.version' "$marker")" = "$version"
+          test "$(jq -r '.mobile_binding_api_version' "$marker")" = "$mobile_api"
+          test "$(jq -r '.core_client_api_version' "$marker")" = "$core_api"
+
+          tag="mobile-sdk-v${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  android:
+    if: github.event_name != 'pull_request'
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "26.1.10909125"
+      FRESNICA_ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 -print -quit)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;${ANDROID_NDK_VERSION}" "platforms;android-34"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build Rust package and generated Kotlin
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          bash bindings/mobile/scripts/build-android.sh
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.5.1"
+      - name: Build and lint release AAR
+        run: gradle -p bindings/mobile/platform/android assembleRelease lintRelease --stacktrace
+      - name: Validate and stage Android SDK
+        run: |
+          set -euo pipefail
+          AAR="$(find bindings/mobile/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          test -s "$AAR"
+          unzip -l "$AAR" > /tmp/fresnica-aar.txt
+          grep -q 'classes.jar' /tmp/fresnica-aar.txt
+          for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
+            grep -q "jni/${abi}/libfresnica_mobile_core.so" /tmp/fresnica-aar.txt
+          done
+          unzip -p "$AAR" classes.jar > /tmp/fresnica-classes.jar
+          jar tf /tmp/fresnica-classes.jar > /tmp/fresnica-classes.txt
+          grep -q 'com/fresnica/core/reactnative/FresnicaCoreModule.class' /tmp/fresnica-classes.txt
+          grep -q 'com/fresnica/core/reactnative/FresnicaCorePackage.class' /tmp/fresnica-classes.txt
+          mkdir -p dist
+          cp "$AAR" "dist/fresnica-mobile-sdk-${{ needs.prepare.outputs.version }}.aar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-sdk-android-${{ needs.prepare.outputs.version }}
+          path: dist/fresnica-mobile-sdk-${{ needs.prepare.outputs.version }}.aar
+          if-no-files-found: error
+
+  apple:
+    if: github.event_name != 'pull_request'
+    needs: prepare
+    runs-on: macos-14
+    env:
+      FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Apple Core package
+        run: bash bindings/mobile/scripts/build-apple.sh
+      - name: Validate native Apple adapter
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator swiftc \
+            -target arm64-apple-ios13.4-simulator \
+            -sdk "$SDK" \
+            -I bindings/mobile/build/apple/headers \
+            -typecheck \
+            bindings/mobile/build/apple/generated-swift/FresnicaCore.swift \
+            bindings/mobile/platform/apple/FresnicaWalletUnlockKeyStore.swift \
+            bindings/mobile/platform/apple/FresnicaSignerAuthorization.swift \
+            bindings/mobile/platform/apple/FresnicaCoreModule.swift
+
+          SHIM="bindings/mobile/platform/apple/FresnicaCoreModule.m"
+          MODULE="bindings/mobile/platform/apple/FresnicaCoreModule.swift"
+          grep -q 'RCT_EXTERN_MODULE(FresnicaCoreModule' "$SHIM"
+          for method in parseAccount protectSecret protectMnemonic generateMnemonic reprotect reveal prepareEd25519Signing applyEd25519Signature signWithSystemAuth signWithPasscode; do
+            grep -q "$method" "$SHIM"
+            grep -q "@objc(${method}" "$MODULE"
+          done
+          ! grep -q '@objc(deriveUnlockKey' "$MODULE"
+          ! grep -q '@objc(validateUnlockKey' "$MODULE"
+          ! grep -q '@objc(signTransactionXdr' "$MODULE"
+      - name: Stage Apple SDK
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          ROOT="dist/FresnicaMobileSDK-${VERSION}"
+          mkdir -p "$ROOT"
+          cp -R bindings/mobile/build/apple/FresnicaCoreFFI.xcframework "$ROOT/"
+          cp bindings/mobile/build/apple/generated-swift/FresnicaCore.swift "$ROOT/"
+          cp bindings/mobile/platform/apple/FresnicaWalletUnlockKeyStore.swift "$ROOT/"
+          cp bindings/mobile/platform/apple/FresnicaSignerAuthorization.swift "$ROOT/"
+          cp bindings/mobile/platform/apple/FresnicaCoreModule.swift "$ROOT/"
+          cp bindings/mobile/platform/apple/FresnicaCoreModule.m "$ROOT/"
+          ditto -c -k --sequesterRsrc --keepParent "$ROOT" "dist/FresnicaMobileSDK-${VERSION}-apple.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-sdk-apple-${{ needs.prepare.outputs.version }}
+          path: dist/FresnicaMobileSDK-${{ needs.prepare.outputs.version }}-apple.zip
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs:
+      - prepare
+      - android
+      - apple
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-sdk-android-${{ needs.prepare.outputs.version }}
+          path: dist/android
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-sdk-apple-${{ needs.prepare.outputs.version }}
+          path: dist/apple
+      - name: Assemble immutable release
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release already exists and will not be overwritten: $TAG" >&2
+            exit 1
+          fi
+
+          mkdir -p release
+          cp "dist/android/fresnica-mobile-sdk-${VERSION}.aar" release/
+          cp "dist/apple/FresnicaMobileSDK-${VERSION}-apple.zip" release/
+          jq --arg commit "$GITHUB_SHA" --arg tag "$TAG" \
+            '. + {git_commit: $commit, tag: $tag}' \
+            "releases/mobile-sdk-v${VERSION}.json" \
+            > "release/fresnica-mobile-sdk-${VERSION}-manifest.json"
+
+          (
+            cd release
+            sha256sum \
+              "fresnica-mobile-sdk-${VERSION}.aar" \
+              "FresnicaMobileSDK-${VERSION}-apple.zip" \
+              "fresnica-mobile-sdk-${VERSION}-manifest.json" \
+              > SHA256SUMS
+          )
+
+          cat > /tmp/release-notes.md <<EOF
+          Fresnica Mobile SDK ${VERSION} is an integration-stable pre-1.0 release.
+
+          - Mobile binding API: 2
+          - Core client API: 2
+          - Android: minSdk 26, four native ABIs, AAR includes the Fresnica native/RN adapter
+          - Apple: iOS 13.4+, XCFramework + generated Swift + native authorization/RN adapter sources
+          - React Native adapter: legacy native-module implementation; Android compile baseline 0.74.2
+
+          Application-side Account/Signer/Realm lifecycle code from PR #81-#84 is intentionally not part of the SDK artifact. See docs/mobile-app-migration-pr81-pr84.md in the tagged source tree.
+          EOF
+
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Fresnica Mobile SDK v${VERSION}" \
+            --prerelease \
+            --notes-file /tmp/release-notes.md \
+            "release/fresnica-mobile-sdk-${VERSION}.aar" \
+            "release/FresnicaMobileSDK-${VERSION}-apple.zip" \
+            "release/fresnica-mobile-sdk-${VERSION}-manifest.json" \
+            "release/SHA256SUMS"
