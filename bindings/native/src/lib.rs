@@ -440,9 +440,15 @@ mod tests {
         let api = FresnicaSdkApi::new();
         let version = api.version();
         let sdk_version = FresnicaSdk::new().version();
-        assert_eq!(version.native_binding_api_version, NATIVE_BINDING_API_VERSION);
+        assert_eq!(
+            version.native_binding_api_version,
+            NATIVE_BINDING_API_VERSION
+        );
         assert_eq!(version.sdk_api_version, sdk_version.sdk_api_version);
-        assert_eq!(version.core_client_api_version, sdk_version.core_client_api_version);
+        assert_eq!(
+            version.core_client_api_version,
+            sdk_version.core_client_api_version
+        );
 
         let classic = api.parse_account(CLASSIC.to_owned()).unwrap();
         assert_eq!(classic.kind, NativeAccountKind::Classic);
