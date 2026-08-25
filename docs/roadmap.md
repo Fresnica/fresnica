@@ -207,6 +207,8 @@ The universal SDK work should provide:
 
 The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, and React Native adapter contract without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
+Native SDK release automation is intentionally not enabled yet: the Apple direct-consumer binary package must pass the real macOS/Xcode validation gate first. The existing `mobile-sdk-v0.1.0` release workflow remains a transitional compatibility release path, not the template for the generalized Native SDK.
+
 ## Phase 5 - Wallet Functional Foundation and Standards
 
 Continue wallet functionality while the SDK foundation is being completed. The goal is to stabilize reusable wallet behavior before investing heavily in final product UX.
@@ -281,13 +283,13 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. Generalize the current Mobile-facing facade into a universal SDK contract without changing established Core security semantics.
-2. Separate framework-specific code from future Native SDK release binaries; retain `v0.1.0` only as the transitional baseline.
-3. Make React Native the first canonical one-time-build adapter implementation, with generated binary + compatibility manifest tooling.
-4. Define Desktop Native SDK targets and WASM/Web contract boundaries; reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
-5. Continue wallet functional coverage and SEP-aligned behavior, including hardware/external signer work and the separate smart-account/passkey provider prototype when appropriate.
-6. Keep the Rust CLI as the reference native client and evaluate a Rust TUI as an engineering client.
-7. Once these foundations are stable, move concentrated effort into Mobile/Desktop/Web wallet experience.
+1. Validate `FresnicaSDK.xcframework` and the Apple React Native adapter on a real macOS/Xcode toolchain; only after that validation add Native SDK release automation.
+2. Run the pinned `smart-account-kit` provider through a real browser/WebAuthn + Protocol 27 Testnet create/connect/sign-and-submit flow, then capture auth-XDR/context-rule conformance fixtures.
+3. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
+4. Extend the validated Apple Native SDK package to macOS Swift after the iOS package is proven. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
+5. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
+6. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
+7. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
 
 ## Non-negotiable Architecture Rules
 
