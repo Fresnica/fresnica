@@ -239,12 +239,14 @@ mod tests {
         let TransactionEnvelope::Tx(value) = &mut envelope else {
             unreachable!();
         };
-        let OperationBody::ManageData(data) = &mut value.tx.operations[0].body else {
+        let mut operations: Vec<_> = value.tx.operations.clone().into();
+        let OperationBody::ManageData(data) = &mut operations[0].body else {
             unreachable!();
         };
         data.data_name = stellar_xdr::String64(
             StringM::<64>::try_from("attacker.example auth").unwrap(),
         );
+        value.tx.operations = operations.try_into().unwrap();
         let mutated = fresnica_core::transaction_envelope_xdr(&envelope).unwrap();
 
         assert!(verify(&mutated, 1_597_691_000).is_err());
