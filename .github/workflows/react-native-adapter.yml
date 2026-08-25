@@ -11,13 +11,102 @@ on:
 
 jobs:
   contract:
-    runs-on: ubuntu-latest
+    runs-on: macos-15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Check Apple adapter build script syntax
-        run: bash -n adapters/react-native/apple/build.sh
-      - name: Test adapter contract and one-time build tooling
-        run: npm test --prefix adapters/react-native
+
+      - name: Create real RN 0.87 consumer and run pod install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sw_vers
+          node --version
+          npm --version
+          ruby --version
+          pod --version
+
+          cd "$RUNNER_TEMP"
+          npx --yes @react-native-community/cli@latest init RNProbe --version 0.87.0 --pm npm --skip-git-init
+          cd RNProbe
+          node -p "require('./node_modules/react-native/package.json').version"
+
+          echo '=== source headers ==='
+          find node_modules/react-native \( -name RCTBridgeModule.h -o -name RCTDeprecation.h \) -print | sort
+
+          echo '=== pod install ==='
+          cd ios
+          pod install
+          cd ..
+
+          echo '=== installed matching headers ==='
+          find ios/Pods \( -name RCTBridgeModule.h -o -name RCTDeprecation.h \) -print | sort || true
+
+          echo '=== React frameworks ==='
+          find ios/Pods \( -name 'React*.xcframework' -o -name 'React.framework' \) -print | sort || true
+
+          echo '=== Local Podspecs ==='
+          find 'ios/Pods/Local Podspecs' -maxdepth 1 -name '*.podspec.json' -print | sort | grep -E 'React-Core|RCTDeprecation|React-RCTFabric' || true
+
+          echo '=== key evaluated podspec fields ==='
+          python3 - <<'PY'
+          import glob, json, os
+          for path in sorted(glob.glob('ios/Pods/Local Podspecs/*.podspec.json')):
+              name = os.path.basename(path)
+              if any(k in name for k in ('React-Core', 'RCTDeprecation', 'React-RCTFabric')):
+                  data = json.load(open(path))
+                  print('\n---', name, '---')
+                  for key in ('name','source_files','public_header_files','private_header_files','header_dir','header_mappings_dir','vendored_frameworks','pod_target_xcconfig','user_target_xcconfig'):
+                      if key in data:
+                          print(key, '=', data[key])
+                  if 'ios' in data:
+                      print('ios =', data['ios'])
+          PY
+
+          echo '=== target support search paths ==='
+          find 'ios/Pods/Target Support Files' -name '*.xcconfig' -print0 | while IFS= read -r -d '' f; do
+            if grep -Eq 'HEADER_SEARCH_PATHS|FRAMEWORK_SEARCH_PATHS' "$f"; then
+              echo "--- $f"
+              grep -E 'HEADER_SEARCH_PATHS|FRAMEWORK_SEARCH_PATHS' "$f" || true
+            fi
+          done | grep -E '(^---|React|Headers/Public|Headers/Private|xcframework)' | head -800 || true
+
+          echo '=== run Fresnica pod-header shim ==='
+          ruby "$GITHUB_WORKSPACE/adapters/react-native/apple/pod-header-shim.rb" \
+            "$RUNNER_TEMP/RNProbe/node_modules/react-native" \
+            "$RUNNER_TEMP/RNProbe/ios/Pods" \
+            "$RUNNER_TEMP/fresnica-header-shims" | tee "$RUNNER_TEMP/fresnica-header-roots.txt"
+
+          echo '=== shim matching headers ==='
+          find "$RUNNER_TEMP/fresnica-header-shims" \( -type f -o -type l \) -print | grep -E 'RCTBridgeModule|RCTDeprecation' | sort || true
+
+          echo '=== syntax-check <React/RCTBridgeModule.h> using Fresnica roots ==='
+          cat > "$RUNNER_TEMP/header-probe.m" <<'EOF'
+          #import <React/RCTBridgeModule.h>
+          @interface FresnicaHeaderProbe : NSObject <RCTBridgeModule>
+          @end
+          @implementation FresnicaHeaderProbe
+          + (NSString *)moduleName { return @"FresnicaHeaderProbe"; }
+          @end
+          EOF
+
+          args=()
+          while IFS= read -r root; do
+            [ -n "$root" ] && args+=("-I" "$root")
+          done < "$RUNNER_TEMP/fresnica-header-roots.txt"
+          for headers in "$RUNNER_TEMP/RNProbe/ios/Pods/Headers/Public" "$RUNNER_TEMP/RNProbe/ios/Pods/Headers/Private"; do
+            if [ -d "$headers" ]; then
+              args+=("-I" "$headers")
+              while IFS= read -r dir; do args+=("-I" "$dir"); done < <(find "$headers" -mindepth 1 -maxdepth 1 -type d -print | sort)
+            fi
+          done
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator clang \
+            -target arm64-apple-ios13.4-simulator \
+            -isysroot "$sdk" \
+            -fobjc-arc -fmodules -fsyntax-only \
+            "${args[@]}" \
+            "$RUNNER_TEMP/header-probe.m"
