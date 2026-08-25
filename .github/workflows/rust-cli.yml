@@ -6,6 +6,7 @@ on:
     paths:
       - "clients/rust-cli/**"
       - "core/rust/**"
+      - "sdk/rust/**"
       - "reference/python/fresnica/storage.py"
       - "reference/python/fresnica/wallet_backup.py"
       - "reference/python/tests/test_rust_cli_compat.py"

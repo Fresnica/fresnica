@@ -81,7 +81,7 @@
 - [x] Watch-only signer attachment identity verification
 - [x] Core-side passcode re-protection
 - [x] External Ed25519 prepare/apply signing boundary
-- [x] Native Rust CLI direct-link client
+- [x] Native Rust CLI direct SDK/Core reference client
 
 ## Universal / Native SDK
 

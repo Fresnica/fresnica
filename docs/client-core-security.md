@@ -277,13 +277,13 @@ Rust Core is authoritative for:
 
 Core MUST NOT implement a `SystemProtectionProvider`, Keychain abstraction, biometric abstraction, OS key-store abstraction, Realm schema, or product UI policy.
 
-## 13. TUI/CLI as first real Core client
+## 13. TUI/CLI as first real Core/SDK clients
 
 The Python implementation remains the behavioral reference for product semantics, but it can also act as a real Rust Core client.
 
 When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is available on `PATH`, the Python TUI delegates software-signer cryptographic operations to Rust Core.
 
-The process protocol is the first verification transport, not a requirement for every future client. A native Rust CLI should link the Core crate directly. Mobile and desktop clients may use another native binding mechanism while preserving the same Core operations and credential boundaries.
+The process protocol is the first verification transport, not a requirement for every future client. The native Rust CLI consumes `fresnica-sdk` directly for account identity, wallet protection, Reveal/Export and routine passcode signing while retaining only low-level Rust Core transaction/XDR helpers where no SDK abstraction is needed. Mobile and desktop clients use the same SDK semantics through their appropriate native binding/package layer.
 
 OS-specific system-auth work still belongs to the client that releases a `WalletUnlockKey`; it is not implemented in Core or in the machine protocol.
 

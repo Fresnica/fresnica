@@ -1,7 +1,8 @@
 # Fresnica Native Rust CLI
 
-This client links `fresnica-core` directly and builds as one `fresnica` executable.
-It is the second concrete Core client after the Python reference/TUI bridge.
+This client consumes the platform-neutral `fresnica-sdk` semantic boundary and
+links the Rust libraries into one `fresnica` executable. It remains a direct
+native reference client without a process/FFI transport.
 
 ## Current scope
 
@@ -46,9 +47,10 @@ It reads and writes the same wallet record files, `.default` pointer,
 reference client. The default application home is `FRESNICA_HOME` when set,
 otherwise `~/.fresnica`.
 
-Create/import/reveal cryptography is performed by the linked Rust Core. Secret,
-mnemonic, BIP39-passphrase, and Fresnica-passcode prompts are read from the
-controlling terminal with input hidden; they are not accepted as command-line
+Create/import/reveal cryptography and account identity parsing go through
+`fresnica-sdk`; Core remains the cryptographic authority underneath the SDK.
+Secret, mnemonic, BIP39-passphrase, and Fresnica-passcode prompts are read from
+the controlling terminal with input hidden; they are not accepted as command-line
 arguments.
 
 Contacts are client-local public metadata. Contact names are resolved before
@@ -66,9 +68,10 @@ the matching public or testnet Horizon server; none of that HTTP or product
 policy is moved into `fresnica-core`.
 
 Reviewed write commands present operation-specific review and ask for
-confirmation before requesting the Fresnica passcode. A short-lived verified
-`WalletUnlockKey` is then derived and the exact prepared envelope is signed by
-Rust Core before Horizon submission. If the HTTP submission result is uncertain,
+confirmation before requesting the Fresnica passcode. The exact prepared XDR is
+then passed to the SDK composite passcode-signing operation, so routine CLI
+signing does not expose a raw `WalletUnlockKey` outside the Rust SDK/Core call.
+If the HTTP submission result is uncertain,
 the native client persists the locally computed transaction hash and blocks a
 later same-account write until Horizon confirms it or the 210-second recovery
 window expires after a not-found lookup.
@@ -150,6 +153,6 @@ The native client does not expose a raw `sign-xdr` shortcut. Routine transaction
 signing stays behind client-side construction and review rather than creating a
 path that bypasses product review.
 
-OS authentication remains a client responsibility. A future platform adapter
-may release a standard `WalletUnlockKey` to Core; no Keychain, biometric, PAM,
-or Windows Hello logic belongs in `fresnica-core`.
+OS authentication remains a client responsibility. A future native platform
+adapter may release a standard `WalletUnlockKey` through the SDK/Core boundary;
+no Keychain, biometric, PAM, or Windows Hello logic belongs in `fresnica-core`.

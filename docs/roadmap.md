@@ -60,7 +60,7 @@ Substantially completed:
 - external Ed25519 prepare/apply signing boundary
 - stable error classification
 - thin process adapter for compatibility/reference use
-- native Rust CLI direct-link client
+- native Rust CLI direct SDK/Core reference client
 
 The Rust CLI should remain a **reference native client** for proving that Core works without Mobile, JavaScript, Flutter or other application-framework dependencies.
 

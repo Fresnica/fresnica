@@ -279,7 +279,7 @@ Python does not need to decrypt Rust-backed software-signer material or hold a S
 
 ## 5. Rust CLI packaging
 
-A native CLI can bypass the process protocol and link `fresnica-core` directly.
+A native Rust CLI can bypass the process protocol and consume `fresnica-sdk` directly, with Rust Core linked underneath it.
 
 The current bridge itself is a normal Rust binary and can be built as one executable:
 
@@ -287,7 +287,7 @@ The current bridge itself is a normal Rust binary and can be built as one execut
 cargo build --release --manifest-path core/rust/Cargo.toml --bin fresnica-core
 ```
 
-A future user-facing Rust CLI should reuse `CoreClientApi` directly rather than spawning `fresnica-core` recursively.
+The current user-facing Rust CLI reuses the platform-neutral `FresnicaSdk` semantic boundary rather than spawning `fresnica-core` recursively. Low-level transaction/XDR helpers may still be used directly in Rust when they do not duplicate SDK wallet/security semantics.
 
 ## 6. OS authentication remains outside Core
 

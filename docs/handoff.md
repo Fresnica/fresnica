@@ -251,7 +251,7 @@ Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Wi
 
 ## Rust CLI and Possible Rust TUI
 
-The Rust CLI is substantially implemented and should remain a reference native client for Core/SDK behavior.
+The Rust CLI is substantially implemented and should remain a reference native client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths now consume `fresnica-sdk`; direct Core use is limited to low-level Rust transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
 
 A Rust TUI is worth considering after the universal SDK boundary is clear. Its role should be engineering-focused:
 
