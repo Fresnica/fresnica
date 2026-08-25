@@ -8,7 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fresnica_core::{
-    parse_transaction_envelope_xdr, transaction_envelope_xdr, transaction_hash,
+    parse_transaction_envelope_xdr, transaction_envelope_has_valid_signature,
+    transaction_envelope_xdr, transaction_hash,
 };
 use fresnica_sdk::{FresnicaSdk, SdkErrorCode};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,24 @@ thread_local! {
     // before signing. Retaining the invocation home here lets the shared submit
     // path persist recovery state without threading storage through every command.
     static ACTIVE_CLIENT_HOME: RefCell<Option<PathBuf>> = RefCell::new(None);
+}
+
+pub(crate) fn parse_transaction_xdr(xdr: &[u8]) -> Result<TransactionEnvelope, String> {
+    parse_transaction_envelope_xdr(xdr)
+        .map_err(|error| format!("invalid Stellar transaction XDR: {error}"))
+}
+
+pub(crate) fn has_valid_transaction_signature(
+    envelope: &TransactionEnvelope,
+    network: &str,
+    signer_public_key: &str,
+) -> Result<bool, String> {
+    transaction_envelope_has_valid_signature(
+        envelope,
+        network_passphrase(network)?,
+        signer_public_key,
+    )
+    .map_err(|error| format!("unable to verify transaction signature: {error}"))
 }
 
 pub fn network_client(network: &str) -> Result<HorizonClient, String> {

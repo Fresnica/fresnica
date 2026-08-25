@@ -1,10 +1,19 @@
+use std::str::FromStr;
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
+use stellar_xdr::{
+    AccountId, Memo, MuxedAccount, OperationBody, Preconditions, PublicKey, TimeBounds,
+    TransactionEnvelope,
+};
 use toml::Value as TomlValue;
 use url::Url;
 
-use crate::transaction_flow::network_client;
+use crate::transaction_flow::{
+    has_valid_transaction_signature, network_client, parse_transaction_xdr,
+};
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
 
@@ -280,6 +289,142 @@ where
     })
 }
 
+fn verify_sep10_challenge(
+    challenge_xdr: &str,
+    network: &str,
+    client_account: &str,
+    server_signing_key: &str,
+    home_domain: &str,
+    web_auth_endpoint: &str,
+    now_unix: u64,
+) -> Result<Vec<u8>, String> {
+    let transaction_xdr = STANDARD
+        .decode(challenge_xdr.trim())
+        .map_err(|_| "SEP-10 challenge transaction is not valid base64 XDR".to_owned())?;
+    let envelope = parse_transaction_xdr(&transaction_xdr)?;
+    let TransactionEnvelope::Tx(transaction_envelope) = &envelope else {
+        return Err("SEP-10 challenge must use a classic transaction envelope".to_owned());
+    };
+    let transaction = &transaction_envelope.tx;
+    let server_account = classic_muxed_account(server_signing_key, "SEP-10 SIGNING_KEY")?;
+    let client_account = classic_muxed_account(client_account, "SEP-10 client account")?;
+
+    if transaction.source_account != server_account {
+        return Err("SEP-10 challenge source account does not match SIGNING_KEY".to_owned());
+    }
+    if transaction.seq_num.0 != 0 {
+        return Err("SEP-10 challenge sequence number must be zero".to_owned());
+    }
+    if transaction.memo != Memo::None {
+        return Err("SEP-10 challenge contains an unexpected memo".to_owned());
+    }
+
+    let time_bounds = transaction_time_bounds(&transaction.cond)?;
+    if time_bounds.max_time.0 == 0
+        || time_bounds.min_time.0 > time_bounds.max_time.0
+        || now_unix < time_bounds.min_time.0
+        || now_unix > time_bounds.max_time.0
+    {
+        return Err("SEP-10 challenge is outside its valid time bounds".to_owned());
+    }
+
+    let first = transaction
+        .operations
+        .first()
+        .ok_or_else(|| "SEP-10 challenge has no operations".to_owned())?;
+    if first.source_account.as_ref() != Some(&client_account) {
+        return Err("SEP-10 first operation source does not match the client account".to_owned());
+    }
+    let OperationBody::ManageData(first_data) = &first.body else {
+        return Err("SEP-10 first operation must be ManageData".to_owned());
+    };
+    let expected_key = format!("{} auth", valid_domain(home_domain)?);
+    if xdr_string64(&first_data.data_name)? != expected_key {
+        return Err("SEP-10 first operation home-domain key is invalid".to_owned());
+    }
+    let nonce = first_data
+        .data_value
+        .as_ref()
+        .ok_or_else(|| "SEP-10 challenge nonce is missing".to_owned())?;
+    if AsRef::<[u8]>::as_ref(nonce).len() != 64 {
+        return Err("SEP-10 challenge nonce must be exactly 64 bytes".to_owned());
+    }
+
+    let expected_web_auth_domain = web_auth_domain(web_auth_endpoint)?;
+    let mut web_auth_domain_seen = false;
+    for operation in transaction.operations.iter().skip(1) {
+        let OperationBody::ManageData(data) = &operation.body else {
+            return Err("SEP-10 additional operations must be ManageData".to_owned());
+        };
+        let key = xdr_string64(&data.data_name)?;
+        if key == "client_domain" {
+            return Err("SEP-10 challenge contains an unexpected client_domain operation".to_owned());
+        }
+        if operation.source_account.as_ref() != Some(&server_account) {
+            return Err("SEP-10 additional operation source must be SIGNING_KEY".to_owned());
+        }
+        if key == "web_auth_domain" {
+            if web_auth_domain_seen {
+                return Err("SEP-10 challenge contains duplicate web_auth_domain operations".to_owned());
+            }
+            let value = data
+                .data_value
+                .as_ref()
+                .ok_or_else(|| "SEP-10 web_auth_domain value is missing".to_owned())?;
+            let value = std::str::from_utf8(AsRef::<[u8]>::as_ref(value))
+                .map_err(|_| "SEP-10 web_auth_domain is not UTF-8".to_owned())?;
+            if value != expected_web_auth_domain {
+                return Err("SEP-10 web_auth_domain does not match WEB_AUTH_ENDPOINT".to_owned());
+            }
+            web_auth_domain_seen = true;
+        }
+    }
+    if !web_auth_domain_seen {
+        return Err("SEP-10 challenge is missing web_auth_domain".to_owned());
+    }
+
+    if !has_valid_transaction_signature(&envelope, network, server_signing_key)? {
+        return Err("SEP-10 challenge is not signed by SIGNING_KEY".to_owned());
+    }
+
+    Ok(transaction_xdr)
+}
+
+fn transaction_time_bounds(preconditions: &Preconditions) -> Result<&TimeBounds, String> {
+    match preconditions {
+        Preconditions::Time(bounds) => Ok(bounds),
+        Preconditions::V2(value) => value
+            .time_bounds
+            .as_ref()
+            .ok_or_else(|| "SEP-10 challenge must include time bounds".to_owned()),
+        Preconditions::None => Err("SEP-10 challenge must include time bounds".to_owned()),
+    }
+}
+
+fn classic_muxed_account(address: &str, label: &str) -> Result<MuxedAccount, String> {
+    let account = AccountId::from_str(address).map_err(|_| format!("{label} must be a Classic G address"))?;
+    match account.0 {
+        PublicKey::PublicKeyTypeEd25519(key) => Ok(MuxedAccount::Ed25519(key)),
+    }
+}
+
+fn xdr_string64(value: &stellar_xdr::String64) -> Result<String, String> {
+    std::str::from_utf8(AsRef::<[u8]>::as_ref(value))
+        .map(str::to_owned)
+        .map_err(|_| "SEP-10 ManageData key is not UTF-8".to_owned())
+}
+
+fn web_auth_domain(endpoint: &str) -> Result<String, String> {
+    let url = Url::parse(endpoint).map_err(|_| "WEB_AUTH_ENDPOINT must be a valid URL".to_owned())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "WEB_AUTH_ENDPOINT must include a host".to_owned())?;
+    Ok(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    })
+}
+
 fn valid_domain(value: &str) -> Result<String, String> {
     let domain = value.trim().trim_end_matches('.').to_ascii_lowercase();
     if domain.is_empty()
@@ -417,13 +562,263 @@ fn usage() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use super::*;
+    use stellar_xdr::{
+        DataValue, Limits, ManageDataOp, Operation, SequenceNumber, String64, TimePoint,
+        Transaction, TransactionExt, TransactionV1Envelope, VecM, WriteXdr,
+    };
 
     const ISSUER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const CONTRACT: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+    const SERVER_SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
+    const SERVER_PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+    const TESTNET: &str = "testnet";
+    const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+    const HOME_DOMAIN: &str = "anchor.example";
+    const WEB_AUTH_ENDPOINT: &str = "https://auth.example.com/sep10";
+    const NOW: u64 = 1_800_000_000;
 
     fn asset() -> IssuedAsset {
         IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap()
+    }
+
+    fn manage_data(source: &str, key: &str, value: Vec<u8>) -> Operation {
+        Operation {
+            source_account: Some(classic_muxed_account(source, "test source").unwrap()),
+            body: OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(key.as_bytes().to_vec()).unwrap(),
+                data_value: Some(DataValue::try_from(value).unwrap()),
+            }),
+        }
+    }
+
+    fn challenge_envelope(
+        client: &str,
+        home_domain: &str,
+        web_auth_domain: &str,
+        min_time: u64,
+        max_time: u64,
+        nonce_len: usize,
+    ) -> TransactionEnvelope {
+        let operations: VecM<Operation, 100> = vec![
+            manage_data(
+                client,
+                &format!("{home_domain} auth"),
+                vec![b'n'; nonce_len],
+            ),
+            manage_data(
+                SERVER_PUBLIC,
+                "web_auth_domain",
+                web_auth_domain.as_bytes().to_vec(),
+            ),
+        ]
+        .try_into()
+        .unwrap();
+        TransactionEnvelope::Tx(TransactionV1Envelope {
+            tx: Transaction {
+                source_account: classic_muxed_account(SERVER_PUBLIC, "server").unwrap(),
+                fee: 200,
+                seq_num: SequenceNumber(0),
+                cond: Preconditions::Time(TimeBounds {
+                    min_time: TimePoint(min_time),
+                    max_time: TimePoint(max_time),
+                }),
+                memo: Memo::None,
+                operations,
+                ext: TransactionExt::V0,
+            },
+            signatures: VecM::default(),
+        })
+    }
+
+    fn encode_envelope(envelope: &TransactionEnvelope) -> String {
+        STANDARD.encode(envelope.to_xdr(Limits::none()).unwrap())
+    }
+
+    fn signed_valid_challenge() -> &'static str {
+        static CHALLENGE: OnceLock<String> = OnceLock::new();
+        CHALLENGE.get_or_init(|| {
+            let envelope = challenge_envelope(
+                ISSUER,
+                HOME_DOMAIN,
+                "auth.example.com",
+                NOW - 30,
+                NOW + 300,
+                64,
+            );
+            let unsigned = envelope.to_xdr(Limits::none()).unwrap();
+            let sdk = FresnicaSdk::new();
+            let protected = sdk
+                .protect_secret(
+                    SERVER_SECRET.to_owned(),
+                    "test-passcode".to_owned(),
+                    Some(SERVER_PUBLIC.to_owned()),
+                )
+                .unwrap();
+            let signed = sdk
+                .sign_transaction_xdr_with_passcode(
+                    protected.envelope_json,
+                    "test-passcode".to_owned(),
+                    SERVER_PUBLIC.to_owned(),
+                    unsigned,
+                    TESTNET_PASSPHRASE.to_owned(),
+                )
+                .unwrap();
+            STANDARD.encode(signed)
+        })
+    }
+
+    #[test]
+    fn verifies_signed_sep10_challenge() {
+        let verified = verify_sep10_challenge(
+            signed_valid_challenge(),
+            TESTNET,
+            ISSUER,
+            SERVER_PUBLIC,
+            HOME_DOMAIN,
+            WEB_AUTH_ENDPOINT,
+            NOW,
+        )
+        .unwrap();
+
+        assert!(!verified.is_empty());
+    }
+
+    #[test]
+    fn sep10_verifier_binds_server_signature_to_network() {
+        let error = verify_sep10_challenge(
+            signed_valid_challenge(),
+            "mainnet",
+            ISSUER,
+            SERVER_PUBLIC,
+            HOME_DOMAIN,
+            WEB_AUTH_ENDPOINT,
+            NOW,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "SEP-10 challenge is not signed by SIGNING_KEY");
+    }
+
+    #[test]
+    fn sep10_verifier_rejects_expired_or_malformed_challenge() {
+        let expired = challenge_envelope(
+            ISSUER,
+            HOME_DOMAIN,
+            "auth.example.com",
+            NOW - 300,
+            NOW - 1,
+            64,
+        );
+        assert_eq!(
+            verify_sep10_challenge(
+                &encode_envelope(&expired),
+                TESTNET,
+                ISSUER,
+                SERVER_PUBLIC,
+                HOME_DOMAIN,
+                WEB_AUTH_ENDPOINT,
+                NOW,
+            )
+            .unwrap_err(),
+            "SEP-10 challenge is outside its valid time bounds"
+        );
+
+        let short_nonce = challenge_envelope(
+            ISSUER,
+            HOME_DOMAIN,
+            "auth.example.com",
+            NOW - 30,
+            NOW + 300,
+            63,
+        );
+        assert_eq!(
+            verify_sep10_challenge(
+                &encode_envelope(&short_nonce),
+                TESTNET,
+                ISSUER,
+                SERVER_PUBLIC,
+                HOME_DOMAIN,
+                WEB_AUTH_ENDPOINT,
+                NOW,
+            )
+            .unwrap_err(),
+            "SEP-10 challenge nonce must be exactly 64 bytes"
+        );
+    }
+
+    #[test]
+    fn sep10_verifier_binds_home_and_web_auth_domains() {
+        let wrong_home = challenge_envelope(
+            ISSUER,
+            "other.example",
+            "auth.example.com",
+            NOW - 30,
+            NOW + 300,
+            64,
+        );
+        assert_eq!(
+            verify_sep10_challenge(
+                &encode_envelope(&wrong_home),
+                TESTNET,
+                ISSUER,
+                SERVER_PUBLIC,
+                HOME_DOMAIN,
+                WEB_AUTH_ENDPOINT,
+                NOW,
+            )
+            .unwrap_err(),
+            "SEP-10 first operation home-domain key is invalid"
+        );
+
+        let wrong_auth_domain = challenge_envelope(
+            ISSUER,
+            HOME_DOMAIN,
+            "evil.example",
+            NOW - 30,
+            NOW + 300,
+            64,
+        );
+        assert_eq!(
+            verify_sep10_challenge(
+                &encode_envelope(&wrong_auth_domain),
+                TESTNET,
+                ISSUER,
+                SERVER_PUBLIC,
+                HOME_DOMAIN,
+                WEB_AUTH_ENDPOINT,
+                NOW,
+            )
+            .unwrap_err(),
+            "SEP-10 web_auth_domain does not match WEB_AUTH_ENDPOINT"
+        );
+    }
+
+    #[test]
+    fn sep10_verifier_rejects_unsigned_challenge() {
+        let unsigned = challenge_envelope(
+            ISSUER,
+            HOME_DOMAIN,
+            "auth.example.com",
+            NOW - 30,
+            NOW + 300,
+            64,
+        );
+        assert_eq!(
+            verify_sep10_challenge(
+                &encode_envelope(&unsigned),
+                TESTNET,
+                ISSUER,
+                SERVER_PUBLIC,
+                HOME_DOMAIN,
+                WEB_AUTH_ENDPOINT,
+                NOW,
+            )
+            .unwrap_err(),
+            "SEP-10 challenge is not signed by SIGNING_KEY"
+        );
     }
 
     #[test]
