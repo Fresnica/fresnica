@@ -1,24 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import path from 'node:path';
 
 import { SMART_ACCOUNT_KIT_VERSION } from '../src/config.mjs';
 
-const require = createRequire(import.meta.url);
-let cursor = path.dirname(require.resolve('smart-account-kit'));
-let installed;
-for (;;) {
-  try {
-    installed = JSON.parse(await readFile(path.join(cursor, 'package.json'), 'utf8'));
-    if (installed.name === 'smart-account-kit') break;
-  } catch {
-    // Keep walking toward the package root.
-  }
-  const parent = path.dirname(cursor);
-  if (parent === cursor) throw new Error('unable to locate smart-account-kit package.json');
-  cursor = parent;
-}
+const installed = JSON.parse(
+  await readFile(new URL('../node_modules/smart-account-kit/package.json', import.meta.url), 'utf8'),
+);
 
 assert.equal(
   installed.version,
