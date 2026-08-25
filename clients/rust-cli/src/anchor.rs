@@ -443,7 +443,7 @@ fn command_status(
         return Ok(());
     }
 
-    let payment = withdrawal_payment_from_transaction(&transaction)?;
+    let payment = withdrawal_payment_from_transaction(&transaction, &record.address, &asset)?;
     let signing_record = resolve_signing_wallet(storage, network, Some(&record.name))?;
     println!();
     println!("Anchor withdrawal payment handoff");
@@ -688,6 +688,8 @@ struct AnchorWithdrawalPayment {
 
 fn withdrawal_payment_from_transaction(
     transaction: &JsonValue,
+    expected_source: &str,
+    asset: &IssuedAsset,
 ) -> Result<AnchorWithdrawalPayment, String> {
     let status = transaction_text(transaction, "status")
         .ok_or_else(|| "anchor transaction has no status".to_owned())?;
@@ -702,6 +704,22 @@ fn withdrawal_payment_from_transaction(
         return Err(format!(
             "anchor transaction is {kind}, not a withdrawal payment"
         ));
+    }
+
+    let source = transaction_text(transaction, "from")
+        .ok_or_else(|| "anchor withdrawal has no source account; refusing automatic payment".to_owned())?;
+    if source != expected_source {
+        return Err(format!(
+            "anchor withdrawal source account mismatch: expected {expected_source}, received {source}"
+        ));
+    }
+    if let Some(amount_in_asset) = transaction_text(transaction, "amount_in_asset") {
+        let expected_asset = format!("stellar:{}:{}", asset.code, asset.issuer);
+        if amount_in_asset != expected_asset {
+            return Err(format!(
+                "anchor withdrawal input asset mismatch: expected {expected_asset}, received {amount_in_asset}"
+            ));
+        }
     }
 
     let destination = transaction_text(transaction, "withdraw_anchor_account")
@@ -2427,26 +2445,64 @@ issuer = "{ISSUER}"
 
     #[test]
     fn withdrawal_payment_requires_ready_status_and_parses_memo() {
-        let payment = withdrawal_payment_from_transaction(&serde_json::json!({
-            "id": "tx-1",
-            "kind": "withdrawal",
-            "status": "pending_user_transfer_start",
-            "withdraw_anchor_account": ISSUER,
-            "withdraw_memo_type": "id",
-            "withdraw_memo": "123",
-            "amount_in": "5.2500000"
-        }))
+        let payment = withdrawal_payment_from_transaction(
+            &serde_json::json!({
+                "id": "tx-1",
+                "kind": "withdrawal",
+                "status": "pending_user_transfer_start",
+                "from": ISSUER,
+                "withdraw_anchor_account": ISSUER,
+                "withdraw_memo_type": "id",
+                "withdraw_memo": "123",
+                "amount_in": "5.2500000",
+                "amount_in_asset": format!("stellar:USD:{ISSUER}")
+            }),
+            ISSUER,
+            &asset(),
+        )
         .unwrap();
         assert_eq!(payment.destination, ISSUER);
         assert_eq!(payment.amount, "5.2500000");
         assert_eq!(payment.memo, PaymentMemo::Id(123));
 
-        assert!(withdrawal_payment_from_transaction(&serde_json::json!({
-            "kind": "withdrawal",
-            "status": "pending_anchor",
-            "withdraw_anchor_account": ISSUER,
-            "amount_in": "5"
-        }))
+        assert!(withdrawal_payment_from_transaction(
+            &serde_json::json!({
+                "kind": "withdrawal",
+                "status": "pending_anchor",
+                "from": ISSUER,
+                "withdraw_anchor_account": ISSUER,
+                "amount_in": "5"
+            }),
+            ISSUER,
+            &asset(),
+        )
+        .is_err());
+
+        assert!(withdrawal_payment_from_transaction(
+            &serde_json::json!({
+                "kind": "withdrawal",
+                "status": "pending_user_transfer_start",
+                "from": SERVER_PUBLIC,
+                "withdraw_anchor_account": ISSUER,
+                "amount_in": "5"
+            }),
+            ISSUER,
+            &asset(),
+        )
+        .is_err());
+
+        assert!(withdrawal_payment_from_transaction(
+            &serde_json::json!({
+                "kind": "withdrawal",
+                "status": "pending_user_transfer_start",
+                "from": ISSUER,
+                "withdraw_anchor_account": ISSUER,
+                "amount_in": "5",
+                "amount_in_asset": "stellar:EUR:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+            }),
+            ISSUER,
+            &asset(),
+        )
         .is_err());
     }
 
