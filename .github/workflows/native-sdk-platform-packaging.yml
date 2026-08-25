@@ -1,0 +1,86 @@
+name: Native SDK platform packaging
+
+on:
+  push:
+    paths:
+      - "bindings/native/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - ".github/workflows/native-sdk-platform-packaging.yml"
+  pull_request:
+    paths:
+      - "bindings/native/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - ".github/workflows/native-sdk-platform-packaging.yml"
+
+jobs:
+  android-aar:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "26.1.10909125"
+      FRESNICA_ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 -print -quit)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;${ANDROID_NDK_VERSION}" "platforms;android-34"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build Rust libraries and generated Kotlin
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          bash bindings/native/scripts/build-android.sh
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.5.1"
+      - name: Build and lint Native SDK AAR
+        run: gradle -p bindings/native/platform/android assembleRelease lintRelease --stacktrace
+      - name: Validate Native SDK AAR
+        run: |
+          AAR="$(find bindings/native/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          test -s "$AAR"
+          unzip -l "$AAR" > /tmp/fresnica-native-aar.txt
+          grep -q 'classes.jar' /tmp/fresnica-native-aar.txt
+          for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
+            grep -q "jni/${abi}/libfresnica_native_sdk.so" /tmp/fresnica-native-aar.txt
+          done
+          unzip -p "$AAR" classes.jar > /tmp/fresnica-native-classes.jar
+          jar tf /tmp/fresnica-native-classes.jar > /tmp/fresnica-native-classes.txt
+          grep -q 'com/fresnica/sdk/FresnicaSdkApi.class' /tmp/fresnica-native-classes.txt
+          ! grep -q -E 'reactnative|facebook/react|flutter' /tmp/fresnica-native-classes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-native-sdk-android-aar
+          path: bindings/native/platform/android/build/outputs/aar/*release.aar
+          if-no-files-found: error
+
+  apple:
+    runs-on: macos-14
+    env:
+      FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Apple Native SDK package
+        run: bash bindings/native/scripts/build-apple.sh
+      - name: Validate Apple Native SDK package
+        run: |
+          test -s bindings/native/build/apple/generated-swift/FresnicaSDK.swift
+          test -s bindings/native/build/apple/headers/FresnicaSDKFFI.h
+          test -s bindings/native/build/apple/headers/module.modulemap
+          test -d bindings/native/build/apple/FresnicaSDKFFI.xcframework
+          ! grep -q -E 'ReactNative|RCTBridge|Flutter' bindings/native/build/apple/generated-swift/FresnicaSDK.swift
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-native-sdk-apple
+          path: bindings/native/build/apple
+          if-no-files-found: error

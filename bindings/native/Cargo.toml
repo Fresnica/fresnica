@@ -1,0 +1,28 @@
+[package]
+name = "fresnica-native-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "UniFFI native binding layer for the platform-neutral Fresnica SDK"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[features]
+default = []
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+fresnica-sdk = { path = "../../sdk/rust" }
+serde = { version = "1", features = ["derive"] }
+uniffi = "=0.32.0"
+
+[dev-dependencies]
+base64 = "=0.23.1"
+serde_json = "1"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]

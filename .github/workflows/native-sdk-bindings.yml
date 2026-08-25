@@ -1,0 +1,56 @@
+name: Native SDK bindings
+
+on:
+  push:
+    paths:
+      - "bindings/native/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/native-sdk-bindings.yml"
+  pull_request:
+    paths:
+      - "bindings/native/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
+      - ".github/workflows/native-sdk-bindings.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check native binding formatting
+        run: cargo fmt -- --check
+        working-directory: bindings/native
+      - name: Test universal SDK
+        run: cargo test --manifest-path sdk/rust/Cargo.toml
+      - name: Test native binding
+        run: cargo test
+        working-directory: bindings/native
+      - name: Build native host library
+        run: cargo build
+        working-directory: bindings/native
+      - name: Generate Kotlin native SDK binding
+        run: |
+          rm -rf target/generated/kotlin
+          cargo run --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libfresnica_native_sdk.so \
+            --language kotlin --out-dir target/generated/kotlin
+          grep -R "package com.fresnica.sdk" target/generated/kotlin
+          grep -R "FresnicaSdkApi" target/generated/kotlin
+          grep -R "NativeSdkVersion" target/generated/kotlin
+        working-directory: bindings/native
+      - name: Generate Swift native SDK binding
+        run: |
+          rm -rf target/generated/swift
+          cargo run --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/debug/libfresnica_native_sdk.so \
+            --language swift --out-dir target/generated/swift
+          grep -R "FresnicaSdkApi" target/generated/swift
+          grep -R "NativeSdkVersion" target/generated/swift
+        working-directory: bindings/native
