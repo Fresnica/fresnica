@@ -4,7 +4,7 @@ Status: **integration-stable pre-1.0 SDK**.
 
 The Fresnica Mobile SDK is released independently from the future `fresnica-mobile` application. The SDK owns Core/mobile binding/native security integration; the Mobile app owns React Native product state, Realm lifecycle, screens, network behavior and application orchestration.
 
-The finalized framework boundary is defined in `docs/mobile-framework-adapter-contract.md`. The target model is: **Fresnica publishes compiled Native SDK binaries plus canonical framework-adapter source; each consumer compiles its adapter once in its own framework environment and reuses the generated adapter binary for normal application builds.**
+The finalized framework boundary is defined in `docs/mobile-framework-adapter-contract.md`. The generalized binary release policy is now defined separately in `docs/native-sdk-release.md`; this document remains authoritative only for the transitional Mobile v0.1.0 release. The target model is: **Fresnica publishes compiled Native SDK binaries plus canonical framework-adapter source; each consumer compiles its adapter once in its own framework environment and reuses the generated adapter binary for normal application builds.**
 
 ## Versioning
 

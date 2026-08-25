@@ -1,0 +1,315 @@
+name: Native SDK release
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/native-sdk-release.yml"
+      - "docs/native-sdk-release.md"
+      - "bindings/native/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - "releases/native-sdk-v*.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "releases/native-sdk-v*.json"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Native SDK version to publish, without native-sdk-v prefix"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+      tag: ${{ steps.contract.outputs.tag }}
+      publish: ${{ steps.contract.outputs.publish }}
+      native_package_version: ${{ steps.contract.outputs.native_package_version }}
+      sdk_package_version: ${{ steps.contract.outputs.sdk_package_version }}
+      core_package_version: ${{ steps.contract.outputs.core_package_version }}
+      native_api: ${{ steps.contract.outputs.native_api }}
+      sdk_api: ${{ steps.contract.outputs.sdk_api }}
+      core_api: ${{ steps.contract.outputs.core_api }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release contract
+        id: contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_version() {
+            sed -n 's/^version = "\([^"]*\)"/\1/p' "$1" | head -n 1
+          }
+
+          native_version="$(package_version bindings/native/Cargo.toml)"
+          sdk_version="$(package_version sdk/rust/Cargo.toml)"
+          core_version="$(package_version core/rust/Cargo.toml)"
+          native_api="$(sed -n 's/^pub const NATIVE_BINDING_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' bindings/native/src/lib.rs)"
+          sdk_api="$(sed -n 's/^pub const SDK_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' sdk/rust/src/lib.rs)"
+          core_api="$(sed -n 's/^pub const CLIENT_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' core/rust/src/client_api.rs)"
+
+          for value in "$native_version" "$sdk_version" "$core_version" "$native_api" "$sdk_api" "$core_api"; do
+            test -n "$value"
+          done
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="$native_version"
+          fi
+
+          test "$version" = "$native_version"
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "invalid Native SDK version: $version" >&2; exit 1 ;;
+          esac
+
+          marker="releases/native-sdk-v${version}.json"
+          marker_exists=false
+          if [ -s "$marker" ]; then
+            marker_exists=true
+            test "$(jq -r '.kind' "$marker")" = "fresnica-native-sdk-release"
+            test "$(jq -r '.version' "$marker")" = "$version"
+            test "$(jq -r '.channel' "$marker")" = "preview"
+            test "$(jq -r '.native_binding_api_version' "$marker")" = "$native_api"
+            test "$(jq -r '.sdk_api_version' "$marker")" = "$sdk_api"
+            test "$(jq -r '.core_client_api_version' "$marker")" = "$core_api"
+            test "$(jq -r '.android.min_sdk' "$marker")" = "26"
+            test "$(jq -c '.android.abis' "$marker")" = '["armeabi-v7a","x86","x86_64","arm64-v8a"]'
+            test "$(jq -r '.apple.minimum_ios' "$marker")" = "13.4"
+          fi
+
+          publish=false
+          case "${{ github.event_name }}" in
+            pull_request)
+              ;;
+            workflow_dispatch)
+              if [ "$marker_exists" != true ]; then
+                echo "release marker is required before publishing: $marker" >&2
+                exit 1
+              fi
+              publish=true
+              ;;
+            push)
+              if [ "$marker_exists" != true ]; then
+                echo "release marker is missing after main push: $marker" >&2
+                exit 1
+              fi
+              publish=true
+              ;;
+          esac
+
+          tag="native-sdk-v${version}"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+            echo "native_package_version=$native_version"
+            echo "sdk_package_version=$sdk_version"
+            echo "core_package_version=$core_version"
+            echo "native_api=$native_api"
+            echo "sdk_api=$sdk_api"
+            echo "core_api=$core_api"
+          } >> "$GITHUB_OUTPUT"
+
+  android:
+    if: needs.prepare.outputs.publish == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "26.1.10909125"
+      FRESNICA_ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 -print -quit)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;${ANDROID_NDK_VERSION}" "platforms;android-34"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build Rust libraries and generated Kotlin
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          bash bindings/native/scripts/build-android.sh
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.5.1"
+      - name: Build and lint Native SDK AAR
+        run: gradle -p bindings/native/platform/android assembleRelease lintRelease --stacktrace
+      - name: Validate and stage Android Native SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAR="$(find bindings/native/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          test -s "$AAR"
+          unzip -l "$AAR" > /tmp/fresnica-native-aar.txt
+          grep -q 'classes.jar' /tmp/fresnica-native-aar.txt
+          for abi in armeabi-v7a x86 x86_64 arm64-v8a; do
+            grep -q "jni/${abi}/libfresnica_native_sdk.so" /tmp/fresnica-native-aar.txt
+          done
+          unzip -p "$AAR" classes.jar > /tmp/fresnica-native-classes.jar
+          jar tf /tmp/fresnica-native-classes.jar > /tmp/fresnica-native-classes.txt
+          grep -q 'com/fresnica/sdk/FresnicaSdkApi.class' /tmp/fresnica-native-classes.txt
+          grep -q 'com/fresnica/sdk/security/WalletUnlockKeyStore.class' /tmp/fresnica-native-classes.txt
+          grep -q 'com/fresnica/sdk/security/FresnicaSignerAuthorization.class' /tmp/fresnica-native-classes.txt
+          ! grep -q -E 'reactnative|facebook/react|flutter' /tmp/fresnica-native-classes.txt
+          mkdir -p dist
+          cp "$AAR" "dist/fresnica-native-sdk-${{ needs.prepare.outputs.version }}.aar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-android-${{ needs.prepare.outputs.version }}
+          path: dist/fresnica-native-sdk-${{ needs.prepare.outputs.version }}.aar
+          if-no-files-found: error
+
+  apple:
+    if: needs.prepare.outputs.publish == 'true'
+    needs: prepare
+    runs-on: macos-14
+    env:
+      FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build and validate Apple Native SDK package
+        run: bash bindings/native/scripts/validate-apple-local.sh
+      - name: Stage Apple Native SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD="bindings/native/build/apple"
+          test -d "$BUILD/FresnicaSDK.xcframework"
+          test -d "$BUILD/FresnicaSDKFFI.xcframework"
+          mkdir -p dist/apple
+          cp -R "$BUILD/FresnicaSDK.xcframework" dist/apple/
+          cp -R "$BUILD/FresnicaSDKFFI.xcframework" dist/apple/
+          (
+            cd dist/apple
+            zip -qry "../FresnicaSDK-${{ needs.prepare.outputs.version }}-apple.zip" \
+              FresnicaSDK.xcframework FresnicaSDKFFI.xcframework
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-apple-${{ needs.prepare.outputs.version }}
+          path: dist/FresnicaSDK-${{ needs.prepare.outputs.version }}-apple.zip
+          if-no-files-found: error
+
+  release:
+    if: needs.prepare.outputs.publish == 'true'
+    needs:
+      - prepare
+      - android
+      - apple
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-sdk-android-${{ needs.prepare.outputs.version }}
+          path: incoming/android
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-sdk-apple-${{ needs.prepare.outputs.version }}
+          path: incoming/apple
+      - name: Assemble release manifest and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          MARKER="releases/native-sdk-v${VERSION}.json"
+
+          mkdir -p release
+          cp "incoming/android/fresnica-native-sdk-${VERSION}.aar" release/
+          cp "incoming/apple/FresnicaSDK-${VERSION}-apple.zip" release/
+
+          jq \
+            --arg commit "$GITHUB_SHA" \
+            --arg tag "$TAG" \
+            --arg native_package_version "${{ needs.prepare.outputs.native_package_version }}" \
+            --arg sdk_package_version "${{ needs.prepare.outputs.sdk_package_version }}" \
+            --arg core_package_version "${{ needs.prepare.outputs.core_package_version }}" \
+            --arg android_artifact "fresnica-native-sdk-${VERSION}.aar" \
+            --arg apple_artifact "FresnicaSDK-${VERSION}-apple.zip" \
+            '. + {
+              git_commit: $commit,
+              tag: $tag,
+              packages: {
+                native: $native_package_version,
+                sdk: $sdk_package_version,
+                core: $core_package_version
+              },
+              artifacts: {
+                android: $android_artifact,
+                apple: $apple_artifact
+              }
+            }' \
+            "$MARKER" > "release/fresnica-native-sdk-${VERSION}-manifest.json"
+
+          (
+            cd release
+            sha256sum \
+              "fresnica-native-sdk-${VERSION}.aar" \
+              "FresnicaSDK-${VERSION}-apple.zip" \
+              "fresnica-native-sdk-${VERSION}-manifest.json" \
+              > SHA256SUMS
+          )
+      - name: Publish immutable prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release already exists: $TAG" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag already exists: $TAG" >&2
+            exit 1
+          fi
+
+          cat > /tmp/native-sdk-release-notes.md <<EOF_NOTES
+          Fresnica Native SDK ${VERSION} is a pre-1.0 direct-consumer release.
+
+          - Native binding API: ${{ needs.prepare.outputs.native_api }}
+          - Universal SDK API: ${{ needs.prepare.outputs.sdk_api }}
+          - Core client API: ${{ needs.prepare.outputs.core_api }}
+          - Android: minSdk 26, four native ABIs, framework-neutral AAR
+          - Apple: validated FresnicaSDK + FresnicaSDKFFI XCFramework package
+
+          React Native/Flutter adapters and application product code are intentionally not embedded in these Native SDK binaries. See docs/native-sdk-release.md in the tagged source tree.
+          EOF_NOTES
+
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Fresnica Native SDK v${VERSION}" \
+            --prerelease \
+            --notes-file /tmp/native-sdk-release-notes.md \
+            "release/fresnica-native-sdk-${VERSION}.aar" \
+            "release/FresnicaSDK-${VERSION}-apple.zip" \
+            "release/fresnica-native-sdk-${VERSION}-manifest.json" \
+            "release/SHA256SUMS"
