@@ -1,5 +1,5 @@
 use fresnica_core::detect_mnemonic_language;
-use fresnica_sdk::{FresnicaSdk, SdkSigningMaterialKind};
+use fresnica_sdk::{FresnicaSdk, SdkError, SdkErrorCode, SdkSigningMaterialKind};
 use serde_json::{Map, Number, Value};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -103,6 +103,74 @@ pub fn create_mnemonic_record(
     Ok((record, Zeroizing::new(generated.mnemonic)))
 }
 
+
+pub fn attach_secret_record(
+    record: &WalletRecord,
+    secret: &str,
+    passcode: &str,
+) -> Result<WalletRecord, String> {
+    ensure_watch_only(record)?;
+    let protected = FresnicaSdk::new()
+        .protect_secret(
+            secret.to_owned(),
+            passcode.to_owned(),
+            Some(record.address.clone()),
+        )
+        .map_err(map_attach_error)?;
+    let mut updated = record.clone();
+    updated.wallet_type = "secret".to_owned();
+    updated.secret = Some(parse_envelope(&protected.envelope_json)?);
+    updated.metadata = Map::new();
+    Ok(updated)
+}
+
+pub fn attach_mnemonic_record(
+    record: &WalletRecord,
+    mnemonic: &str,
+    mnemonic_passphrase: &str,
+    index: usize,
+    language: Option<&str>,
+    passcode: &str,
+) -> Result<WalletRecord, String> {
+    ensure_watch_only(record)?;
+    let language = match language {
+        Some(value) if !value.is_empty() => value.to_owned(),
+        _ => detect_mnemonic_language(mnemonic)
+            .map_err(|error| error.to_string())?
+            .to_owned(),
+    };
+    let protected = FresnicaSdk::new()
+        .protect_mnemonic(
+            mnemonic.to_owned(),
+            mnemonic_passphrase.to_owned(),
+            sdk_u32(index, "index")?,
+            Some(language.clone()),
+            passcode.to_owned(),
+            Some(record.address.clone()),
+        )
+        .map_err(map_attach_error)?;
+    let mut updated = record.clone();
+    updated.wallet_type = "mnemonic".to_owned();
+    updated.secret = Some(parse_envelope(&protected.envelope_json)?);
+    updated.metadata = mnemonic_metadata(index, &language);
+    Ok(updated)
+}
+
+pub fn detach_signer_record(
+    record: &WalletRecord,
+    passcode: &str,
+) -> Result<WalletRecord, String> {
+    if record.watch_only() {
+        return Err("wallet is already watch-only".to_owned());
+    }
+    verify_passcode(record, passcode)?;
+    let mut updated = record.clone();
+    updated.wallet_type = "watch-only".to_owned();
+    updated.secret = None;
+    updated.metadata = Map::new();
+    Ok(updated)
+}
+
 pub fn verify_passcode(record: &WalletRecord, passcode: &str) -> Result<(), String> {
     let envelope_json = record_envelope_json(record)?;
     let mut unlock_key = FresnicaSdk::new()
@@ -156,6 +224,22 @@ pub fn reveal_record(
     }
 }
 
+
+fn ensure_watch_only(record: &WalletRecord) -> Result<(), String> {
+    if !record.watch_only() || record.secret.is_some() {
+        return Err("wallet already has signing material".to_owned());
+    }
+    Ok(())
+}
+
+fn map_attach_error(error: SdkError) -> String {
+    if error.code == SdkErrorCode::IdentityMismatch {
+        "signing material does not match watch-only address".to_owned()
+    } else {
+        error.to_string()
+    }
+}
+
 fn record_envelope_json(record: &WalletRecord) -> Result<String, String> {
     let envelope = record
         .secret
@@ -199,6 +283,9 @@ mod tests {
 
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+    const OTHER_PUBLIC: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
+    const MNEMONIC: &str = "illness spike retreat truth genius clock brain pass fit cave bargain toe";
+    const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
 
     #[test]
     fn secret_record_is_protected_by_sdk_and_revealable() {
@@ -216,6 +303,57 @@ mod tests {
             RevealedSigningMaterial::Secret { secret } => assert_eq!(secret.as_str(), SECRET),
             _ => panic!("secret wallet revealed the wrong material kind"),
         }
+    }
+
+
+    #[test]
+    fn watch_only_secret_attachment_is_identity_bound_and_detachable() {
+        let watch = WalletRecord {
+            name: "alpha".to_owned(),
+            address: PUBLIC.to_owned(),
+            wallet_type: "watch-only".to_owned(),
+            network: "testnet".to_owned(),
+            secret: None,
+            metadata: Map::new(),
+        };
+        let attached = attach_secret_record(&watch, SECRET, "passcode").unwrap();
+        assert_eq!(attached.address, PUBLIC);
+        assert_eq!(attached.wallet_type, "secret");
+        assert!(attached.secret.is_some());
+
+        let detached = detach_signer_record(&attached, "passcode").unwrap();
+        assert_eq!(detached.address, PUBLIC);
+        assert_eq!(detached.wallet_type, "watch-only");
+        assert!(detached.secret.is_none());
+        assert!(detached.metadata.is_empty());
+
+        let mismatch = WalletRecord {
+            address: OTHER_PUBLIC.to_owned(),
+            ..watch
+        };
+        assert_eq!(
+            attach_secret_record(&mismatch, SECRET, "passcode").unwrap_err(),
+            "signing material does not match watch-only address"
+        );
+    }
+
+    #[test]
+    fn watch_only_mnemonic_attachment_preserves_resolved_metadata() {
+        let watch = WalletRecord {
+            name: "mnemonic".to_owned(),
+            address: MNEMONIC_PUBLIC.to_owned(),
+            wallet_type: "watch-only".to_owned(),
+            network: "mainnet".to_owned(),
+            secret: None,
+            metadata: Map::new(),
+        };
+        let attached = attach_mnemonic_record(&watch, MNEMONIC, "", 0, None, "passcode").unwrap();
+        assert_eq!(attached.wallet_type, "mnemonic");
+        assert_eq!(
+            attached.metadata.get("language").and_then(Value::as_str),
+            Some("english")
+        );
+        assert_eq!(attached.metadata.get("index").and_then(Value::as_u64), Some(0));
     }
 
     #[test]

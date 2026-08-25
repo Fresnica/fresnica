@@ -36,6 +36,9 @@ trustline lifecycle, and Classic SDEX read/write/history operations:
 - `wallet import-secret NAME`
 - `wallet import-mnemonic NAME`
 - `wallet import-watch NAME G...`
+- `wallet attach-secret NAME`
+- `wallet attach-mnemonic NAME [--index N] [--language LANGUAGE]`
+- `wallet detach-signer NAME`
 - `wallet testnet-fund [--wallet NAME]` (`wallet fund` is an alias)
 - `wallet reveal [NAME]`
 - `wallet backup NAME PATH`
@@ -52,6 +55,12 @@ Create/import/reveal cryptography and account identity parsing go through
 Secret, mnemonic, BIP39-passphrase, and Fresnica-passcode prompts are read from
 the controlling terminal with input hidden; they are not accepted as command-line
 arguments.
+
+A watch-only Classic account can later attach a secret or mnemonic signer without
+changing wallet identity. The CLI passes the existing G address as the SDK
+`expected_signer_public_key`; mismatched material is rejected before the wallet
+record changes. `wallet detach-signer` removes only local protected signing
+material after passcode verification and keeps the same account as watch-only.
 
 Contacts are client-local public metadata. Contact names are resolved before
 payment construction, an explicit `--memo` takes precedence over a contact's

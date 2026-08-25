@@ -56,6 +56,9 @@ Wallet commands:
   import-secret NAME
   import-mnemonic NAME [--index N] [--language LANGUAGE]
   import-watch NAME G...
+  attach-secret NAME             Add matching S... signing material to watch-only wallet
+  attach-mnemonic NAME [--index N] [--language LANGUAGE]
+  detach-signer NAME             Remove local signing material and keep the G address
   testnet-fund [--wallet NAME]   Fund a testnet wallet with Friendbot
   fund [--wallet NAME]           Alias for testnet-fund
   reveal [NAME]
@@ -186,7 +189,7 @@ fn command_info(storage: &WalletStorage, arguments: &[String]) -> Result<(), Str
             "no"
         }
     );
-    println!("Core:       Rust (direct link)");
+    println!("SDK/Core:   Rust (direct link)");
     Ok(())
 }
 
@@ -213,6 +216,11 @@ fn command_wallet(
         "import-watch" if arguments.len() == 3 => {
             wallet_import_watch(storage, network, &arguments[1], &arguments[2])
         }
+        "attach-secret" if arguments.len() == 2 => {
+            wallet_attach_secret(storage, &arguments[1])
+        }
+        "attach-mnemonic" => wallet_attach_mnemonic(storage, &arguments[1..]),
+        "detach-signer" if arguments.len() == 2 => wallet_detach_signer(storage, &arguments[1]),
         "testnet-fund" | "fund" => friendbot::command_fund(storage, network, &arguments[1..]),
         "reveal" if arguments.len() <= 2 => {
             wallet_reveal(storage, arguments.get(1).map(String::as_str))
@@ -326,6 +334,69 @@ fn wallet_import_watch(
     };
     save_new_record(storage, &record)?;
     println!("Added watch-only wallet \"{}\"", record.name);
+    Ok(())
+}
+
+fn wallet_attach_secret(storage: &WalletStorage, name: &str) -> Result<(), String> {
+    let record = storage.load(name)?;
+    if !record.watch_only() {
+        return Err("wallet already has signing material".to_owned());
+    }
+    let secret = prompt_hidden("Stellar secret (S...): ")?;
+    let passcode = prompt_app_passcode(storage)?;
+    let updated = wallet_ops::attach_secret_record(&record, &secret, &passcode)?;
+    storage.save(&updated, true)?;
+    println!("Attached matching secret signer to watch-only wallet \"{}\"", updated.name);
+    println!("Address: {}", updated.address);
+    Ok(())
+}
+
+fn wallet_attach_mnemonic(storage: &WalletStorage, arguments: &[String]) -> Result<(), String> {
+    let (name, options) = parse_mnemonic_options(arguments, false)?;
+    let record = storage.load(name)?;
+    if !record.watch_only() {
+        return Err("wallet already has signing material".to_owned());
+    }
+    let mnemonic = prompt_hidden("Mnemonic phrase: ")?;
+    let mnemonic_passphrase = prompt_hidden("BIP39 passphrase (optional; leave empty if none): ")?;
+    let passcode = prompt_app_passcode(storage)?;
+    let updated = wallet_ops::attach_mnemonic_record(
+        &record,
+        &mnemonic,
+        &mnemonic_passphrase,
+        options.index,
+        options.language.as_deref(),
+        &passcode,
+    )?;
+    storage.save(&updated, true)?;
+    println!("Attached matching mnemonic signer to watch-only wallet \"{}\"", updated.name);
+    println!("Address: {}", updated.address);
+    Ok(())
+}
+
+fn wallet_detach_signer(storage: &WalletStorage, name: &str) -> Result<(), String> {
+    let record = storage.load(name)?;
+    if record.watch_only() {
+        return Err("wallet is already watch-only".to_owned());
+    }
+    print!(
+        "Remove local signing material from wallet \"{name}\" and keep it watch-only? [y/N] "
+    );
+    io::stdout()
+        .flush()
+        .map_err(|error| format!("unable to write prompt: {error}"))?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| format!("unable to read confirmation: {error}"))?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        return Ok(());
+    }
+    let passcode = prompt_hidden("Fresnica passcode: ")?;
+    let updated = wallet_ops::detach_signer_record(&record, &passcode)?;
+    storage.save(&updated, true)?;
+    println!("Wallet \"{}\" is now watch-only", updated.name);
+    println!("Address: {}", updated.address);
     Ok(())
 }
 

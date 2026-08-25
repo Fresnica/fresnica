@@ -285,6 +285,8 @@ When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is
 
 The process protocol is the first verification transport, not a requirement for every future client. The native Rust CLI consumes `fresnica-sdk` directly for account identity, wallet protection, Reveal/Export and routine passcode signing while retaining only low-level Rust Core transaction/XDR helpers where no SDK abstraction is needed. Mobile and desktop clients use the same SDK semantics through their appropriate native binding/package layer.
 
+The CLI also exercises the watch-only signer transition directly: `attach-secret` / `attach-mnemonic` supply the existing Classic G address as `expected_signer_public_key`, and `detach-signer` removes local protected signer capability without changing the account identity.
+
 OS-specific system-auth work still belongs to the client that releases a `WalletUnlockKey`; it is not implemented in Core or in the machine protocol.
 
 See [`docs/core-client-protocol.md`](core-client-protocol.md).

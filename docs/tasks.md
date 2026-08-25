@@ -82,6 +82,7 @@
 - [x] Core-side passcode re-protection
 - [x] External Ed25519 prepare/apply signing boundary
 - [x] Native Rust CLI direct SDK/Core reference client
+- [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
 
 ## Universal / Native SDK
 
