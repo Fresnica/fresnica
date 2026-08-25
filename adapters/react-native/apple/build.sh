@@ -107,28 +107,6 @@ find_react_native_root() {
   return 1
 }
 
-link_flat_header_namespace() {
-  source_root="$1"
-  namespace="$2"
-  namespace_root="$BUILD_DIR/react-source-headers/$namespace"
-  mkdir -p "$namespace_root"
-
-  while IFS= read -r header; do
-    destination="$namespace_root/$(basename "$header")"
-    if [ -e "$destination" ] || [ -L "$destination" ]; then
-      existing="$(readlink "$destination" 2>/dev/null || true)"
-      if [ "$existing" != "$header" ]; then
-        echo "ambiguous React Native header basename: $(basename "$header")" >&2
-        echo "  first: $existing" >&2
-        echo "  next:  $header" >&2
-        exit 1
-      fi
-      continue
-    fi
-    ln -s "$header" "$destination"
-  done < <(find "$source_root" -type f -name '*.h' -print | sort)
-}
-
 REACT_BRIDGE_HEADER="$(find "$PODS_DIR" \
   \( -type f -o -type l \) \
   -path '*/React/RCTBridgeModule.h' \
@@ -143,29 +121,23 @@ else
     echo "unable to locate React/RCTBridgeModule.h under $PODS_DIR or react-native under node_modules" >&2
     exit 1
   fi
-
-  # React-Core exposes Base headers below the virtual React/ namespace. Xcode/CocoaPods
-  # normally provides that mapping through header maps or a generated symlink farm.
-  # A standalone clang invocation has neither, so mirror the Base header namespace
-  # needed by RCTBridgeModule in the temporary build directory without modifying
-  # the consumer installation.
-  link_flat_header_namespace "$REACT_NATIVE_ROOT/React/Base" "React"
-
-  REACT_SOURCE_BRIDGE="$REACT_NATIVE_ROOT/React/Base/RCTBridgeModule.h"
-  if grep -q '<RCTDeprecation/RCTDeprecation.h>' "$REACT_SOURCE_BRIDGE"; then
-    RCT_DEPRECATION_HEADER="$(find "$REACT_NATIVE_ROOT" \
-      \( -type f -o -type l \) \
-      -path '*/RCTDeprecation/RCTDeprecation.h' \
-      -print -quit)"
-    if [ -z "$RCT_DEPRECATION_HEADER" ]; then
-      echo "unable to locate RCTDeprecation/RCTDeprecation.h under $REACT_NATIVE_ROOT" >&2
-      exit 1
-    fi
-    link_flat_header_namespace "$(dirname "$RCT_DEPRECATION_HEADER")" "RCTDeprecation"
+  if ! command -v ruby >/dev/null 2>&1; then
+    echo "ruby is required to reconstruct CocoaPods React Native source header namespaces" >&2
+    exit 1
   fi
 
-  react_header_flags+=("-I" "$BUILD_DIR/react-source-headers")
-  REACT_BRIDGE_HEADER="$REACT_SOURCE_BRIDGE"
+  POD_HEADER_SHIM="$SCRIPT_DIR/pod-header-shim.rb"
+  if [ ! -s "$POD_HEADER_SHIM" ]; then
+    echo "missing CocoaPods header resolver: $POD_HEADER_SHIM" >&2
+    exit 1
+  fi
+
+  while IFS= read -r header_root; do
+    [ -n "$header_root" ] && react_header_flags+=("-I" "$header_root")
+  done < <(ruby "$POD_HEADER_SHIM" \
+    "$REACT_NATIVE_ROOT" \
+    "$PODS_DIR" \
+    "$BUILD_DIR/react-source-headers")
 fi
 
 compile_slice() {

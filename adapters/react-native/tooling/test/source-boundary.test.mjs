@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -81,9 +83,66 @@ test('Apple binary build compiles framework glue without absorbing Native SDK so
   assert.match(build, /React\/RCTBridgeModule\.h/, 'React Native build must discover the actual RCTBridgeModule header');
   assert.match(build, /REACT_BRIDGE_ROOT/, 'React Native build must derive the include root from a CocoaPods bridge header');
   assert.match(build, /node_modules\/react-native/, 'React Native build must support source headers when CocoaPods does not expose a React header tree');
-  assert.match(build, /REACT_NATIVE_ROOT\/React\/Base/, 'React Native source fallback must mirror the React Base header namespace used by RCTBridgeModule');
-  assert.match(build, /react-source-headers/, 'React Native source fallback must create an isolated virtual header namespace');
-  assert.match(build, /RCTDeprecation/, 'React Native source fallback must include the RCTDeprecation namespace used by current bridge headers');
+  assert.match(build, /REACT_NATIVE_ROOT/, 'React Native build must locate the installed source root when CocoaPods headers are absent');
+  assert.match(build, /pod-header-shim\.rb/, 'React Native source fallback must follow evaluated CocoaPods podspec metadata');
+  assert.match(build, /react-source-headers/, 'React Native source fallback must create isolated virtual header roots');
+  assert.doesNotMatch(build, /RCTDeprecation_HEADER|link_flat_header_namespace/, 'React Native source fallback must not hardcode transitive header locations');
+});
+
+
+test('Apple podspec header shim follows CocoaPods namespaces instead of React Native source paths', async (t) => {
+  const ruby = spawnSync('ruby', ['--version'], { encoding: 'utf8' });
+  if (ruby.status !== 0) {
+    t.skip('ruby is unavailable');
+    return;
+  }
+
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'fresnica-rn-podspec-'));
+  const reactNative = path.join(temp, 'node_modules/react-native');
+  const pods = path.join(temp, 'ios/Pods');
+  const localSpecs = path.join(pods, 'Local Podspecs');
+  const out = path.join(temp, 'headers');
+
+  await mkdir(path.join(reactNative, 'React/Base'), { recursive: true });
+  await mkdir(path.join(reactNative, 'ReactApple/Libraries/RCTFoundation/RCTDeprecation/Exported'), { recursive: true });
+  await mkdir(path.join(reactNative, 'React/Fabric'), { recursive: true });
+  await mkdir(localSpecs, { recursive: true });
+
+  const bridge = path.join(reactNative, 'React/Base/RCTBridgeModule.h');
+  const deprecation = path.join(reactNative, 'ReactApple/Libraries/RCTFoundation/RCTDeprecation/Exported/RCTDeprecation.h');
+  const fabric = path.join(reactNative, 'React/Fabric/RCTSurfaceTouchHandler.h');
+  await writeFile(bridge, '#import <RCTDeprecation/RCTDeprecation.h>\n');
+  await writeFile(deprecation, '#pragma once\n');
+  await writeFile(fabric, '#pragma once\n');
+  await writeFile(path.join(reactNative, 'React-Core.podspec'), '# source root marker\n');
+  await writeFile(path.join(reactNative, 'React-RCTFabric.podspec'), '# source root marker\n');
+  await writeFile(path.join(reactNative, 'ReactApple/Libraries/RCTFoundation/RCTDeprecation/RCTDeprecation.podspec'), '# source root marker\n');
+
+  await writeFile(path.join(localSpecs, 'React-Core.podspec.json'), JSON.stringify({
+    name: 'React-Core',
+    header_dir: 'React',
+    source_files: ['React/Base/*.{h,m}'],
+  }));
+  await writeFile(path.join(localSpecs, 'RCTDeprecation.podspec.json'), JSON.stringify({
+    name: 'RCTDeprecation',
+    source_files: ['Exported/*.h', 'RCTDeprecation.m'],
+  }));
+  await writeFile(path.join(localSpecs, 'React-RCTFabric.podspec.json'), JSON.stringify({
+    name: 'React-RCTFabric',
+    header_dir: 'React',
+    header_mappings_dir: 'React/Fabric',
+    source_files: ['React/Fabric/*.h'],
+  }));
+
+  const helper = path.join(ADAPTER_DIR, 'apple/pod-header-shim.rb');
+  const result = spawnSync('ruby', [helper, reactNative, pods, out], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+
+  assert.equal(await realpath(path.join(out, 'React-Core/React/RCTBridgeModule.h')), await realpath(bridge));
+  assert.equal(await realpath(path.join(out, 'RCTDeprecation/RCTDeprecation/RCTDeprecation.h')), await realpath(deprecation));
+  assert.equal(await realpath(path.join(out, 'React-RCTFabric/React/RCTSurfaceTouchHandler.h')), await realpath(fabric));
+  const roots = result.stdout.trim().split('\n');
+  assert.match(roots[0], /React-Core$/, 'bridge-owning include root must be searched first');
 });
 
 
