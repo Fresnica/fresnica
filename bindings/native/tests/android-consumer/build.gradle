@@ -1,5 +1,5 @@
 plugins {
-    id 'com.android.library' version '7.4.0'
+    id 'com.android.application' version '7.4.0'
     id 'org.jetbrains.kotlin.android' version '1.9.24'
 }
 
@@ -13,7 +13,11 @@ android {
     compileSdk 34
 
     defaultConfig {
+        applicationId 'com.fresnica.sdk.smoke'
         minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
     }
 
     compileOptions {
