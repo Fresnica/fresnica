@@ -107,8 +107,9 @@
 - [x] Mobile watch-only upgrade/downgrade lifecycle
 - [x] Realm-ready Account / Signer / reference schemas and WalletStore adapter
 - [x] Mobile staged/atomic app-passcode rotation
+- [x] Protected account secret/mnemonic import and mnemonic generation provisioning
+- [x] Explicit mobile signer Reveal / Export product flow
 - [ ] Wire the host application's Realm instance and migrations to `RealmWalletStore`
-- [ ] Explicit mobile Reveal / Export product flow
 
 ## Quality
 
