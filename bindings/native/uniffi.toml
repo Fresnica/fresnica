@@ -1,0 +1,8 @@
+[bindings.kotlin]
+package_name = "com.fresnica.sdk"
+android = true
+immutable_records = true
+
+[bindings.swift]
+module_name = "FresnicaSDK"
+ffi_module_name = "FresnicaSDKFFI"
