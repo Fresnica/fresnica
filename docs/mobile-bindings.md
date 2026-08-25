@@ -180,3 +180,9 @@ Before platform UI integration, CI should prove:
 - generated APIs contain the expected Core object, account/signer records, stable error surface, and external signing operations.
 
 Later platform packaging PRs should add Android ABI builds and Apple static/XCFramework builds rather than weakening this host-level conformance gate.
+
+## React Native framework upgrades
+
+React Native itself is a replaceable host framework layer. Upgrading it must not trigger redesign of Core, signer semantics, protected envelopes, `WalletUnlockKey`, Realm Account/Signer semantics, or the UniFFI facade merely for framework convenience.
+
+All React Native version upgrades must follow [`react-native-upgrade-playbook.md`](react-native-upgrade-playbook.md). The playbook defines the allowed migration surface, New Architecture/TurboModule transition rules, security invariants, CI matrix, acceptance criteria, and rollback criteria.
