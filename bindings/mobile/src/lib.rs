@@ -376,9 +376,7 @@ impl From<SdkError> for MobileCoreError {
     }
 }
 
-fn mobile_protected_signer(
-    protected: SdkProtectedSoftwareSigner,
-) -> MobileProtectedSoftwareSigner {
+fn mobile_protected_signer(protected: SdkProtectedSoftwareSigner) -> MobileProtectedSoftwareSigner {
     MobileProtectedSoftwareSigner {
         signer_public_key: protected.signer_public_key,
         envelope_json: protected.envelope_json,
