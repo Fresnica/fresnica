@@ -67,43 +67,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build Apple Native SDK package
-        run: bash bindings/native/scripts/build-apple.sh
-      - name: Validate Apple Native SDK package
-        run: |
-          test -s bindings/native/build/apple/generated-swift/FresnicaSDK.swift
-          test -s bindings/native/build/apple/headers/FresnicaSDKFFI.h
-          test -s bindings/native/build/apple/headers/module.modulemap
-          test -d bindings/native/build/apple/FresnicaSDKFFI.xcframework
-          test -d bindings/native/build/apple/FresnicaSDK.xcframework
-          test -s bindings/native/build/apple/platform-security/FresnicaWalletUnlockKeyStore.swift
-          test -s bindings/native/build/apple/platform-security/FresnicaSignerAuthorization.swift
-          SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-          xcrun --sdk iphonesimulator swiftc \
-            -target arm64-apple-ios13.4-simulator \
-            -sdk "$SDK" \
-            -I bindings/native/build/apple/headers \
-            -typecheck \
-            bindings/native/build/apple/generated-swift/FresnicaSDK.swift \
-            bindings/native/build/apple/platform-security/FresnicaWalletUnlockKeyStore.swift \
-            bindings/native/build/apple/platform-security/FresnicaSignerAuthorization.swift
-          SDK_FRAMEWORK="$(find bindings/native/build/apple/FresnicaSDK.xcframework -type d -name FresnicaSDK.framework -path '*simulator*' -print -quit)"
-          FFI_HEADERS="$(find bindings/native/build/apple/FresnicaSDKFFI.xcframework -type d -name Headers -path '*simulator*' -print -quit)"
-          test -n "$SDK_FRAMEWORK"
-          test -n "$FFI_HEADERS"
-          test -d "$SDK_FRAMEWORK/Modules/FresnicaSDK.swiftmodule"
-          cat > /tmp/fresnica-native-sdk-consumer.swift <<'SWIFT'
-          import FresnicaSDK
-          let api: FresnicaSdkApiProtocol = FresnicaSdkApi()
-          _ = api.version()
-          SWIFT
-          xcrun --sdk iphonesimulator swiftc \
-            -target arm64-apple-ios13.4-simulator \
-            -sdk "$SDK" \
-            -F "$(dirname "$SDK_FRAMEWORK")" \
-            -I "$FFI_HEADERS" \
-            -typecheck /tmp/fresnica-native-sdk-consumer.swift
-          ! grep -R -q -E 'ReactNative|RCTBridge|Flutter' bindings/native/build/apple/FresnicaSDK.xcframework
+      - name: Build and validate Apple Native SDK package
+        run: bash bindings/native/scripts/validate-apple-local.sh
       - uses: actions/upload-artifact@v4
         with:
           name: fresnica-native-sdk-apple

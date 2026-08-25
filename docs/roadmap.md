@@ -118,26 +118,26 @@ The shared contract includes wallet/signing semantics, DTOs, errors, API version
 
 ### 4.2 Native SDK binaries - IN PROGRESS
 
-The generalized `fresnica-native-sdk` UniFFI layer, Android AAR packaging and Apple Rust-FFI package are implemented. Android/Apple package paths also carry reusable native signer-authorization helpers. The Apple build now additionally archives those SDK-owned Swift pieces into an importable `FresnicaSDK.xcframework`; that new packaging step still needs a real macOS/Xcode validation run before 4.2 is called complete. Fresnica should publish **compiled platform SDK content**, not require application projects to rebuild Rust/UniFFI during ordinary builds.
+The generalized `fresnica-native-sdk` UniFFI layer, Android AAR packaging and Apple Rust-FFI package are implemented. Android/Apple package paths also carry reusable native signer-authorization helpers. The Apple build additionally archives those SDK-owned Swift pieces into an importable `FresnicaSDK.xcframework`. On 2026-08-25 the complete `validate-apple-local.sh` flow passed on a real macOS/Xcode toolchain, including device/simulator Rust libraries, both XCFrameworks, generated Swift/security typechecking, and an independent consumer `import FresnicaSDK` check. Fresnica should publish **compiled platform SDK content**, not require application projects to rebuild Rust/UniFFI during ordinary builds.
 
 Current native outputs:
 
 ```text
 Android  -> complete direct-consumer AAR
-Apple    -> FFI XCFramework + compiled `FresnicaSDK.xcframework` build path (macOS validation pending)
+Apple    -> validated FFI XCFramework + compiled `FresnicaSDK.xcframework` direct-consumer package
 ```
 
-The Apple direct-consumer module build path is implemented, but the resulting `FresnicaSDK.xcframework` still needs real macOS/Xcode validation before the Native SDK binary boundary is called complete. The React Native one-time Apple build path now compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that module; it does not absorb SDK-owned Swift/security source. Both new Apple XCFramework paths still require a real Xcode validation run.
+The Apple direct-consumer module is now validated on real macOS/Xcode. The React Native one-time Apple build path compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that validated module; it does not absorb SDK-owned Swift/security source. The remaining Apple adapter checkpoint is to run that adapter build against a real React Native consumer project with CocoaPods headers.
 
 Desktop consumer surfaces are now defined in `desktop-sdk-contract.md`:
 
 ```text
 Rust desktop      -> consume `fresnica-sdk` directly
-macOS Swift       -> extend compiled `FresnicaSDK` after current Apple validation
+macOS Swift       -> extend the now-validated compiled `FresnicaSDK` packaging
 Windows/Linux     -> select an explicit supported consumer language/framework before packaging
 ```
 
-Android native applications may consume the AAR directly. The Apple direct-consumer packaging path is implemented and awaits real Xcode validation. Fresnica will not publish a bare UniFFI `.dll`/`.so` as a language-neutral desktop SDK or treat UniFFI's internal C-compatible layer as a stable public C ABI.
+Android native applications may consume the AAR directly. The Apple iOS direct-consumer packaging path has passed real Xcode validation. Fresnica will not publish a bare UniFFI `.dll`/`.so` as a language-neutral desktop SDK or treat UniFFI's internal C-compatible layer as a stable public C ABI.
 
 Platform-specific signer authorization remains outside the pure Core contract, for example:
 
@@ -161,7 +161,7 @@ Validated on macOS with the Rust + `wasm-bindgen` toolchain via `bindings/wasm/s
 - generated JS/TypeScript surface validation;
 - Node-hosted runtime conformance against shared transaction vectors.
 
-The passkey architecture is now defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary now lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally, deliberately delegates only the safe upstream `signAndSubmit` path, and includes a localhost browser smoke harness for create/fund/discover/native-XLM transfer. The smoke path now captures the exact public relayer `func/auth` XDR for a confirmed transfer and independently verifies the Protocol-27 digest, bound context-rule IDs, WebAuthn challenge and P-256 signature before allowing fixture export. The remaining checkpoint is to execute that path with real WebAuthn/Testnet and check in the resulting real auth-XDR fixture; this is not an unlock-key API added to WASM.
+The passkey architecture is defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally and deliberately delegates only the safe upstream `signAndSubmit` path. On 2026-08-25 the localhost browser harness completed a real WebAuthn/Testnet create/connect/sign-and-submit flow; the confirmed transaction's public relayer `func/auth` XDR was independently verified for the Protocol-27 digest, bound context-rule IDs, WebAuthn challenge, UP/UV flags and P-256 signature, then checked in as `spec/test-vectors/smart-account-auth-v1.json`. This remains a contract-account provider boundary, not an unlock-key API added to WASM.
 
 Web should normally consume the WASM SDK directly. Add a web-framework adapter only if a framework creates a real integration need.
 
@@ -184,11 +184,11 @@ normal application builds
     -> do not rebuild adapter source
 ```
 
-React Native is the first adapter target. Canonical Android/Apple adapter source now targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The new Apple Native SDK and adapter XCFramework paths remain pending real macOS/Xcode validation as described in 4.2.
+React Native is the first adapter target. Canonical Android/Apple adapter source targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The Apple Native SDK XCFramework path is now validated on real macOS/Xcode; only the static React Native adapter XCFramework still needs validation against a real React Native consumer project.
 
 Planned adapter boundary:
 
-- React Native: validate the Apple Native SDK + adapter XCFramework path on macOS/Xcode, then treat Android/Apple one-time adapter builds as the canonical reference
+- React Native: validate the static Apple adapter XCFramework against a real React Native consumer, then treat Android/Apple one-time adapter builds as the canonical reference
 - Flutter Mobile/Desktop: reserve and document the same contract; implement when needed
 - Desktop frameworks such as Electron/Node, Qt or .NET: reserve the extension boundary; implement based on product choice
 
@@ -207,7 +207,7 @@ The universal SDK work should provide:
 
 The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
-Native SDK release automation is intentionally not enabled yet: the Apple direct-consumer binary package must pass the real macOS/Xcode validation gate first. The existing `mobile-sdk-v0.1.0` release workflow remains a transitional compatibility release path, not the template for the generalized Native SDK.
+The Apple direct-consumer validation gate is now cleared. Generalized Native SDK release automation is still intentionally disabled until its explicit version/tag/artifact policy is defined; do not turn the existing transitional `mobile-sdk-v0.1.0` release workflow into the generalized release path by accident.
 
 ## Phase 5 - Wallet Functional Foundation and Standards
 
@@ -285,13 +285,14 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. Validate `FresnicaSDK.xcframework` and the Apple React Native adapter on a real macOS/Xcode toolchain; only after that validation add Native SDK release automation.
-2. Run the pinned `smart-account-kit` provider through a real browser/WebAuthn + Protocol 27 Testnet create/connect/sign-and-submit flow, download the smoke page's verified auth-XDR fixture, verify it again with `npm run fixture:verify -- <file>`, then check the real fixture into `spec/test-vectors/`.
+1. Validate the static `FresnicaRNAdapter.xcframework` against a real React Native consumer project; the underlying `FresnicaSDK.xcframework` iOS package is now proven on real macOS/Xcode.
+2. Define the generalized Native SDK release version/tag/artifact policy now that the Apple direct-consumer validation gate is cleared; keep the release trigger explicit rather than restoring heavy `main` CI.
 3. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
-4. Extend the validated Apple Native SDK package to macOS Swift after the iOS package is proven. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
-5. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
-6. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
-7. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
+4. Extend the validated Apple Native SDK package to macOS Swift. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
+5. Treat the checked-in real smart-account Testnet vector as the provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile integration begins.
+6. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
+7. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
+8. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
 
 ## Non-negotiable Architecture Rules
 
