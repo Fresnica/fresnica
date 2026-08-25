@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fresnica_core::AccountIdentity;
+use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde::{Deserialize, Serialize};
 
 use crate::storage::WalletStorage;
@@ -213,9 +213,10 @@ fn normalize_contact(name: &str, address: &str, memo: Option<&str>) -> Result<Co
         return Err("Contact name cannot be empty".to_owned());
     }
     let address = address.trim();
-    let identity = AccountIdentity::parse(address)
+    let identity = FresnicaSdk::new()
+        .parse_account(address.to_owned())
         .map_err(|_| "Contact address is not a valid Stellar G... account".to_owned())?;
-    if !identity.is_classic() || identity.address() != address {
+    if identity.kind != SdkAccountKind::Classic || identity.address != address {
         return Err("Contact address is not a valid Stellar G... account".to_owned());
     }
     let memo = memo

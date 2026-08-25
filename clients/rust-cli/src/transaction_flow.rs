@@ -8,9 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fresnica_core::{
-    derive_verified_unlock_key, sign_protected_transaction_envelope, transaction_envelope_xdr,
-    transaction_hash, ProtectionRegistry,
+    parse_transaction_envelope_xdr, transaction_envelope_xdr, transaction_hash,
 };
+use fresnica_sdk::{FresnicaSdk, SdkErrorCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stellar_xdr::{
@@ -162,25 +162,25 @@ pub fn sign_and_submit(
         .secret
         .as_ref()
         .ok_or_else(|| "wallet has no protected signing material".to_owned())?;
-    let registry = ProtectionRegistry::new();
-    let unlock_key = derive_verified_unlock_key(
-        &registry,
-        protected,
-        &passcode,
-        &record.address,
-    )
-    .map_err(|error| format!("Unable to unlock wallet: {error}"))?;
+    let protected_json = serde_json::to_string(protected)
+        .map_err(|error| format!("Unable to encode protected signing material: {error}"))?;
     let network_passphrase = network_passphrase(network)?;
-    sign_protected_transaction_envelope(
-        &registry,
-        protected,
-        &unlock_key,
-        &record.address,
-        envelope,
-        network_passphrase,
-    )
-    .map_err(|error| format!("Unable to sign transaction: {error}"))?;
-    drop(unlock_key);
+    let unsigned_xdr = transaction_envelope_xdr(envelope)
+        .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
+    let signed_xdr = FresnicaSdk::new()
+        .sign_transaction_xdr_with_passcode(
+            protected_json,
+            passcode.as_str().to_owned(),
+            record.address.clone(),
+            unsigned_xdr,
+            network_passphrase.to_owned(),
+        )
+        .map_err(|error| match error.code {
+            SdkErrorCode::InvalidPasscode => "Unable to unlock wallet: invalid Fresnica passcode".to_owned(),
+            _ => format!("Unable to sign transaction: {error}"),
+        })?;
+    *envelope = parse_transaction_envelope_xdr(&signed_xdr)
+        .map_err(|error| format!("Unable to decode transaction returned by Fresnica SDK: {error}"))?;
     drop(passcode);
 
     let tx_hash = transaction_hash(envelope, network_passphrase)

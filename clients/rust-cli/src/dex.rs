@@ -3,7 +3,7 @@ mod history;
 #[path = "dex_write.rs"]
 mod write;
 
-use fresnica_core::AccountIdentity;
+use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Value;
 
 use crate::horizon::{MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
@@ -222,14 +222,15 @@ impl ClassicAsset {
         {
             return Err("Asset code must be 1 to 12 ASCII alphanumeric characters".to_owned());
         }
-        let identity = AccountIdentity::parse(issuer)
+        let identity = FresnicaSdk::new()
+            .parse_account(issuer.to_owned())
             .map_err(|_| "invalid Stellar asset issuer".to_owned())?;
-        if !identity.is_classic() {
+        if identity.kind != SdkAccountKind::Classic {
             return Err("asset issuer must be a Classic G address".to_owned());
         }
         Ok(Self::Issued {
             code: code.to_owned(),
-            issuer: identity.address().to_owned(),
+            issuer: identity.address,
         })
     }
 

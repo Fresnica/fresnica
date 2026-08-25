@@ -14,9 +14,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use fresnica_core::{AccountIdentity, ExportedSigningMaterial};
+use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Map;
 use storage::{WalletRecord, WalletStorage};
+use wallet_ops::RevealedSigningMaterial;
 use zeroize::Zeroizing;
 
 const HELP: &str = r#"Fresnica native Rust CLI
@@ -39,7 +40,7 @@ Network commands:
   account                       Show current Horizon account state
   balance                       Show current account balances and liabilities
   history                       Show newest Horizon operations (default 20, max 200)
-  send                          Review, sign with Rust Core, and submit a payment
+  send                          Review, sign through Fresnica SDK/Core, and submit a payment
   trust                         Add, change, or remove an issued-asset trustline
   dex                           Read and trade on the Stellar DEX
 
@@ -62,10 +63,11 @@ Wallet commands:
   restore PATH [--name NAME]
   delete NAME
 
-The native client links Fresnica Rust Core directly. It uses the same wallet files
-and version-1 encrypted backup format as the Python reference client. All local
-software wallets share one Fresnica passcode while retaining independent Core
-salt/nonce-derived encryption keys.
+The native client uses the platform-neutral Fresnica SDK for wallet protection and
+signing, while low-level Stellar/XDR primitives remain in Rust Core. It uses the
+same wallet files and version-1 encrypted backup format as the Python reference
+client. All local software wallets share one Fresnica passcode while retaining
+independent Core salt/nonce-derived encryption keys.
 "#;
 
 fn main() {
@@ -308,14 +310,15 @@ fn wallet_import_watch(
     if name.trim().is_empty() {
         return Err("wallet name cannot be empty".to_owned());
     }
-    let identity = AccountIdentity::parse(address)
+    let identity = FresnicaSdk::new()
+        .parse_account(address.to_owned())
         .map_err(|_| "invalid Stellar G address".to_owned())?;
-    if !identity.is_classic() {
+    if identity.kind != SdkAccountKind::Classic {
         return Err("watch-only wallet requires a Classic G address".to_owned());
     }
     let record = WalletRecord {
         name: name.to_owned(),
-        address: identity.address().to_owned(),
+        address: identity.address,
         wallet_type: "watch-only".to_owned(),
         network: network.to_owned(),
         secret: None,
@@ -334,11 +337,11 @@ fn wallet_reveal(storage: &WalletStorage, name: Option<&str>) -> Result<(), Stri
     let passcode = prompt_hidden("Fresnica passcode: ")?;
     let material = wallet_ops::reveal_record(&record, &passcode)?;
     match material {
-        ExportedSigningMaterial::Secret { secret } => {
+        RevealedSigningMaterial::Secret { secret } => {
             println!("Wallet: {}", record.name);
             println!("Stellar secret: {}", secret.as_str());
         }
-        ExportedSigningMaterial::Mnemonic {
+        RevealedSigningMaterial::Mnemonic {
             mnemonic,
             mnemonic_passphrase,
             index,

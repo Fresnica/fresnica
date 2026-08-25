@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fresnica_core::AccountIdentity;
+use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -209,9 +209,10 @@ pub fn validate_record(record: &WalletRecord) -> Result<(), String> {
     if !matches!(record.network.as_str(), "mainnet" | "testnet") {
         return Err(format!("unknown network: {}", record.network));
     }
-    let identity = AccountIdentity::parse(&record.address)
+    let identity = FresnicaSdk::new()
+        .parse_account(record.address.clone())
         .map_err(|_| "invalid Stellar wallet address".to_owned())?;
-    if !identity.is_classic() || identity.address() != record.address {
+    if identity.kind != SdkAccountKind::Classic || identity.address != record.address {
         return Err("wallet address must be a canonical Classic G address".to_owned());
     }
     if record.watch_only() {
