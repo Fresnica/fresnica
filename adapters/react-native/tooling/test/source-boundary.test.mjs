@@ -79,7 +79,11 @@ test('Apple binary build compiles framework glue without absorbing Native SDK so
   assert.match(build, /! -path '\*macos\*'/, 'iOS device lookup must exclude the macOS Native SDK slice');
   assert.match(build, /Headers\/Private/, 'React Native build must include private CocoaPods header roots when present');
   assert.match(build, /React\/RCTBridgeModule\.h/, 'React Native build must discover the actual RCTBridgeModule header');
-  assert.match(build, /REACT_BRIDGE_ROOT/, 'React Native build must derive the include root from the discovered bridge header');
+  assert.match(build, /REACT_BRIDGE_ROOT/, 'React Native build must derive the include root from a CocoaPods bridge header');
+  assert.match(build, /node_modules\/react-native/, 'React Native build must support source headers when CocoaPods does not expose a React header tree');
+  assert.match(build, /REACT_NATIVE_ROOT\/React\/Base/, 'React Native source fallback must mirror the React Base header namespace used by RCTBridgeModule');
+  assert.match(build, /react-source-headers/, 'React Native source fallback must create an isolated virtual header namespace');
+  assert.match(build, /RCTDeprecation/, 'React Native source fallback must include the RCTDeprecation namespace used by current bridge headers');
 });
 
 
