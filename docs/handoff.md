@@ -88,11 +88,11 @@ Current platform outputs:
 
 Desktop status:
 
-- macOS: `FresnicaSDK.xcframework` / `FresnicaSDKFFI.xcframework` now include universal macOS slices and the macOS Data Protection Keychain path; real-Xcode validation is still pending
+- macOS: `FresnicaSDK.xcframework` / `FresnicaSDKFFI.xcframework` include universal macOS slices and the macOS Data Protection Keychain path; the expanded Apple validator passed on real macOS/Xcode on 2026-08-25
 - Windows: compiled native library/package waits for a defined direct-consumer language/API surface
 - Linux: compiled native library/package waits for a defined direct-consumer language/API surface
 
-Android native applications can use the AAR directly without React Native/Flutter/etc. The Apple iOS direct-consumer package path is validated on real macOS/Xcode; macOS is implemented but not yet called validated. Do not describe a bare desktop UniFFI `.dll`/`.so` as a complete public SDK until its supported direct-consumer language/API surface is defined.
+Android native applications can use the AAR directly without React Native/Flutter/etc. The Apple iOS and macOS direct-consumer package paths are validated on real macOS/Xcode. Do not describe a bare desktop UniFFI `.dll`/`.so` as a complete public SDK until its supported direct-consumer language/API surface is defined.
 
 ### WASM / Web rule
 
@@ -241,7 +241,7 @@ Desktop is no longer a separate architecture problem. It should use the same uni
 The direct-consumer contract is now explicit in `desktop-sdk-contract.md`:
 
 - Rust desktop clients consume `fresnica-sdk` directly;
-- macOS Swift now reuses the compiled `FresnicaSDK` packaging; the universal macOS slices need real-Xcode validation before release;
+- macOS Swift reuses the compiled `FresnicaSDK` packaging; the universal macOS slices passed real-Xcode validation on 2026-08-25;
 - Windows/Linux non-Rust packages are product-language driven rather than declared as generic `.dll`/`.so` SDKs;
 - UniFFI's internal C-compatible layer is not a stable Fresnica public C ABI.
 
@@ -372,11 +372,10 @@ Real-browser validation exposed upstream `smart-account-kit` 0.6.2 requesting We
 
 The next coherent implementation batches are:
 
-1. **Validate the remaining Apple RN adapter path**: `FresnicaSDK.xcframework` iOS is proven on real macOS/Xcode; next build the static `FresnicaRNAdapter.xcframework` against a real React Native consumer and keep SDK-owned Swift/security code out of framework adapters.
-2. **Validate macOS Native SDK slices**: the shared Apple build now produces macOS Rust/FFI + compiled Swift slices and a macOS Data Protection Keychain path; run the expanded `validate-apple-local.sh` on real Xcode before release.
-3. **Keep the Native SDK release gate explicit**: `native-sdk-release.md` and marker-gated `native-sdk-v*` automation exist, but no release marker is present yet. Ordinary `main` pushes remain light.
-4. **Keep the RN adapter contract stable**: Android and Apple have one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
-5. **WASM/Web + smart account**: keep the real Testnet auth vector as the provider conformance baseline; implement a platform-native Mobile passkey provider only when Mobile integration starts rather than adding passkey-derived unlock-key APIs to WASM.
+1. **Validate the remaining Apple RN adapter path**: `FresnicaSDK.xcframework` iOS + macOS is proven on real macOS/Xcode; next build the static `FresnicaRNAdapter.xcframework` against a real React Native consumer and keep SDK-owned Swift/security code out of framework adapters.
+2. **Keep Native SDK release explicit**: the macOS validation gate is cleared and marker-gated `native-sdk-v*` automation exists, but no release marker is present yet. Create one only when the version/artifact set is intentionally ready to publish; ordinary `main` pushes remain light.
+3. **Keep the RN adapter contract stable**: Android and Apple have one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
+4. **WASM/Web + smart account**: keep the real Testnet auth vector as the provider conformance baseline; implement a platform-native Mobile passkey provider only when Mobile integration starts rather than adding passkey-derived unlock-key APIs to WASM.
 6. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
 7. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
 8. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.

@@ -134,11 +134,11 @@ Desktop consumer surfaces are now defined in `desktop-sdk-contract.md`:
 ```text
 Rust desktop      -> consume `fresnica-sdk` directly
 macOS Swift       -> same `FresnicaSDK` / `FresnicaSDKFFI` XCFrameworks as iOS
-                    (implementation present; real-Xcode validation pending)
+                    (implemented and validated on real macOS/Xcode, 2026-08-25)
 Windows/Linux     -> select an explicit supported consumer language/framework before packaging
 ```
 
-Android native applications may consume the AAR directly. The Apple iOS direct-consumer packaging path has passed real Xcode validation. Fresnica will not publish a bare UniFFI `.dll`/`.so` as a language-neutral desktop SDK or treat UniFFI's internal C-compatible layer as a stable public C ABI.
+Android native applications may consume the AAR directly. The Apple iOS and macOS direct-consumer packaging paths have passed real Xcode validation. Fresnica will not publish a bare UniFFI `.dll`/`.so` as a language-neutral desktop SDK or treat UniFFI's internal C-compatible layer as a stable public C ABI.
 
 Platform-specific signer authorization remains outside the pure Core contract, for example:
 
@@ -185,7 +185,7 @@ normal application builds
     -> do not rebuild adapter source
 ```
 
-React Native is the first adapter target. Canonical Android/Apple adapter source targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The Apple Native SDK XCFramework path is now validated on real macOS/Xcode; only the static React Native adapter XCFramework still needs validation against a real React Native consumer project.
+React Native is the first adapter target. Canonical Android/Apple adapter source targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The Apple Native SDK XCFramework path, including the shared iOS + macOS slices, is now validated on real macOS/Xcode; only the static React Native adapter XCFramework still needs validation against a real React Native consumer project.
 
 Planned adapter boundary:
 
@@ -208,7 +208,7 @@ The universal SDK work should provide:
 
 The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
-The generalized Native SDK release contract is now defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. No Native SDK release marker has been added yet, so ordinary `main` pushes still cannot trigger heavy release packaging. The transitional `mobile-sdk-v0.1.0` workflow remains separate. The first generalized release remains gated on validating the new macOS Apple slices and deciding to add an explicit release marker.
+The generalized Native SDK release contract is now defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. No Native SDK release marker has been added yet, so ordinary `main` pushes still cannot trigger heavy release packaging. The transitional `mobile-sdk-v0.1.0` workflow remains separate. The macOS Apple-slice validation gate has passed. The first generalized release now remains gated only on an explicit decision to add a release marker and run the release workflow.
 
 ## Phase 5 - Wallet Functional Foundation and Standards
 
@@ -286,10 +286,10 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. Validate the static `FresnicaRNAdapter.xcframework` against a real React Native consumer project; the underlying `FresnicaSDK.xcframework` iOS package is proven on real macOS/Xcode.
-2. Run the expanded `validate-apple-local.sh` against the implemented macOS Swift/FFI slices; do not create the first `native-sdk-v*` release marker until this passes.
+1. Validate the static `FresnicaRNAdapter.xcframework` against a real React Native consumer project; the underlying `FresnicaSDK.xcframework` iOS + macOS package is proven on real macOS/Xcode.
+2. Decide when to create the first `native-sdk-v*` release marker; the Apple iOS + macOS validation gate is cleared, so release should remain an explicit product/versioning decision rather than an automatic `main` action.
 3. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
-4. Keep the marker-gated Native SDK release workflow idle until an explicit release decision. Windows/Linux non-Rust packaging remains deferred until a concrete consumer language/framework is selected.
+4. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
 5. Treat the checked-in real smart-account Testnet vector as the provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile integration begins.
 6. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
 7. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.

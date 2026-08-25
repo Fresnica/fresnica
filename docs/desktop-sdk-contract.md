@@ -19,7 +19,7 @@ Rust desktop client
 macOS Swift client
   -> consume compiled `FresnicaSDK` Swift module/package
   -> same XCFramework product as iOS, with universal macOS slices
-  -> real-Xcode validation required before release
+  -> real-Xcode validation passed on 2026-08-25
 
 Windows/Linux non-Rust client
   -> choose a supported consumer language/framework first
@@ -60,7 +60,7 @@ FresnicaSDKFFI.xcframework
 
 The public consumer imports `FresnicaSDK`; generated FFI declarations remain an implementation dependency of that module.
 
-The macOS extension reuses the existing Swift DTO/error surface and does not fork wallet/signing semantics. The packaging implementation now builds `aarch64-apple-darwin` and `x86_64-apple-darwin`, combines them into the Apple XCFrameworks, and opts Keychain operations into the macOS Data Protection Keychain. It remains pending until the expanded `validate-apple-local.sh` passes on a real Xcode toolchain.
+The macOS extension reuses the existing Swift DTO/error surface and does not fork wallet/signing semantics. The packaging implementation now builds `aarch64-apple-darwin` and `x86_64-apple-darwin`, combines them into the Apple XCFrameworks, and opts Keychain operations into the macOS Data Protection Keychain. The expanded `validate-apple-local.sh` passed on a real Xcode toolchain on 2026-08-25, validating the shared iOS + universal macOS Apple package path.
 
 ## Windows and Linux
 

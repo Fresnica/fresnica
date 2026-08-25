@@ -95,7 +95,7 @@
 - [x] Android Keystore/native signer-authorization helpers in Native SDK package
 - [x] Apple Keychain/LocalAuthentication signer-authorization helpers in Native SDK package
 - [x] Desktop direct-consumer contract and supported-surface rules
-- [ ] Validate implemented Apple Swift Native SDK macOS slices on real Xcode (`validate-apple-local.sh`)
+- [x] Validate implemented Apple Swift Native SDK macOS slices on real Xcode (`validate-apple-local.sh`, 2026-08-25)
 - [ ] Windows/Linux non-Rust package only after a concrete consumer language/framework is selected
 - [x] Canonical React Native adapter source targets `fresnica-native-sdk` instead of the transitional Mobile facade
 - [x] React Native Android one-time adapter build entry point + compatibility manifest/rebuild diagnostics
