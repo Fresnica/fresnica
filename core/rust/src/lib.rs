@@ -43,7 +43,8 @@ pub use signer::{
 };
 pub use transaction::{
     network_id, parse_transaction_envelope_xdr, sign_transaction_envelope,
-    transaction_envelope_xdr, transaction_hash, TransactionSigningError,
+    transaction_envelope_xdr, transaction_hash, verify_transaction_envelope_signature,
+    TransactionSigningError,
 };
 pub use wallet::{
     derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,
