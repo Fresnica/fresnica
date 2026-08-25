@@ -101,7 +101,7 @@
 - [x] React Native Android one-time adapter build entry point + compatibility manifest/rebuild diagnostics
 - [x] Apple one-time React Native adapter binary build path targets compiled `FresnicaSDK`
 - [x] One-command real-consumer Apple RN adapter validation wrapper (`adapters/react-native/apple/validate-consumer.sh`)
-- [ ] Validate static `FresnicaRNAdapter.xcframework` against a real React Native consumer (Native SDK XCFramework validated)
+- [x] Validate static `FresnicaRNAdapter.xcframework` against a real RN 0.87 CocoaPods consumer on macOS (`validate-consumer.sh`, 2026-08-25)
 - [x] WASM/Web API filtering and fresh-passcode routine-signing security boundary
 - [x] WASM source-boundary and generated-package surface tests
 - [x] WASM target/package compile validation

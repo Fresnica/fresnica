@@ -125,7 +125,7 @@ normal app build
     -> no adapter-source rebuild
 ```
 
-For Mobile, React Native is the first adapter target. Canonical Android/Apple adapter source lives under `adapters/react-native` and targets the generalized Native SDK. Both platforms have one-time consumer build commands plus compatibility manifest/rebuild checks. The underlying Apple `FresnicaSDK` module is now validated on real macOS/Xcode; the remaining Apple adapter checkpoint is building the static adapter against a real React Native consumer's CocoaPods headers. Run `bash adapters/react-native/apple/validate-consumer.sh /path/to/mobile` after `pod install` to execute that gate in one step. Flutter/Desktop adapters should follow the same architecture when implemented.
+For Mobile, React Native is the first adapter target. Canonical Android/Apple adapter source lives under `adapters/react-native` and targets the generalized Native SDK. Both platforms have one-time consumer build commands plus compatibility manifest/rebuild checks. The underlying Apple `FresnicaSDK` module is validated on real macOS/Xcode, and the complete static Apple adapter path has passed `validate-consumer.sh` against a freshly generated React Native 0.87 CocoaPods consumer on macOS. Modern prebuilt React Native is resolved from CocoaPods' installed `React.xcframework` plus public/private header roots rather than by reconstructing `node_modules` header layouts. Flutter/Desktop adapters should follow the same architecture when implemented.
 
 An adapter may perform argument/result conversion, Promise/Future/callback mapping, thread dispatch and framework registration. It must not own cryptography, envelope mutation, signer identity verification, transaction signing logic or native key-protection policy.
 
@@ -372,14 +372,13 @@ Real-browser validation exposed upstream `smart-account-kit` 0.6.2 requesting We
 
 The next coherent implementation batches are:
 
-1. **Validate the remaining Apple RN adapter path**: `FresnicaSDK.xcframework` iOS + macOS is proven on real macOS/Xcode; next build the static `FresnicaRNAdapter.xcframework` against a real React Native consumer and keep SDK-owned Swift/security code out of framework adapters.
-2. **Keep Native SDK release explicit**: the macOS validation gate is cleared and marker-gated `native-sdk-v*` automation exists, but no release marker is present yet. Create one only when the version/artifact set is intentionally ready to publish; ordinary `main` pushes remain light.
-3. **Keep the RN adapter contract stable**: Android and Apple have one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
-4. **WASM/Web + smart account**: keep the real Testnet auth vector as the provider conformance baseline; implement a platform-native Mobile passkey provider only when Mobile integration starts rather than adding passkey-derived unlock-key APIs to WASM.
-6. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
-7. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
-8. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.
-9. **Product UX later**: once the above foundation is stable, concentrate effort on Mobile first, then Desktop/Web according to product priorities.
+1. **Keep Native SDK release explicit**: Apple Native SDK and the React Native 0.87 reference-consumer adapter path are validated, and marker-gated `native-sdk-v*` automation exists, but no release marker is present yet. Create one only when the version/artifact set is intentionally ready to publish; ordinary `main` pushes remain light.
+2. **Keep the RN adapter contract stable**: Android and Apple have validated one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
+3. **WASM/Web + smart account**: keep the real Testnet auth vector as the provider conformance baseline; implement a platform-native Mobile passkey provider only when Mobile integration starts rather than adding passkey-derived unlock-key APIs to WASM.
+4. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
+5. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
+6. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.
+7. **Product UX later**: once the above foundation is stable, concentrate effort on Mobile first, then Desktop/Web according to product priorities.
 
 ## Start Here Next Session
 

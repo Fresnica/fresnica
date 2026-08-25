@@ -127,7 +127,7 @@ Android  -> complete direct-consumer AAR
 Apple    -> validated FFI XCFramework + compiled `FresnicaSDK.xcframework` direct-consumer package
 ```
 
-The Apple direct-consumer module is now validated on real macOS/Xcode. The React Native one-time Apple build path compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that validated module; it does not absorb SDK-owned Swift/security source. The remaining Apple adapter checkpoint is to run that adapter build against a real React Native consumer project with CocoaPods headers.
+The Apple direct-consumer module is now validated on real macOS/Xcode. The React Native one-time Apple build path compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that validated module; it does not absorb SDK-owned Swift/security source. On 2026-08-25 the full path also passed on a macOS runner against a freshly generated React Native 0.87 project after real `pod install`, including device arm64 and simulator arm64/x86_64 adapter slices. Modern prebuilt React Native is consumed through CocoaPods' installed `React.xcframework`; Fresnica does not reconstruct React header namespaces from `node_modules`.
 
 Desktop consumer surfaces are now defined in `desktop-sdk-contract.md`:
 
@@ -185,11 +185,11 @@ normal application builds
     -> do not rebuild adapter source
 ```
 
-React Native is the first adapter target. Canonical Android/Apple adapter source targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The Apple Native SDK XCFramework path, including the shared iOS + macOS slices, is now validated on real macOS/Xcode; only the static React Native adapter XCFramework still needs validation against a real React Native consumer project.
+React Native is the first adapter target. Canonical Android/Apple adapter source targets `fresnica-native-sdk`; both platforms have one-time consumer build entry points plus compatibility manifest/rebuild checks. The Apple Native SDK XCFramework path, including the shared iOS + macOS slices, is validated on real macOS/Xcode, and the static React Native adapter XCFramework has passed a real React Native 0.87 CocoaPods reference-consumer build on macOS.
 
 Planned adapter boundary:
 
-- React Native: validate the static Apple adapter XCFramework against a real React Native consumer, then treat Android/Apple one-time adapter builds as the canonical reference
+- React Native: treat the validated Android/Apple one-time adapter builds as the canonical reference; application integration should pin the framework version and reuse the stored adapter binary + compatibility manifest
 - Flutter Mobile/Desktop: reserve and document the same contract; implement when needed
 - Desktop frameworks such as Electron/Node, Qt or .NET: reserve the extension boundary; implement based on product choice
 
@@ -286,14 +286,13 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. Validate the static `FresnicaRNAdapter.xcframework` against a real React Native consumer project; the underlying `FresnicaSDK.xcframework` iOS + macOS package is proven on real macOS/Xcode.
-2. Decide when to create the first `native-sdk-v*` release marker; the Apple iOS + macOS validation gate is cleared, so release should remain an explicit product/versioning decision rather than an automatic `main` action.
-3. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
-4. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
-5. Treat the checked-in real smart-account Testnet vector as the provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile integration begins.
-6. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
-7. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
-8. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
+1. Decide when to create the first `native-sdk-v*` release marker; the Apple iOS + macOS and React Native reference-consumer validation gates are cleared, so release should remain an explicit product/versioning decision rather than an automatic `main` action.
+2. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
+3. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
+4. Treat the checked-in real smart-account Testnet vector as the provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile integration begins.
+5. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.
+6. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
+7. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
 
 ## Non-negotiable Architecture Rules
 
