@@ -66,10 +66,12 @@ Target release shape:
 
 ```text
 Android
-  fresnica-core-android-VERSION.aar
+  fresnica-native-sdk-VERSION.aar
 
 Apple
-  FresnicaCore-VERSION.xcframework.zip
+  FresnicaSDK-VERSION-apple.zip
+    -> FresnicaSDK.xcframework
+    -> FresnicaSDKFFI.xcframework
 ```
 
 The Native SDK must not contain React Native, Flutter, or other framework-specific adapter code.
@@ -131,8 +133,9 @@ Representative generated outputs:
 ```text
 vendor/fresnica/
   native/
-    fresnica-core-android-VERSION.aar
-    FresnicaCore-VERSION.xcframework
+    fresnica-native-sdk-VERSION.aar
+    FresnicaSDK.xcframework
+    FresnicaSDKFFI.xcframework
   adapter/
     react-native/
       fresnica-rn-adapter.aar
@@ -147,7 +150,7 @@ The exact consumer directory names are not contractual. The binary/rebuild behav
 Rebuild the adapter when at least one of these changes crosses a compatibility boundary:
 
 1. the consumer changes React Native/Flutter framework version and the existing adapter binary is not declared compatible;
-2. `MOBILE_BINDING_API_VERSION` changes incompatibly;
+2. `NATIVE_BINDING_API_VERSION` changes incompatibly;
 3. canonical adapter source changes because framework glue must change;
 4. a native platform/toolchain change creates an actual binary/API incompatibility requiring a new adapter build.
 
@@ -178,7 +181,7 @@ Every generated adapter binary set should have a machine-readable manifest. At m
   "framework": "react-native",
   "frameworkVersion": "0.87.0",
   "fresnicaNativeSdkVersion": "0.2.0",
-  "mobileBindingApiVersion": 3,
+  "nativeBindingApiVersion": 1,
   "adapterSourceVersion": "mobile-sdk-v0.2.0"
 }
 ```
@@ -249,7 +252,7 @@ This transition must not change the established Core/security semantics merely t
 The independent `fresnica-mobile` project should use this document as its integration starting point:
 
 1. choose and pin its React Native version;
-2. pin a Fresnica Native SDK release and Binding API;
+2. pin a Fresnica Native SDK release and `NATIVE_BINDING_API_VERSION`;
 3. generate its RN adapter binaries once from the matching canonical adapter source;
 4. store the adapter binaries and manifest under Mobile ownership;
 5. run a native/framework smoke test such as `parseAccount`;

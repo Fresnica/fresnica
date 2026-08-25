@@ -88,8 +88,8 @@ Future packaging should separate native binaries from framework adapters:
 
 ```text
 Native SDK release
-  Android: fresnica-core-android-VERSION.aar
-  Apple:   FresnicaCore-VERSION.xcframework.zip
+  Android: fresnica-native-sdk-VERSION.aar
+  Apple:   FresnicaSDK-VERSION-apple.zip
   manifest + checksums
 
 Source tree / adapter package
