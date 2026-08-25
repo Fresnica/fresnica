@@ -4,15 +4,18 @@ Status: **handoff source for the independent Fresnica Mobile application**.
 
 This document identifies the React Native/application-side work that was implemented temporarily inside the `fresnica` repository during PR #81-#84. The independent Mobile project should use this document to decide what to absorb, adapt, or leave behind.
 
+Before absorbing any application-side code, Mobile should establish its SDK/framework boundary using `docs/mobile-framework-adapter-contract.md`. That document is the authoritative integration baseline: pin compiled Native SDK binaries, compile the canonical framework adapter once in the Mobile framework environment, store the generated adapter binaries/manifest, and keep adapter-source compilation out of ordinary app builds.
+
 The repository boundary going forward is:
 
 ```text
 fresnica
-  Core + mobile SDK + native binding/security adapters + conformance tests
+  Core + compiled native SDK + canonical framework adapters + conformance tests
 
 fresnica-mobile
-  React Native application + Realm configuration/migrations + account/signer persistence
-  + product lifecycle/orchestration + screens/navigation/network/product state
+  React Native application + generated RN adapter binaries + Realm configuration/migrations
+  + account/signer persistence + product lifecycle/orchestration
+  + screens/navigation/network/product state
 ```
 
 The files described below are donor/reference implementation for the Mobile application. They are not a requirement that the independent app preserve the same TypeScript class names or Realm schema syntax.
@@ -185,33 +188,39 @@ Do not add a "Face ID export" shortcut using the stored WalletUnlockKey. System 
 
 ## What remains in `fresnica` and should be consumed, not copied
 
-The independent Mobile application should consume these as SDK/native integration artifacts:
+The independent Mobile application should consume or generate these through the Fresnica SDK integration contract:
 
-- `core/rust` - cryptographic/signing authority;
-- `bindings/mobile/src` - FFI-neutral `MobileCoreApi`;
-- generated UniFFI Kotlin/Swift API;
-- Android Fresnica AAR with Rust libraries and native signing/RN adapter;
-- Apple `FresnicaCoreFFI.xcframework`, generated Swift binding and native authorization/RN adapter sources;
+- `core/rust` - cryptographic/signing authority behind released native binaries;
+- `bindings/mobile/src` - FFI-neutral `MobileCoreApi` behind the native binding contract;
+- compiled Android Native SDK binary with Rust libraries/native signing implementation;
+- compiled Apple Native SDK binary with native signing implementation;
+- canonical React Native adapter source and adapter-build recipe/tooling;
+- future canonical Flutter/other framework adapter source;
 - stable error categories and API version query;
-- cross-language transaction/protection vectors.
+- cross-language transaction/protection vectors and adapter conformance tests.
 
-Do not fork these into the Mobile repository unless there is a deliberate SDK fork. The Mobile project should pin a released Fresnica Mobile SDK version.
+Do not fork Core/native SDK implementation into the Mobile repository unless there is a deliberate SDK fork. Mobile should pin a released Fresnica Native SDK version.
+
+The canonical RN adapter source remains Fresnica-owned, but Mobile compiles it **once** against its selected RN/toolchain version and stores the generated Android/iOS adapter binaries plus compatibility manifest. Ordinary Mobile builds consume those binaries; they do not rebuild Rust/Core/UniFFI or adapter source.
 
 ## Suggested absorption order in `fresnica-mobile`
 
-1. Add/pin the Fresnica Mobile SDK and prove `parseAccount` from React Native.
-2. Define the host Realm schema/migration around Account / Signer / Reference.
-3. Absorb #81 watch-only create, attach and downgrade semantics.
-4. Absorb #83 create/import/generate provisioning.
-5. Connect native system-auth enrollment/signing to persisted signer records.
-6. Absorb #82 global passcode rotation into Settings/security UX.
-7. Absorb #84 explicit Reveal/Export UX.
-8. Add ledger-side signer/threshold resolution so `hasLocalSigner` can be combined with actual on-chain authorization.
+1. Choose/pin the Mobile React Native version and Fresnica Native SDK/Binding API.
+2. Follow `docs/mobile-framework-adapter-contract.md` to compile the RN adapter once, store its binaries/manifest and prove `parseAccount` from React Native.
+3. Define the host Realm schema/migration around Account / Signer / Reference.
+4. Absorb #81 watch-only create, attach and downgrade semantics.
+5. Absorb #83 create/import/generate provisioning.
+6. Connect native system-auth enrollment/signing to persisted signer records.
+7. Absorb #82 global passcode rotation into Settings/security UX.
+8. Absorb #84 explicit Reveal/Export UX.
+9. Add ledger-side signer/threshold resolution so `hasLocalSigner` can be combined with actual on-chain authorization.
 
 ## Completion criteria before deleting donor TypeScript from `fresnica`
 
 The donor `bindings/mobile/react-native/src/*.ts` application orchestration may be removed from `fresnica` after the independent Mobile repository has tests proving:
 
+- the pinned Native SDK + generated adapter binary integration is reproducible from the recorded manifest;
+- normal Mobile builds do not compile Rust/Core/UniFFI or adapter source;
 - watch-only create/upgrade/downgrade;
 - Account != Signer preservation;
 - shared signer detach safety;
