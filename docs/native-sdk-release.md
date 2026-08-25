@@ -43,7 +43,8 @@ Required marker shape:
     "abis": ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
   },
   "apple": {
-    "minimum_ios": "13.4"
+    "minimum_ios": "13.4",
+    "minimum_macos": "12.0"
   }
 }
 ```
@@ -81,9 +82,9 @@ FresnicaSDK.xcframework/
 FresnicaSDKFFI.xcframework/
 ```
 
-`FresnicaSDK.xcframework` is the direct Swift consumer module. `FresnicaSDKFFI.xcframework` remains beside it because the generated Swift module links/imports the UniFFI FFI module. SDK-owned Keychain/LocalAuthentication code is already compiled into `FresnicaSDK.xcframework`; loose generated/security Swift sources are build diagnostics, not release inputs.
+`FresnicaSDK.xcframework` is the direct Swift consumer module. `FresnicaSDKFFI.xcframework` remains beside it because the generated Swift module links/imports the UniFFI FFI module. Both XCFrameworks carry iOS and macOS slices. SDK-owned Keychain/LocalAuthentication code is already compiled into `FresnicaSDK.xcframework`; loose generated/security Swift sources are build diagnostics, not release inputs.
 
-The Apple release job must run `bindings/native/scripts/validate-apple-local.sh` before staging the zip. The complete iOS direct-consumer path passed on real macOS/Xcode on 2026-08-25.
+The Apple release job must run `bindings/native/scripts/validate-apple-local.sh` before staging the zip. The complete iOS direct-consumer path passed on real macOS/Xcode on 2026-08-25; the new macOS slice must pass the same expanded validator before the first generalized Native SDK release marker is added.
 
 React Native adapter binaries are deliberately absent. A framework consumer builds the canonical adapter once in its own framework environment according to `mobile-framework-adapter-contract.md`.
 

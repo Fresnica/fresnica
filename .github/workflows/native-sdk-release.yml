@@ -89,6 +89,7 @@ jobs:
             test "$(jq -r '.android.min_sdk' "$marker")" = "26"
             test "$(jq -c '.android.abis' "$marker")" = '["armeabi-v7a","x86","x86_64","arm64-v8a"]'
             test "$(jq -r '.apple.minimum_ios' "$marker")" = "13.4"
+            test "$(jq -r '.apple.minimum_macos' "$marker")" = "12.0"
           fi
 
           publish=false
@@ -186,6 +187,7 @@ jobs:
     runs-on: macos-14
     env:
       FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
+      FRESNICA_MACOS_DEPLOYMENT_TARGET: "12.0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -299,7 +301,7 @@ jobs:
           - Universal SDK API: ${{ needs.prepare.outputs.sdk_api }}
           - Core client API: ${{ needs.prepare.outputs.core_api }}
           - Android: minSdk 26, four native ABIs, framework-neutral AAR
-          - Apple: validated FresnicaSDK + FresnicaSDKFFI XCFramework package
+          - Apple: FresnicaSDK + FresnicaSDKFFI XCFramework package (iOS + macOS)
 
           React Native/Flutter adapters and application product code are intentionally not embedded in these Native SDK binaries. See docs/native-sdk-release.md in the tagged source tree.
           EOF_NOTES

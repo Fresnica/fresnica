@@ -5,6 +5,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 CRATE_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="${1:-$CRATE_DIR/build/apple}"
 DEPLOYMENT_TARGET="${FRESNICA_IOS_DEPLOYMENT_TARGET:-13.4}"
+MACOS_DEPLOYMENT_TARGET="${FRESNICA_MACOS_DEPLOYMENT_TARGET:-12.0}"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Apple Native SDK validation must run on macOS" >&2
@@ -33,6 +34,10 @@ if ! IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)"; then
 fi
 if ! SIMULATOR_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null)"; then
   echo "full Xcode with the iPhoneSimulator SDK is required" >&2
+  exit 1
+fi
+if ! MACOS_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"; then
+  echo "full Xcode with the macOS SDK is required" >&2
   exit 1
 fi
 
@@ -70,12 +75,29 @@ xcrun --sdk iphonesimulator swiftc \
   "$SECURITY_STORE" \
   "$SECURITY_AUTH"
 
+# The same SDK-owned Swift/security layer must compile against the macOS data-protection
+# Keychain and LocalAuthentication surface.
+xcrun --sdk macosx swiftc \
+  -target "arm64-apple-macosx${MACOS_DEPLOYMENT_TARGET}" \
+  -sdk "$MACOS_SDK" \
+  -I "$OUTPUT_DIR/headers" \
+  -typecheck \
+  "$SWIFT_SOURCE" \
+  "$SECURITY_STORE" \
+  "$SECURITY_AUTH"
+
 SDK_FRAMEWORK="$(find "$SDK_XCFRAMEWORK" -type d -name FresnicaSDK.framework -path '*simulator*' -print -quit)"
 FFI_HEADERS="$(find "$FFI_XCFRAMEWORK" -type d -name Headers -path '*simulator*' -print -quit)"
 
 test -n "$SDK_FRAMEWORK"
 test -n "$FFI_HEADERS"
 test -d "$SDK_FRAMEWORK/Modules/FresnicaSDK.swiftmodule"
+
+MACOS_SDK_FRAMEWORK="$(find "$SDK_XCFRAMEWORK" -type d -name FresnicaSDK.framework -path '*macos*' -print -quit)"
+MACOS_FFI_HEADERS="$(find "$FFI_XCFRAMEWORK" -type d -name Headers -path '*macos*' -print -quit)"
+test -n "$MACOS_SDK_FRAMEWORK"
+test -n "$MACOS_FFI_HEADERS"
+test -d "$MACOS_SDK_FRAMEWORK/Modules/FresnicaSDK.swiftmodule"
 
 cat > "$OUTPUT_DIR/consumer-smoke.swift" <<'SWIFT'
 import FresnicaSDK
@@ -96,11 +118,18 @@ xcrun --sdk iphonesimulator swiftc \
   -I "$FFI_HEADERS" \
   -typecheck "$OUTPUT_DIR/consumer-smoke.swift"
 
+xcrun --sdk macosx swiftc \
+  -target "arm64-apple-macosx${MACOS_DEPLOYMENT_TARGET}" \
+  -sdk "$MACOS_SDK" \
+  -F "$(dirname "$MACOS_SDK_FRAMEWORK")" \
+  -I "$MACOS_FFI_HEADERS" \
+  -typecheck "$OUTPUT_DIR/consumer-smoke.swift"
+
 if grep -R -q -E 'ReactNative|RCTBridge|Flutter' "$SDK_XCFRAMEWORK"; then
   echo "framework-specific adapter code leaked into FresnicaSDK.xcframework" >&2
   exit 1
 fi
 
-printf 'Fresnica Apple Native SDK validation: OK\n'
+printf 'Fresnica Apple Native SDK validation (iOS + macOS): OK\n'
 printf '  SDK: %s\n' "$SDK_XCFRAMEWORK"
 printf '  FFI: %s\n' "$FFI_XCFRAMEWORK"

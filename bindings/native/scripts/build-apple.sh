@@ -5,6 +5,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 CRATE_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="${1:-$CRATE_DIR/build/apple}"
 DEPLOYMENT_TARGET="${FRESNICA_IOS_DEPLOYMENT_TARGET:-13.4}"
+MACOS_DEPLOYMENT_TARGET="${FRESNICA_MACOS_DEPLOYMENT_TARGET:-12.0}"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Apple packaging must run on macOS" >&2
@@ -35,16 +36,23 @@ if ! SIMULATOR_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null)";
   echo "full Xcode with the iPhoneSimulator SDK is required" >&2
   exit 1
 fi
+if ! MACOS_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"; then
+  echo "full Xcode with the macOS SDK is required" >&2
+  exit 1
+fi
 
 rustup target add \
   aarch64-apple-ios \
   aarch64-apple-ios-sim \
-  x86_64-apple-ios
+  x86_64-apple-ios \
+  aarch64-apple-darwin \
+  x86_64-apple-darwin
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p \
   "$OUTPUT_DIR/device" \
   "$OUTPUT_DIR/simulator" \
+  "$OUTPUT_DIR/macos" \
   "$OUTPUT_DIR/generated-swift" \
   "$OUTPUT_DIR/headers" \
   "$OUTPUT_DIR/platform-security"
@@ -55,6 +63,10 @@ export IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
 SDKROOT="$IOS_SDK" cargo build --release --target aarch64-apple-ios
 SDKROOT="$SIMULATOR_SDK" cargo build --release --target aarch64-apple-ios-sim
 SDKROOT="$SIMULATOR_SDK" cargo build --release --target x86_64-apple-ios
+SDKROOT="$MACOS_SDK" MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+  cargo build --release --target aarch64-apple-darwin
+SDKROOT="$MACOS_SDK" MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+  cargo build --release --target x86_64-apple-darwin
 
 cp target/aarch64-apple-ios/release/libfresnica_native_sdk.a \
   "$OUTPUT_DIR/device/libfresnica_native_sdk.a"
@@ -63,6 +75,11 @@ lipo -create \
   target/aarch64-apple-ios-sim/release/libfresnica_native_sdk.a \
   target/x86_64-apple-ios/release/libfresnica_native_sdk.a \
   -output "$OUTPUT_DIR/simulator/libfresnica_native_sdk.a"
+
+lipo -create \
+  target/aarch64-apple-darwin/release/libfresnica_native_sdk.a \
+  target/x86_64-apple-darwin/release/libfresnica_native_sdk.a \
+  -output "$OUTPUT_DIR/macos/libfresnica_native_sdk.a"
 
 # Build a host library only so uniffi-bindgen can read embedded metadata.
 cargo build --release
@@ -96,6 +113,8 @@ xcodebuild -create-xcframework \
   -headers "$OUTPUT_DIR/headers" \
   -library "$OUTPUT_DIR/simulator/libfresnica_native_sdk.a" \
   -headers "$OUTPUT_DIR/headers" \
+  -library "$OUTPUT_DIR/macos/libfresnica_native_sdk.a" \
+  -headers "$OUTPUT_DIR/headers" \
   -output "$OUTPUT_DIR/FresnicaSDKFFI.xcframework"
 
 test -d "$OUTPUT_DIR/FresnicaSDKFFI.xcframework"
@@ -116,7 +135,7 @@ import PackageDescription
 
 let package = Package(
     name: "FresnicaSDK",
-    platforms: [.iOS(.v13)],
+    platforms: [.iOS(.v13), .macOS(.v12)],
     products: [
         .library(name: "FresnicaSDK", type: .dynamic, targets: ["FresnicaSDK"]),
     ],
@@ -137,6 +156,11 @@ archive_swift_framework() {
   archive_path="$3"
   derived_data="$4"
 
+  deployment_setting="IPHONEOS_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET"
+  if [ "$platform" = "macOS" ]; then
+    deployment_setting="MACOSX_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET"
+  fi
+
   if ! (
     cd "$SWIFT_PACKAGE_DIR"
     xcodebuild archive \
@@ -147,11 +171,13 @@ archive_swift_framework() {
       SKIP_INSTALL=NO \
       BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
       ONLY_ACTIVE_ARCH=NO \
-      IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
+      "$deployment_setting"
   ); then
     echo "failed to archive FresnicaSDK for ${platform}" >&2
-    echo "if Xcode reports no matching generic iOS destination, install the iOS platform" >&2
-    echo "with Xcode > Settings > Components or: xcodebuild -downloadPlatform iOS" >&2
+    if [ "$platform" = "iOS" ] || [ "$platform" = "iOS Simulator" ]; then
+      echo "if Xcode reports no matching generic iOS destination, install the iOS platform" >&2
+      echo "with Xcode > Settings > Components or: xcodebuild -downloadPlatform iOS" >&2
+    fi
     exit 1
   fi
 
@@ -182,10 +208,16 @@ archive_swift_framework \
   "Release-iphonesimulator" \
   "$APPLE_ARCHIVES/simulator" \
   "$APPLE_ARCHIVES/simulator-derived"
+archive_swift_framework \
+  "macOS" \
+  "Release" \
+  "$APPLE_ARCHIVES/macos" \
+  "$APPLE_ARCHIVES/macos-derived"
 
 xcodebuild -create-xcframework \
   -framework "$APPLE_ARCHIVES/device.xcarchive/Products/usr/local/lib/FresnicaSDK.framework" \
   -framework "$APPLE_ARCHIVES/simulator.xcarchive/Products/usr/local/lib/FresnicaSDK.framework" \
+  -framework "$APPLE_ARCHIVES/macos.xcarchive/Products/usr/local/lib/FresnicaSDK.framework" \
   -output "$OUTPUT_DIR/FresnicaSDK.xcframework"
 
 test -d "$OUTPUT_DIR/FresnicaSDK.xcframework"

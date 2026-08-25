@@ -42,13 +42,16 @@ An ordinary Android consumer links this AAR. It does not build Rust or run UniFF
 
 ## Apple
 
-Supported initial iOS slices:
+Supported Apple slices:
 
-- `aarch64-apple-ios`;
-- `aarch64-apple-ios-sim`;
-- `x86_64-apple-ios`.
+- iOS device: `aarch64-apple-ios`;
+- iOS simulator: `aarch64-apple-ios-sim`, `x86_64-apple-ios`;
+- macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`.
 
-Initial deployment baseline remains iOS 13.4 while the generalized package is validated against the existing mobile integration baseline.
+Deployment baselines:
+
+- iOS 13.4, retained from the validated mobile integration baseline;
+- macOS 12.0 for the first desktop Swift package.
 
 Run on macOS:
 
@@ -68,6 +71,7 @@ Output:
 bindings/native/build/apple/
   device/libfresnica_native_sdk.a
   simulator/libfresnica_native_sdk.a
+  macos/libfresnica_native_sdk.a
   generated-swift/
     FresnicaSDK.swift
     FresnicaSDKFFI.h
@@ -82,11 +86,11 @@ bindings/native/build/apple/
   FresnicaSDK.xcframework/
 ```
 
-`FresnicaSDKFFI.xcframework` is the low-level Rust FFI package. The build then uses a temporary Swift package only as a packaging mechanism to compile the generated API plus `platform-security/` into an importable `FresnicaSDK.xcframework`. Consumers import `FresnicaSDK`; ordinary application builds do not compile Fresnica Rust, run UniFFI generation, or compile SDK-owned Swift sources. The loose generated source remains in the build output for inspection/conformance.
+`FresnicaSDKFFI.xcframework` is the low-level Rust FFI package. It now carries iOS-device, iOS-simulator and universal macOS slices. The build then uses a temporary Swift package only as a packaging mechanism to compile the generated API plus `platform-security/` into an importable `FresnicaSDK.xcframework` for the same platforms. Consumers import `FresnicaSDK`; ordinary application builds do not compile Fresnica Rust, run UniFFI generation, or compile SDK-owned Swift sources. The loose generated source remains in the build output for inspection/conformance.
 
-The final Swift framework is built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` and packaged from separate iOS-device and iOS-simulator archives. `FresnicaSDKFFI.xcframework` remains in the distribution because the generated Swift module has a compile/link dependency on its FFI module.
+The final Swift framework is built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` and packaged from separate iOS-device, iOS-simulator and macOS archives. `FresnicaSDKFFI.xcframework` remains in the distribution because the generated Swift module has a compile/link dependency on its FFI module.
 
-`validate-apple-local.sh` rebuilds the package, type-checks the generated Swift API together with the SDK-owned Keychain/LocalAuthentication helpers, then proves that a separate consumer source can `import FresnicaSDK` from the compiled XCFramework without compiling those SDK sources itself.
+`validate-apple-local.sh` rebuilds the package, type-checks the generated Swift API together with the SDK-owned Keychain/LocalAuthentication helpers for both iOS and macOS, then proves that separate iOS and macOS consumer sources can `import FresnicaSDK` from the compiled XCFramework without compiling those SDK sources themselves. The macOS Keychain path opts into the Data Protection Keychain explicitly while preserving the already-validated iOS behavior.
 
 ## Security and framework boundary
 

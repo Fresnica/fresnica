@@ -10,8 +10,8 @@ fresnica-sdk                 shared semantic contract
 fresnica-native-sdk          UniFFI/native DTO glue
     |
     +-- Android SDK package
-    +-- Apple SDK package
-    +-- future desktop native packages
+    +-- Apple SDK package (iOS + macOS Swift)
+    +-- future Windows/Linux native packages
 ```
 
 It is intentionally separate from `bindings/mobile`, which preserves the transitional Mobile v0.1.0 API. New native consumers should target this generalized binding surface.
@@ -45,7 +45,7 @@ cargo build --manifest-path bindings/native/Cargo.toml
 
 Generated language bindings are release/build outputs, not hand-maintained source.
 
-On macOS, run `bash bindings/native/scripts/validate-apple-local.sh` to validate the compiled Apple direct-consumer package end to end. This is the local validation gate for the currently pending Apple packaging checkpoint.
+On macOS, run `bash bindings/native/scripts/validate-apple-local.sh` to validate the compiled Apple direct-consumer package end to end. The same command covers the already-proven iOS package plus the macOS Swift slice; macOS remains pending until that expanded validation passes on a real Xcode toolchain.
 
 ## Platform signer authorization
 
@@ -59,3 +59,9 @@ These are not framework adapters. They implement the platform-side credential re
 ## Apple compiled module
 
 Apple packaging now has a separate direct-consumer module step: `build-apple.sh` first creates `FresnicaSDKFFI.xcframework`, then archives the generated Swift API plus the native Keychain/LocalAuthentication helpers as `FresnicaSDK.xcframework`. Framework adapters should compile against `FresnicaSDK`; they must not absorb the generated SDK Swift/security sources into adapter ownership.
+
+## macOS Swift consumer
+
+The Apple package reuses the same `FresnicaSDK` module and semantic API on macOS. `FresnicaSDKFFI.xcframework` includes a universal macOS Rust static-library slice, and `FresnicaSDK.xcframework` includes the corresponding compiled Swift framework. The initial macOS deployment baseline is 12.0.
+
+The native Keychain helper uses the Data Protection Keychain on macOS (`kSecUseDataProtectionKeychain`) so its `ThisDeviceOnly` access-control policy remains meaningful; routine `WalletUnlockKey` bytes still remain native-only.

@@ -28,12 +28,13 @@ public final class FresnicaWalletUnlockKeyStore {
     /// Best-effort enrollment status without releasing the protected WalletUnlockKey bytes.
     public func isEnrolled(signerId: String) throws -> Bool {
         try validateSignerId(signerId)
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: signerId,
             kSecMatchLimit: kSecMatchLimitOne
         ]
+        useDataProtectionKeychainIfNeeded(&query)
         let status = SecItemCopyMatching(query as CFDictionary, nil)
         switch status {
         case errSecSuccess:
@@ -76,7 +77,7 @@ public final class FresnicaWalletUnlockKeyStore {
 
         try delete(signerId: signerId)
 
-        let addQuery: [CFString: Any] = [
+        var addQuery: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: signerId,
@@ -84,6 +85,7 @@ public final class FresnicaWalletUnlockKeyStore {
             kSecValueData: unlockKey,
             kSecAttrSynchronizable: false
         ]
+        useDataProtectionKeychainIfNeeded(&addQuery)
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         guard status == errSecSuccess else {
@@ -102,7 +104,7 @@ public final class FresnicaWalletUnlockKeyStore {
         context.localizedReason = reason
         context.localizedFallbackTitle = ""
 
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: signerId,
@@ -110,6 +112,7 @@ public final class FresnicaWalletUnlockKeyStore {
             kSecMatchLimit: kSecMatchLimitOne,
             kSecUseAuthenticationContext: context
         ]
+        useDataProtectionKeychainIfNeeded(&query)
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -128,15 +131,22 @@ public final class FresnicaWalletUnlockKeyStore {
     /// Removes the Keychain item. Missing enrollment is treated as success.
     public func delete(signerId: String) throws {
         try validateSignerId(signerId)
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: signerId
         ]
+        useDataProtectionKeychainIfNeeded(&query)
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw StoreError.keychain(status)
         }
+    }
+
+    private func useDataProtectionKeychainIfNeeded(_ query: inout [CFString: Any]) {
+#if os(macOS)
+        query[kSecUseDataProtectionKeychain] = true
+#endif
     }
 
     private func validateSignerId(_ signerId: String) throws {

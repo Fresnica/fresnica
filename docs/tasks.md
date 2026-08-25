@@ -94,7 +94,7 @@
 - [x] Android Keystore/native signer-authorization helpers in Native SDK package
 - [x] Apple Keychain/LocalAuthentication signer-authorization helpers in Native SDK package
 - [x] Desktop direct-consumer contract and supported-surface rules
-- [ ] Extend validated Apple Swift Native SDK packaging to macOS
+- [ ] Validate implemented Apple Swift Native SDK macOS slices on real Xcode (`validate-apple-local.sh`)
 - [ ] Windows/Linux non-Rust package only after a concrete consumer language/framework is selected
 - [x] Canonical React Native adapter source targets `fresnica-native-sdk` instead of the transitional Mobile facade
 - [x] React Native Android one-time adapter build entry point + compatibility manifest/rebuild diagnostics
@@ -105,6 +105,7 @@
 - [x] WASM target/package compile validation
 - [x] Browser-package runtime/shared-vector conformance harness
 - [x] Machine-readable SDK compatibility manifest + source drift validator
+- [x] Native SDK release contract + marker-gated release automation (`native-sdk-v*`; no marker/release published yet)
 - [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
 - [x] Passkey/smart-account architecture decision: contract-account signer, not WalletUnlockKey wrapper
 - [x] Pinned `smart-account-kit` provider boundary + Testnet deployment fixture + mock conformance tests
