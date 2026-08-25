@@ -160,3 +160,9 @@ Run the test suite with:
 ```bash
 uv run pytest -q
 ```
+
+## GitHub main bundle artifact
+
+A push to `main` runs the lightweight `Main bundle` workflow. It does not run the Rust, Android, Apple, or WASM validation suites. The job checks out complete history, creates a cloneable `fresnica-main.bundle`, verifies that its `main` ref and default checkout equal the pushed commit, then uploads it as the `fresnica-main-bundle` Actions artifact.
+
+This artifact is the preferred GitHub-to-development handoff after a local relay push. It lets another development environment consume the exact Git commit graph instead of reconstructing source files through the GitHub contents API. Artifacts are retained for 7 days; any later `main` push creates a fresh one, and the workflow can also be started manually.

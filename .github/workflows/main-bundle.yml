@@ -1,0 +1,51 @@
+name: Main bundle
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-bundle
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create verified main bundle
+        run: |
+          set -euo pipefail
+
+          # Make the bundle self-contained and cloneable with main as its
+          # default branch even if Actions checked out the push detached.
+          git update-ref refs/heads/main "$GITHUB_SHA"
+          git bundle create fresnica-main.bundle HEAD refs/heads/main
+          git bundle verify fresnica-main.bundle
+
+          bundled_main="$(git bundle list-heads fresnica-main.bundle refs/heads/main | awk '{print $1}')"
+          test "$bundled_main" = "$GITHUB_SHA"
+
+          verify_dir="$(mktemp -d)"
+          git clone fresnica-main.bundle "$verify_dir/repo"
+          test "$(git -C "$verify_dir/repo" rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C "$verify_dir/repo" branch --show-current)" = "main"
+          test -z "$(git -C "$verify_dir/repo" status --porcelain)"
+
+      - name: Upload main bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-main-bundle
+          path: fresnica-main.bundle
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
