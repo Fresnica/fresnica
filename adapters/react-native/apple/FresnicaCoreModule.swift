@@ -473,6 +473,8 @@ public final class FresnicaCoreModule: NSObject {
             case let .IdentityMismatch(detail): return ("identity-mismatch", detail)
             case let .InvalidTransaction(detail): return ("invalid-transaction", detail)
             case let .CoreError(detail): return ("core-error", detail)
+            @unknown default:
+                return ("core-error", "Unknown Native SDK error")
             }
         }
 
@@ -503,6 +505,8 @@ public final class FresnicaCoreModule: NSObject {
                 }
             case .invalidStoredValue:
                 return ("invalid-protected-data", "Stored WalletUnlockKey record is invalid")
+            @unknown default:
+                return ("system-auth-error", "Unknown system-auth Keychain error")
             }
         }
 

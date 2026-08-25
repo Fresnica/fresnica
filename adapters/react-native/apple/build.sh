@@ -27,9 +27,11 @@ for path in "$NATIVE_SDK_XCFRAMEWORK" "$NATIVE_FFI_XCFRAMEWORK"; do
   fi
 done
 
-PODS_PUBLIC="$PROJECT_DIR/ios/Pods/Headers/Public"
-if [ ! -d "$PODS_PUBLIC" ]; then
-  echo "React Native CocoaPods headers are required; run pod install in the consumer iOS project first" >&2
+PODS_DIR="$PROJECT_DIR/ios/Pods"
+PODS_PUBLIC="$PODS_DIR/Headers/Public"
+PODS_PRIVATE="$PODS_DIR/Headers/Private"
+if [ ! -d "$PODS_DIR" ]; then
+  echo "React Native CocoaPods installation is required; run pod install in the consumer iOS project first" >&2
   exit 1
 fi
 
@@ -79,9 +81,25 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 mkdir -p "$BUILD_DIR/device" "$BUILD_DIR/sim-arm64" "$BUILD_DIR/sim-x86_64" "$BUILD_DIR/simulator"
 
 react_header_flags=()
-while IFS= read -r header_root; do
-  react_header_flags+=("-I" "$header_root")
-done < <(find "$PODS_PUBLIC" -mindepth 0 -maxdepth 1 -type d -print | sort)
+for headers_dir in "$PODS_PUBLIC" "$PODS_PRIVATE"; do
+  if [ -d "$headers_dir" ]; then
+    while IFS= read -r header_root; do
+      react_header_flags+=("-I" "$header_root")
+    done < <(find "$headers_dir" -mindepth 0 -maxdepth 1 -type d -print | sort)
+  fi
+done
+
+REACT_BRIDGE_HEADER="$(find "$PODS_DIR" \
+  \( -type f -o -type l \) \
+  -path '*/React/RCTBridgeModule.h' \
+  -print -quit)"
+if [ -z "$REACT_BRIDGE_HEADER" ]; then
+  echo "unable to locate React/RCTBridgeModule.h under $PODS_DIR" >&2
+  echo "run pod install and confirm the consumer project includes React-Core" >&2
+  exit 1
+fi
+REACT_BRIDGE_ROOT="$(dirname "$(dirname "$REACT_BRIDGE_HEADER")")"
+react_header_flags+=("-I" "$REACT_BRIDGE_ROOT")
 
 compile_slice() {
   sdk_name="$1"

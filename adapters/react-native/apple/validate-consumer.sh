@@ -23,8 +23,8 @@ if [ ! -s "$PROJECT_DIR/package.json" ]; then
   echo "consumer package.json is required: $PROJECT_DIR/package.json" >&2
   exit 1
 fi
-if [ ! -d "$PROJECT_DIR/ios/Pods/Headers/Public" ]; then
-  echo "React Native CocoaPods headers are required; run pod install in the consumer iOS project first" >&2
+if [ ! -d "$PROJECT_DIR/ios/Pods" ]; then
+  echo "React Native CocoaPods installation is required; run pod install in the consumer iOS project first" >&2
   exit 1
 fi
 

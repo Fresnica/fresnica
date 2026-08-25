@@ -53,6 +53,7 @@ test('Apple adapter targets Native SDK and preserves the reviewed bridge surface
   ]);
   assert.match(source, /import FresnicaSDK/);
   assert.match(source, /private let core: FresnicaSdkApiProtocol/);
+  assert.equal((source.match(/@unknown default:/g) ?? []).length, 2, 'Swift 6 error mapping must tolerate future Native SDK enum cases');
   assert.doesNotMatch(source, /MobileCoreApi|MobileCoreError/);
   assert.doesNotMatch(source, /class FresnicaSignerAuthorization|class FresnicaWalletUnlockKeyStore/);
   assert.match(shim, /RCT_EXTERN_MODULE\(FresnicaCoreModule/);
@@ -76,6 +77,9 @@ test('Apple binary build compiles framework glue without absorbing Native SDK so
   assert.match(build, /libFresnicaRNAdapter\.a/);
   assert.match(build, /-create-xcframework/);
   assert.match(build, /! -path '\*macos\*'/, 'iOS device lookup must exclude the macOS Native SDK slice');
+  assert.match(build, /Headers\/Private/, 'React Native build must include private CocoaPods header roots when present');
+  assert.match(build, /React\/RCTBridgeModule\.h/, 'React Native build must discover the actual RCTBridgeModule header');
+  assert.match(build, /REACT_BRIDGE_ROOT/, 'React Native build must derive the include root from the discovered bridge header');
 });
 
 
@@ -84,7 +88,8 @@ test('Apple real-consumer validator reuses Native SDK and checks adapter slices'
   assert.match(validate, /validate-apple-local\.sh/);
   assert.match(validate, /fresnica-adapter\.mjs/);
   assert.match(validate, /adapter-manifest\.mjs/);
-  assert.match(validate, /Pods\/Headers\/Public/);
+  assert.match(validate, /ios\/Pods/);
+  assert.doesNotMatch(validate, /Pods\/Headers\/Public/, 'consumer validator must not assume React headers are public');
   assert.match(validate, /x86_64/);
   assert.match(validate, /arm64/);
 });
