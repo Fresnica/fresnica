@@ -13,6 +13,9 @@ test -d "$PROVIDER_DIR/node_modules/smart-account-kit" || {
 }
 
 npm test --prefix "$PROVIDER_DIR"
+node --check "$PROVIDER_DIR/src/conformance-recorder.mjs"
+node --check "$PROVIDER_DIR/src/conformance.mjs"
+node --check "$PROVIDER_DIR/scripts/verify-fixture.mjs"
 npm run --prefix "$PROVIDER_DIR" check:installed
 npm run --prefix "$PROVIDER_DIR" testnet:build
 

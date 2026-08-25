@@ -9,6 +9,8 @@ Current sets:
 - `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
 
+The first smart-account/WebAuthn vector is intentionally **not checked in yet**. `providers/smart-account-kit` contains a real-Testnet recorder/verifier that exports the signed Soroban auth XDR only after a confirmed Protocol 27 Testnet transaction and independently validates its context-rule binding and WebAuthn signature. The resulting real fixture should be added here; do not substitute a synthetic passkey vector for that checkpoint.
+
 ## Versioning
 
 Existing vector meaning must not be changed silently. If a later implementation intentionally changes a normative behavior, add a new version and document the compatibility decision.

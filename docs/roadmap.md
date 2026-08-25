@@ -161,7 +161,7 @@ Validated on macOS with the Rust + `wasm-bindgen` toolchain via `bindings/wasm/s
 - generated JS/TypeScript surface validation;
 - Node-hosted runtime conformance against shared transaction vectors.
 
-The passkey architecture is now defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary now lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally, deliberately delegates only the safe upstream `signAndSubmit` path, and includes a localhost browser smoke harness for create/fund/discover/native-XLM transfer. The next checkpoint is executing that harness with real WebAuthn/Testnet, followed by auth-XDR/context-rule fixtures; this is not an unlock-key API added to WASM.
+The passkey architecture is now defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary now lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally, deliberately delegates only the safe upstream `signAndSubmit` path, and includes a localhost browser smoke harness for create/fund/discover/native-XLM transfer. The smoke path now captures the exact public relayer `func/auth` XDR for a confirmed transfer and independently verifies the Protocol-27 digest, bound context-rule IDs, WebAuthn challenge and P-256 signature before allowing fixture export. The remaining checkpoint is to execute that path with real WebAuthn/Testnet and check in the resulting real auth-XDR fixture; this is not an unlock-key API added to WASM.
 
 Web should normally consume the WASM SDK directly. Add a web-framework adapter only if a framework creates a real integration need.
 
@@ -205,7 +205,7 @@ The universal SDK work should provide:
 - adapter build entry point/tooling
 - clear rebuild-required diagnostics rather than silent adapter recompilation
 
-The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, and React Native adapter contract without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
+The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
 Native SDK release automation is intentionally not enabled yet: the Apple direct-consumer binary package must pass the real macOS/Xcode validation gate first. The existing `mobile-sdk-v0.1.0` release workflow remains a transitional compatibility release path, not the template for the generalized Native SDK.
 
@@ -286,7 +286,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 ## Immediate Next Work
 
 1. Validate `FresnicaSDK.xcframework` and the Apple React Native adapter on a real macOS/Xcode toolchain; only after that validation add Native SDK release automation.
-2. Run the pinned `smart-account-kit` provider through a real browser/WebAuthn + Protocol 27 Testnet create/connect/sign-and-submit flow, then capture auth-XDR/context-rule conformance fixtures.
+2. Run the pinned `smart-account-kit` provider through a real browser/WebAuthn + Protocol 27 Testnet create/connect/sign-and-submit flow, download the smoke page's verified auth-XDR fixture, verify it again with `npm run fixture:verify -- <file>`, then check the real fixture into `spec/test-vectors/`.
 3. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
 4. Extend the validated Apple Native SDK package to macOS Swift after the iOS package is proven. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
 5. Continue Phase 5 wallet fundamentals below product UI, with hardware/external signer transport as the next signer-capability gap and existing SEP-aligned behavior reused rather than reimplemented.

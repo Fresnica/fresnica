@@ -76,3 +76,22 @@ npm run testnet:dev
 Open the localhost URL printed by Vite. `localhost` is a WebAuthn secure context. The smoke page intentionally does not log raw WebAuthn responses or passkey public-key material.
 
 For the transfer checkpoint, send a small Testnet amount to a disposable Testnet `G...` or `C...` recipient and record the returned transaction hash/ledger for the future auth-XDR fixture. Do not treat the public Testnet relayer as a production dependency.
+
+After a confirmed transfer, the smoke page now captures the exact public `func` + signed `auth` XDR that was sent to the Testnet relayer. It immediately verifies the captured authorization before enabling **Download verified auth fixture**. Verification independently:
+
+- decodes the Soroban authorization entry;
+- reads the on-chain `AuthPayload.context_rule_ids`;
+- recomputes the Protocol 27 signature payload and context-bound auth digest;
+- checks that the WebAuthn `clientDataJSON.challenge` equals that digest;
+- extracts the passkey P-256 public key from the External signer `keyData`;
+- verifies the compact WebAuthn P-256 signature over `authenticatorData || SHA256(clientDataJSON)`.
+
+The captured WebAuthn assertion is public transaction authorization material that is already carried in the signed auth entry; the fixture recorder does not capture authenticator private keys, mnemonic/secret material, Fresnica `WalletUnlockKey`, or unrelated browser requests.
+
+Verify a downloaded fixture again from the command line:
+
+```sh
+npm run fixture:verify -- ./fresnica-smart-account-auth-<hash>.json
+```
+
+Once a real browser/Testnet run passes both in-page and CLI verification, copy that fixture into `spec/test-vectors/` and use it as the first real smart-account context-rule conformance vector. Do not check in a synthetic vector as a substitute for this checkpoint.

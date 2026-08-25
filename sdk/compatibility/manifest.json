@@ -29,5 +29,14 @@
       "sourceVersion": "0.1.0",
       "requiresNativeBindingApiVersion": 1
     }
+  },
+  "providers": {
+    "smartAccountKit": {
+      "packageVersion": "0.1.0",
+      "upstreamVersion": "0.6.2",
+      "fixtureSchema": "fresnica-smart-account-auth-v1",
+      "network": "testnet",
+      "deploymentDate": "2026-07-09"
+    }
   }
 }

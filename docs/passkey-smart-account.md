@@ -201,9 +201,9 @@ The upstream deterministic-deployer design documents an address-squatting residu
 
 1. Keep the current classic `G...` software-signer path unchanged.
 2. Add a provider-neutral **contract smart-account capability** at the application/service boundary, not in `ProtectedSoftwareSigner`. **Implemented:** `providers/smart-account-kit` provides the first pinned provider boundary with create/connect/discover and safe sign-and-submit orchestration.
-3. Run the provider against real Testnet WebAuthn in a browser and capture create/connect/sign-and-submit results.
+3. Run the provider against real Testnet WebAuthn in a browser and capture create/connect/sign-and-submit results. **Harness ready:** the smoke page records only the confirmed relayer `func/auth` XDR and validates Protocol-27 digest/context binding plus the WebAuthn P-256 signature before fixture export.
 4. Persist passkey credential/provider metadata separately from protected Ed25519 signer records.
-5. Add conformance fixtures from real smart-account transaction/auth XDR, including context-rule identity.
+5. Add conformance fixtures from real smart-account transaction/auth XDR, including context-rule identity. **Verifier ready; real fixture still pending:** `npm run fixture:verify -- <fixture.json>` performs the same independent digest/context/WebAuthn verification offline.
 6. Only after the provider boundary is proven, decide which protocol-generic Soroban authorization helpers belong in Rust Core/SDK.
 7. Add platform-native Mobile passkey adapters against the same smart-account contract semantics.
 

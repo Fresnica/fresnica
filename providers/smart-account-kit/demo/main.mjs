@@ -4,6 +4,11 @@ import {
   SMART_ACCOUNT_KIT_VERSION,
   STELLAR_TESTNET_SMART_ACCOUNT,
 } from '../src/index.mjs';
+import {
+  buildSmartAccountAuthFixture,
+  createRelayerCaptureFetch,
+} from '../src/conformance-recorder.mjs';
+import { verifySmartAccountAuthFixture } from '../src/conformance.mjs';
 
 globalThis.Buffer = Buffer;
 
@@ -11,6 +16,15 @@ const logElement = document.querySelector('#log');
 const userElement = document.querySelector('#user');
 const recipientElement = document.querySelector('#recipient');
 const amountElement = document.querySelector('#amount');
+const downloadFixtureElement = document.querySelector('#download-fixture');
+
+const relayerCapture = createRelayerCaptureFetch({
+  relayerUrl: STELLAR_TESTNET_SMART_ACCOUNT.relayerUrl,
+  fetchImpl: globalThis.fetch.bind(globalThis),
+});
+globalThis.fetch = relayerCapture.fetch;
+
+let latestFixture = null;
 
 function log(label, value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
@@ -78,12 +92,49 @@ document.querySelector('#discover').addEventListener('click', (event) => run(eve
 document.querySelector('#transfer').addEventListener('click', (event) => run(event.currentTarget, async () => {
   if (!provider.activeAccount()) throw new Error('Connect or create a smart account first');
   const amount = Number(amountElement.value);
+  relayerCapture.clear();
+  latestFixture = null;
+  downloadFixtureElement.disabled = true;
   const result = await provider.transfer({
     recipient: recipientElement.value.trim(),
     amount,
   });
   log('Transfer', result);
+
+  if (result.status === 'confirmed') {
+    latestFixture = buildSmartAccountAuthFixture({
+      capture: relayerCapture.last(),
+      account: provider.activeAccount(),
+      result,
+    });
+    const verified = await verifySmartAccountAuthFixture(latestFixture);
+    downloadFixtureElement.disabled = false;
+    log('Verified auth fixture', {
+      schema: verified.schema,
+      transactionHash: verified.transactionHash,
+      ledger: verified.ledger,
+      accountAddress: verified.accountAddress,
+      entries: verified.entries.map((entry) => ({
+        contextRuleIds: entry.contextRuleIds,
+        authDigestHex: entry.authDigestHex,
+        origin: entry.origin,
+      })),
+    });
+  }
 }));
+
+downloadFixtureElement.addEventListener('click', () => {
+  if (!latestFixture) return;
+  const blob = new Blob([`${JSON.stringify(latestFixture, null, 2)}\n`], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `fresnica-smart-account-auth-${latestFixture.transaction.hash}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+});
 
 document.querySelector('#disconnect').addEventListener('click', (event) => run(event.currentTarget, async () => {
   await provider.disconnect();
