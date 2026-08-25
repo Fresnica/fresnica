@@ -104,7 +104,18 @@ pub fn build_single_operation_envelope(
     base_fee: u32,
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
-    build_operation_envelope(source, vec![body], current_sequence, base_fee, memo)
+    let memo = text_memo(memo)?;
+    build_single_operation_envelope_with_memo(source, body, current_sequence, base_fee, memo)
+}
+
+pub(crate) fn build_single_operation_envelope_with_memo(
+    source: &str,
+    body: OperationBody,
+    current_sequence: i64,
+    base_fee: u32,
+    memo: Memo,
+) -> Result<TransactionEnvelope, String> {
+    build_operation_envelope_with_memo(source, vec![body], current_sequence, base_fee, memo)
 }
 
 pub fn build_operation_envelope(
@@ -113,6 +124,27 @@ pub fn build_operation_envelope(
     current_sequence: i64,
     base_fee_per_operation: u32,
     memo: Option<&str>,
+) -> Result<TransactionEnvelope, String> {
+    let memo = text_memo(memo)?;
+    build_operation_envelope_with_memo(source, bodies, current_sequence, base_fee_per_operation, memo)
+}
+
+fn text_memo(memo: Option<&str>) -> Result<Memo, String> {
+    match memo {
+        Some(value) if !value.is_empty() => Ok(Memo::Text(
+            StringM::<28>::try_from(value)
+                .map_err(|_| "text memo must be at most 28 bytes".to_owned())?,
+        )),
+        _ => Ok(Memo::None),
+    }
+}
+
+fn build_operation_envelope_with_memo(
+    source: &str,
+    bodies: Vec<OperationBody>,
+    current_sequence: i64,
+    base_fee_per_operation: u32,
+    memo: Memo,
 ) -> Result<TransactionEnvelope, String> {
     if bodies.is_empty() {
         return Err("transaction must contain at least one operation".to_owned());
@@ -133,13 +165,6 @@ pub fn build_operation_envelope(
     let fee = base_fee_per_operation
         .checked_mul(operation_count)
         .ok_or_else(|| "transaction fee overflow".to_owned())?;
-    let memo = match memo {
-        Some(value) if !value.is_empty() => Memo::Text(
-            StringM::<28>::try_from(value)
-                .map_err(|_| "text memo must be at most 28 bytes".to_owned())?,
-        ),
-        _ => Memo::None,
-    };
     let sequence = current_sequence
         .checked_add(1)
         .ok_or_else(|| "account sequence overflow".to_owned())?;

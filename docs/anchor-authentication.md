@@ -1,6 +1,6 @@
 # Anchor Authentication Boundary
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 This document records the current Rust reference-client authentication boundary for Stellar anchors.
 
@@ -19,8 +19,11 @@ The Rust CLI also implements the Classic-account SEP-10 session path:
 
 - `anchor auth CODE:GISSUER [--wallet NAME]` requests and verifies a challenge before signing it through the Fresnica SDK/Core boundary, exchanges it for a JWT, and immediately discards that JWT after the diagnostic command completes;
 - `anchor deposit|withdraw CODE:GISSUER ...` prefers a usable SEP-24 flow and falls back to SEP-6;
-- SEP-24 interactive requests use `multipart/form-data` and a fresh in-memory SEP-10 token;
-- SEP-6 only authenticates when the selected asset's `/info.authentication_required` is true;
+- SEP-24 interactive requests use `multipart/form-data`, require the anchor's transaction `id`, and use a fresh in-memory SEP-10 token;
+- `anchor status CODE:GISSUER ID ...` queries the protocol `/transaction` endpoint; when SEP-24 and SEP-6 are both plausible the caller must provide `--protocol` rather than letting Fresnica guess;
+- SEP-24 status always authenticates; SEP-6 status follows `/info.transaction.authentication_required`;
+- `anchor status ... --pay` is an explicit write transition only when the transaction is a withdrawal in `pending_user_transfer_start`; it consumes `withdraw_anchor_account`, `amount_in`, and `withdraw_memo[_type]`, then hands the payment to the existing reviewed transaction path;
+- withdrawal memos support the protocol-defined `text`, `id`, and base64 `hash` forms without flattening them to text;
 - JWT values are held only in zeroizing in-memory strings and are never printed, persisted, logged, or passed through CLI arguments.
 
 Transfer execution in the Rust CLI is currently Classic `G...` / SEP-10 only. SEP-45 metadata is discovered but contract-account authentication execution is intentionally still separate.
@@ -67,20 +70,21 @@ Owns the safe application-facing signing boundary. After a challenge has been ve
 
 Owns only command/UX orchestration and user authorization prompts. It must not sign arbitrary server-provided XDR before protocol verification.
 
-## Next implementation slice
+## Transaction status and payment boundary
 
-The current transfer command stops at the protocol-defined next action:
+The Rust reference client treats status lookup and payment as separate actions:
 
-- SEP-24 returns a validated interactive URL (and transaction id when supplied);
-- SEP-6 returns the anchor's structured deposit/withdraw instructions, including KYC-required responses;
-- Fresnica does **not** automatically send the Stellar withdrawal payment from an anchor response in this slice.
+- status lookup is read-only by default and returns the anchor's full transaction object in `--json` mode;
+- `--pay` cannot be combined with `--json` and never bypasses the normal transaction review; `-y/--yes` has the same explicit confirmation-bypass semantics as the existing `send` command;
+- Fresnica refuses to pay unless the anchor transaction is a withdrawal whose status is exactly `pending_user_transfer_start`;
+- the payment destination must be a Classic `G...` account, the amount is revalidated by the existing payment path, and the memo is converted to its real XDR memo type before envelope construction;
+- signing and submission still go through the Fresnica SDK/Core path and the existing pending-transaction safety gate.
 
-The next withdrawal slice should translate verified SEP-6 withdrawal instructions into the existing reviewed payment path, require normal human transaction review/confirmation, and add anchor transaction-status lookup. It must not introduce a second signing path.
-
-SEP-45 remains a separate contract-account path because its Soroban authorization-entry verification/signing semantics differ from Classic SEP-10 transaction signing.
+The next anchor gap is customer-information handling (SEP-12 / `pending_customer_info_update`) and richer status lifecycle integration. SEP-45 remains a separate contract-account path because its Soroban authorization-entry verification/signing semantics differ from Classic SEP-10 transaction signing.
 
 ## Current blockers / non-blockers
 
-- Classic SEP-10 verifier/session and initial SEP-24/SEP-6 transfer initiation are implemented in the Rust reference client.
+- Classic SEP-10 verifier/session, SEP-24/SEP-6 initiation, transaction status lookup, and reviewed Classic withdrawal payment handoff are implemented in the Rust reference client.
+- SEP-12 customer-information updates are not yet wired into the Rust reference client.
 - SEP-45 metadata discovery is complete; SEP-45 execution still requires a dedicated contract-auth provider/verification path.
 - Ledger transport remains independent and must not be forced through a lossy XDR v28/v27 conversion merely to close a checklist item.

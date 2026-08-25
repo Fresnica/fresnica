@@ -15,10 +15,11 @@ use ureq::unversioned::multipart::Form;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::send::{review_and_submit_payment, PaymentMemo};
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction_flow::{
     has_valid_transaction_signature, network_client, network_passphrase, parse_transaction_xdr,
-    resolve_local_signing_wallet, sign_transaction_xdr_with_wallet,
+    resolve_local_signing_wallet, resolve_signing_wallet, sign_transaction_xdr_with_wallet,
 };
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
@@ -44,6 +45,15 @@ impl AnchorTransferKind {
 enum AnchorProtocol {
     Sep24,
     Sep6,
+}
+
+impl AnchorProtocol {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Sep24 => "SEP-24",
+            Self::Sep6 => "SEP-6",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +110,7 @@ pub struct AnchorCapabilities {
     pub sep6_withdraw: bool,
     pub sep6_deposit_info: JsonValue,
     pub sep6_withdraw_info: JsonValue,
+    pub sep6_transaction_info: JsonValue,
     pub sep24_deposit: bool,
     pub sep24_withdraw: bool,
     pub warnings: Vec<String>,
@@ -128,6 +139,7 @@ pub fn command_anchor(
             AnchorTransferKind::Withdraw,
             &arguments[1..],
         ),
+        "status" => command_status(storage, network, &arguments[1..]),
         _ => Err(usage().to_owned()),
     }
 }
@@ -341,11 +353,446 @@ fn command_transfer(
     }
 }
 
+
+fn command_status(
+    storage: &WalletStorage,
+    network: &str,
+    arguments: &[String],
+) -> Result<(), String> {
+    if arguments.len() < 2 {
+        return Err(usage().to_owned());
+    }
+    let asset = IssuedAsset::parse(&arguments[0])?;
+    let transaction_id = arguments[1].trim();
+    if transaction_id.is_empty() {
+        return Err("anchor transaction id must not be empty".to_owned());
+    }
+
+    let mut wallet = None;
+    let mut protocol = None;
+    let mut pay = false;
+    let mut yes = false;
+    let mut json = false;
+    let mut index = 2;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--wallet" => {
+                index += 1;
+                wallet = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--wallet requires a wallet name".to_owned())?
+                        .as_str(),
+                );
+                index += 1;
+            }
+            "--protocol" => {
+                index += 1;
+                protocol = Some(parse_anchor_protocol(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--protocol requires sep24 or sep6".to_owned())?,
+                )?);
+                index += 1;
+            }
+            "--pay" => {
+                pay = true;
+                index += 1;
+            }
+            "-y" | "--yes" => {
+                yes = true;
+                index += 1;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            _ => return Err(usage().to_owned()),
+        }
+    }
+    if yes && !pay {
+        return Err("--yes is only valid together with --pay".to_owned());
+    }
+    if json && pay {
+        return Err("--json cannot be combined with --pay because payment requires transaction review".to_owned());
+    }
+
+    let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
+    let protocol = select_status_protocol(&capabilities, protocol)?;
+    let record = resolve_anchor_wallet(storage, network, wallet)?;
+    let transaction = fetch_anchor_transaction(
+        &record,
+        network,
+        &home_domain,
+        &capabilities,
+        protocol,
+        transaction_id,
+    )?;
+
+    render_anchor_transaction_status(
+        &asset,
+        &record,
+        network,
+        &capabilities.domain,
+        protocol,
+        &transaction,
+        json,
+    )?;
+
+    if !pay {
+        return Ok(());
+    }
+
+    let payment = withdrawal_payment_from_transaction(&transaction)?;
+    let signing_record = resolve_signing_wallet(storage, network, Some(&record.name))?;
+    println!();
+    println!("Anchor withdrawal payment handoff");
+    println!("Anchor:     {}", capabilities.domain);
+    println!("Transfer:   {transaction_id}");
+    if let Some(value) = transaction_text(&transaction, "to") {
+        println!("External:   {value}");
+    }
+    if let Some(value) = transaction_text(&transaction, "external_extra_text") {
+        println!("Details:    {value}");
+    }
+    if let Some(value) = transaction_text(&transaction, "more_info_url") {
+        println!("More info:  {value}");
+    }
+
+    review_and_submit_payment(
+        &signing_record,
+        network,
+        &payment.amount,
+        &asset.display(),
+        &payment.destination,
+        None,
+        payment.memo,
+        yes,
+    )
+}
+
+fn parse_anchor_protocol(value: &str) -> Result<AnchorProtocol, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "sep24" | "sep-24" => Ok(AnchorProtocol::Sep24),
+        "sep6" | "sep-6" => Ok(AnchorProtocol::Sep6),
+        _ => Err("--protocol must be sep24 or sep6".to_owned()),
+    }
+}
+
+fn sep6_transaction_enabled(capabilities: &AnchorCapabilities) -> bool {
+    capabilities
+        .sep6_transaction_info
+        .get("enabled")
+        .and_then(JsonValue::as_bool)
+        != Some(false)
+}
+
+fn sep6_transaction_requires_auth(capabilities: &AnchorCapabilities) -> bool {
+    capabilities
+        .sep6_transaction_info
+        .get("authentication_required")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+}
+
+fn select_status_protocol(
+    capabilities: &AnchorCapabilities,
+    requested: Option<AnchorProtocol>,
+) -> Result<AnchorProtocol, String> {
+    if let Some(protocol) = requested {
+        return validate_status_protocol(capabilities, protocol);
+    }
+
+    let sep24_candidate = capabilities.sep24_url.is_some()
+        && capabilities.sep10_auth
+        && (capabilities.sep24_deposit || capabilities.sep24_withdraw);
+    let sep6_candidate = capabilities.sep6_url.is_some()
+        && sep6_transaction_enabled(capabilities)
+        && (capabilities.sep6_deposit || capabilities.sep6_withdraw)
+        && (!sep6_transaction_requires_auth(capabilities) || capabilities.sep10_auth);
+
+    match (sep24_candidate, sep6_candidate) {
+        (true, false) => Ok(AnchorProtocol::Sep24),
+        (false, true) => Ok(AnchorProtocol::Sep6),
+        (true, true) => Err(
+            "anchor transaction status is available through both SEP-24 and SEP-6; pass --protocol sep24 or --protocol sep6"
+                .to_owned(),
+        ),
+        (false, false) => {
+            if capabilities.sep24_url.is_some()
+                && !capabilities.sep10_auth
+                && capabilities.sep45_auth
+            {
+                return Err("SEP-24 status is available only through SEP-45; contract-account authentication is not implemented in the Rust CLI yet".to_owned());
+            }
+            if capabilities.sep6_url.is_some()
+                && sep6_transaction_enabled(capabilities)
+                && sep6_transaction_requires_auth(capabilities)
+                && !capabilities.sep10_auth
+            {
+                if capabilities.sep45_auth {
+                    return Err("SEP-6 transaction status requires authentication but only SEP-45 is available; contract-account authentication is not implemented in the Rust CLI yet".to_owned());
+                }
+                return Err(
+                    "SEP-6 transaction status requires a complete Classic SEP-10 authentication path"
+                        .to_owned(),
+                );
+            }
+            Err("anchor does not advertise a uniquely usable SEP-24/SEP-6 transaction-status path; pass --protocol if querying an existing transaction".to_owned())
+        }
+    }
+}
+
+fn validate_status_protocol(
+    capabilities: &AnchorCapabilities,
+    protocol: AnchorProtocol,
+) -> Result<AnchorProtocol, String> {
+    match protocol {
+        AnchorProtocol::Sep24 if capabilities.sep24_url.is_none() => {
+            Err("anchor does not advertise a SEP-24 transfer server".to_owned())
+        }
+        AnchorProtocol::Sep24 if !capabilities.sep10_auth => {
+            if capabilities.sep45_auth {
+                Err("SEP-24 status is available only through SEP-45; contract-account authentication is not implemented in the Rust CLI yet".to_owned())
+            } else {
+                Err("SEP-24 status requires a complete Classic SEP-10 authentication path".to_owned())
+            }
+        }
+        AnchorProtocol::Sep6 if capabilities.sep6_url.is_none() => {
+            Err("anchor does not advertise a SEP-6 transfer server".to_owned())
+        }
+        AnchorProtocol::Sep6 if !sep6_transaction_enabled(capabilities) => {
+            Err("anchor reports that SEP-6 /transaction is disabled".to_owned())
+        }
+        AnchorProtocol::Sep6
+            if sep6_transaction_requires_auth(capabilities) && !capabilities.sep10_auth =>
+        {
+            if capabilities.sep45_auth {
+                Err("SEP-6 transaction status requires authentication but only SEP-45 is available; contract-account authentication is not implemented in the Rust CLI yet".to_owned())
+            } else {
+                Err("SEP-6 transaction status requires a complete Classic SEP-10 authentication path".to_owned())
+            }
+        }
+        _ => Ok(protocol),
+    }
+}
+
+fn fetch_anchor_transaction(
+    record: &WalletRecord,
+    network: &str,
+    home_domain: &str,
+    capabilities: &AnchorCapabilities,
+    protocol: AnchorProtocol,
+    transaction_id: &str,
+) -> Result<JsonValue, String> {
+    let (base, token) = match protocol {
+        AnchorProtocol::Sep24 => (
+            capabilities
+                .sep24_url
+                .as_deref()
+                .ok_or_else(|| "SEP-24 transfer server is unavailable".to_owned())?,
+            Some(authenticate_anchor_sep10(
+                record,
+                network,
+                home_domain,
+                capabilities,
+            )?),
+        ),
+        AnchorProtocol::Sep6 => (
+            capabilities
+                .sep6_url
+                .as_deref()
+                .ok_or_else(|| "SEP-6 transfer server is unavailable".to_owned())?,
+            if sep6_transaction_requires_auth(capabilities) {
+                Some(authenticate_anchor_sep10(
+                    record,
+                    network,
+                    home_domain,
+                    capabilities,
+                )?)
+            } else {
+                None
+            },
+        ),
+    };
+
+    let mut url = Url::parse(&format!("{}/transaction", base.trim_end_matches('/')))
+        .map_err(|_| format!("{} transaction endpoint is invalid", protocol.label()))?;
+    url.query_pairs_mut().append_pair("id", transaction_id);
+    let authorization = token
+        .as_ref()
+        .map(|token| Zeroizing::new(format!("Bearer {}", token.as_str())));
+    let mut request = ureq::get(url.as_str());
+    if let Some(authorization) = authorization.as_ref() {
+        request = request.header("Authorization", authorization.as_str());
+    }
+    let request = request
+        .config()
+        .http_status_as_error(false)
+        .build();
+    let mut response = request
+        .call()
+        .map_err(|error| format!("Unable to call {} endpoint {}: {error}", protocol.label(), url.as_str()))?;
+    let status = response.status().as_u16();
+    let value = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_ANCHOR_DOCUMENT_BYTES)
+        .read_json::<JsonValue>()
+        .map_err(|error| {
+            format!(
+                "Invalid JSON from {} endpoint {}: {error}",
+                protocol.label(),
+                url.as_str()
+            )
+        })?;
+    if status == 404 {
+        return Err(format!(
+            "{} transaction {transaction_id} was not found",
+            protocol.label()
+        ));
+    }
+    if !(200..300).contains(&status) {
+        return Err(anchor_http_error(protocol.label(), url.as_str(), status, &value));
+    }
+    parse_anchor_transaction_response(&value, transaction_id)
+}
+
+fn parse_anchor_transaction_response(
+    value: &JsonValue,
+    expected_id: &str,
+) -> Result<JsonValue, String> {
+    let transaction = value
+        .get("transaction")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| "anchor /transaction response has no transaction object".to_owned())?;
+    let id = transaction_text(transaction, "id")
+        .ok_or_else(|| "anchor transaction has no id".to_owned())?;
+    if id != expected_id {
+        return Err(format!(
+            "anchor /transaction response id mismatch: expected {expected_id}, received {id}"
+        ));
+    }
+    if transaction_text(transaction, "status").is_none() {
+        return Err("anchor transaction has no status".to_owned());
+    }
+    Ok(transaction.clone())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AnchorWithdrawalPayment {
+    destination: String,
+    amount: String,
+    memo: PaymentMemo,
+}
+
+fn withdrawal_payment_from_transaction(
+    transaction: &JsonValue,
+) -> Result<AnchorWithdrawalPayment, String> {
+    let status = transaction_text(transaction, "status")
+        .ok_or_else(|| "anchor transaction has no status".to_owned())?;
+    if status != "pending_user_transfer_start" {
+        return Err(format!(
+            "anchor withdrawal is not ready for Stellar payment; current status is {status}"
+        ));
+    }
+    let kind = transaction_text(transaction, "kind")
+        .ok_or_else(|| "anchor transaction has no kind".to_owned())?;
+    if !matches!(kind, "withdrawal" | "withdraw") {
+        return Err(format!(
+            "anchor transaction is {kind}, not a withdrawal payment"
+        ));
+    }
+
+    let destination = transaction_text(transaction, "withdraw_anchor_account")
+        .ok_or_else(|| "anchor withdrawal has no withdraw_anchor_account".to_owned())?;
+    let identity = FresnicaSdk::new()
+        .parse_account(destination.to_owned())
+        .map_err(|_| "anchor withdrawal account is not a valid Stellar address".to_owned())?;
+    if identity.kind != SdkAccountKind::Classic {
+        return Err("anchor withdrawal account must be a Classic G address".to_owned());
+    }
+    let amount = transaction_text(transaction, "amount_in")
+        .ok_or_else(|| "anchor withdrawal has no amount_in".to_owned())?;
+    let memo_type = transaction_text(transaction, "withdraw_memo_type");
+    let memo = transaction_text(transaction, "withdraw_memo");
+
+    Ok(AnchorWithdrawalPayment {
+        destination: identity.address,
+        amount: amount.to_owned(),
+        memo: PaymentMemo::from_anchor_fields(memo_type, memo)?,
+    })
+}
+
+fn render_anchor_transaction_status(
+    asset: &IssuedAsset,
+    record: &WalletRecord,
+    network: &str,
+    domain: &str,
+    protocol: AnchorProtocol,
+    transaction: &JsonValue,
+    json: bool,
+) -> Result<(), String> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "asset": asset.display(),
+                "network": network,
+                "wallet": record.name,
+                "address": record.address,
+                "domain": domain,
+                "protocol": protocol,
+                "transaction": transaction,
+            }))
+            .map_err(|error| format!("unable to encode anchor transaction status: {error}"))?
+        );
+        return Ok(());
+    }
+
+    println!("Anchor transaction · {} [{}]", asset.display(), network);
+    println!("Protocol:    {}", protocol.label());
+    println!("Domain:      {domain}");
+    println!("Wallet:      {}", record.name);
+    for (label, key) in [
+        ("ID", "id"),
+        ("Kind", "kind"),
+        ("Status", "status"),
+        ("Amount in", "amount_in"),
+        ("Amount out", "amount_out"),
+        ("Fee", "amount_fee"),
+        ("Stellar TX", "stellar_transaction_id"),
+        ("External TX", "external_transaction_id"),
+        ("Action by", "user_action_required_by"),
+        ("More info", "more_info_url"),
+    ] {
+        if let Some(value) = transaction_text(transaction, key) {
+            println!("{label:<12} {value}");
+        }
+    }
+    if transaction_text(transaction, "status") == Some("pending_user_transfer_start")
+        && matches!(
+            transaction_text(transaction, "kind"),
+            Some("withdrawal") | Some("withdraw")
+        )
+    {
+        println!("Next action: withdrawal payment is ready; rerun with --pay to review it.");
+    }
+    Ok(())
+}
+
+fn transaction_text<'a>(transaction: &'a JsonValue, key: &str) -> Option<&'a str> {
+    transaction
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct Sep24InteractiveResult {
     url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    transaction_id: Option<String>,
+    transaction_id: String,
 }
 
 fn parse_transfer_field(value: &str) -> Result<(String, String), String> {
@@ -550,10 +997,10 @@ fn parse_sep24_interactive_response(value: &JsonValue) -> Result<Sep24Interactiv
         .and_then(JsonValue::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_owned);
+        .ok_or_else(|| "Anchor SEP-24 interactive response has no transaction id".to_owned())?;
     Ok(Sep24InteractiveResult {
         url: url.to_owned(),
-        transaction_id,
+        transaction_id: transaction_id.to_owned(),
     })
 }
 
@@ -718,9 +1165,13 @@ fn render_sep24_result(
     println!("Domain:      {domain}");
     println!("Wallet:      {}", record.name);
     println!("Open URL:    {}", result.url);
-    if let Some(transaction_id) = &result.transaction_id {
-        println!("Transfer ID: {transaction_id}");
-    }
+    println!("Transfer ID: {}", result.transaction_id);
+    println!(
+        "Status:      fresnica --network {network} anchor status {} {} --protocol sep24 --wallet {}",
+        asset.display(),
+        result.transaction_id,
+        record.name
+    );
     Ok(())
 }
 
@@ -761,6 +1212,13 @@ fn render_sep6_result(
         serde_json::to_string_pretty(&response)
             .map_err(|error| format!("unable to encode anchor response: {error}"))?
     );
+    if let Some(transaction_id) = transaction_text(&response, "id") {
+        println!(
+            "Status:      fresnica --network {network} anchor status {} {transaction_id} --protocol sep6 --wallet {}",
+            asset.display(),
+            record.name
+        );
+    }
     Ok(())
 }
 
@@ -815,6 +1273,7 @@ where
             sep6_withdraw: false,
             sep6_deposit_info: serde_json::json!({}),
             sep6_withdraw_info: serde_json::json!({}),
+            sep6_transaction_info: serde_json::json!({}),
             sep24_deposit: false,
             sep24_withdraw: false,
             warnings: vec!["stellar.toml does not list this exact asset".to_owned()],
@@ -835,6 +1294,7 @@ where
     let mut sep6_withdraw = false;
     let mut sep6_deposit_info = serde_json::json!({});
     let mut sep6_withdraw_info = serde_json::json!({});
+    let mut sep6_transaction_info = serde_json::json!({});
     let mut sep24_deposit = false;
     let mut sep24_withdraw = false;
 
@@ -845,6 +1305,11 @@ where
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
                 sep6_withdraw_info = asset_info(info.get("withdraw"), &asset.code)
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                sep6_transaction_info = info
+                    .get("transaction")
+                    .filter(|value| value.is_object())
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
                 sep6_deposit = asset_enabled(info.get("deposit"), &asset.code);
@@ -868,7 +1333,11 @@ where
     let sep45_ready = web_auth_for_contracts_url.is_some()
         && web_auth_contract_id.is_some()
         && signing_key.is_some();
-    let sep6_requires_auth = [&sep6_deposit_info, &sep6_withdraw_info]
+    let sep6_requires_auth = [
+        &sep6_deposit_info,
+        &sep6_withdraw_info,
+        &sep6_transaction_info,
+    ]
         .into_iter()
         .any(|info| {
             info.get("authentication_required")
@@ -905,6 +1374,7 @@ where
         sep6_withdraw,
         sep6_deposit_info,
         sep6_withdraw_info,
+        sep6_transaction_info,
         sep24_deposit,
         sep24_withdraw,
         warnings,
@@ -1273,7 +1743,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor deposit CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor withdraw CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]"
+    "usage:\n  fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor deposit CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor withdraw CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor status CODE:GISSUER ID [--wallet NAME] [--protocol sep24|sep6] [--pay] [-y] [--json]"
 }
 
 #[cfg(test)]
@@ -1324,6 +1794,10 @@ mod tests {
                 "enabled": true,
                 "authentication_required": true,
                 "funding_methods": ["WIRE"]
+            }),
+            sep6_transaction_info: serde_json::json!({
+                "enabled": true,
+                "authentication_required": true
             }),
             sep24_deposit: true,
             sep24_withdraw: true,
@@ -1627,7 +2101,8 @@ issuer = "{ISSUER}"
             match url {
                 "https://anchor.example/sep6/info" => Ok(serde_json::json!({
                     "deposit": {"USD": {"enabled": true}},
-                    "withdraw": {"USD": {"enabled": false}}
+                    "withdraw": {"USD": {"enabled": false}},
+                    "transaction": {"enabled": true, "authentication_required": true}
                 })),
                 "https://anchor.example/sep24/info" => Ok(serde_json::json!({
                     "deposit": {"USD": {"enabled": true}},
@@ -1642,6 +2117,11 @@ issuer = "{ISSUER}"
         assert!(!capabilities.sep6_withdraw);
         assert_eq!(capabilities.sep6_deposit_info["enabled"], true);
         assert_eq!(capabilities.sep6_withdraw_info["enabled"], false);
+        assert_eq!(capabilities.sep6_transaction_info["enabled"], true);
+        assert_eq!(
+            capabilities.sep6_transaction_info["authentication_required"],
+            true
+        );
         assert!(capabilities.sep24_deposit);
         assert!(capabilities.sep24_withdraw);
         assert_eq!(
@@ -1850,7 +2330,7 @@ issuer = "{ISSUER}"
         }))
         .unwrap();
         assert_eq!(result.url, "https://anchor.example/interactive/123");
-        assert_eq!(result.transaction_id.as_deref(), Some("transfer-123"));
+        assert_eq!(result.transaction_id, "transfer-123");
 
         assert!(parse_sep24_interactive_response(&serde_json::json!({
             "type": "wrong",
@@ -1859,7 +2339,113 @@ issuer = "{ISSUER}"
         .is_err());
         assert!(parse_sep24_interactive_response(&serde_json::json!({
             "type": "interactive_customer_info_needed",
-            "url": "http://anchor.example/interactive/123"
+            "url": "https://anchor.example/interactive/123"
+        }))
+        .is_err());
+        assert!(parse_sep24_interactive_response(&serde_json::json!({
+            "type": "interactive_customer_info_needed",
+            "url": "http://anchor.example/interactive/123",
+            "id": "transfer-123"
+        }))
+        .is_err());
+    }
+
+
+    #[test]
+    fn status_protocol_prefers_sep24_and_allows_explicit_sep6() {
+        let capabilities = transfer_capabilities();
+        assert!(select_status_protocol(&capabilities, None)
+            .unwrap_err()
+            .contains("both SEP-24 and SEP-6"));
+        assert_eq!(
+            select_status_protocol(&capabilities, Some(AnchorProtocol::Sep24)).unwrap(),
+            AnchorProtocol::Sep24
+        );
+        assert_eq!(
+            select_status_protocol(&capabilities, Some(AnchorProtocol::Sep6)).unwrap(),
+            AnchorProtocol::Sep6
+        );
+
+        let mut fallback = capabilities.clone();
+        fallback.sep24_url = None;
+        assert_eq!(
+            select_status_protocol(&fallback, None).unwrap(),
+            AnchorProtocol::Sep6
+        );
+    }
+
+    #[test]
+    fn sep6_status_respects_transaction_auth_metadata() {
+        let mut capabilities = transfer_capabilities();
+        capabilities.sep24_url = None;
+        capabilities.sep10_auth = false;
+        capabilities.web_auth_url = None;
+
+        assert_eq!(
+            select_status_protocol(&capabilities, None).unwrap_err(),
+            "SEP-6 transaction status requires a complete Classic SEP-10 authentication path"
+        );
+
+        capabilities.sep6_transaction_info = serde_json::json!({
+            "enabled": true,
+            "authentication_required": false
+        });
+        assert_eq!(
+            select_status_protocol(&capabilities, None).unwrap(),
+            AnchorProtocol::Sep6
+        );
+    }
+
+    #[test]
+    fn anchor_transaction_response_validates_id_and_status() {
+        let transaction = parse_anchor_transaction_response(
+            &serde_json::json!({
+                "transaction": {
+                    "id": "tx-1",
+                    "kind": "withdrawal",
+                    "status": "pending_anchor"
+                }
+            }),
+            "tx-1",
+        )
+        .unwrap();
+        assert_eq!(transaction["status"], "pending_anchor");
+
+        assert!(parse_anchor_transaction_response(
+            &serde_json::json!({
+                "transaction": {"id": "other", "status": "pending_anchor"}
+            }),
+            "tx-1",
+        )
+        .is_err());
+        assert!(parse_anchor_transaction_response(
+            &serde_json::json!({"transaction": {"id": "tx-1"}}),
+            "tx-1",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn withdrawal_payment_requires_ready_status_and_parses_memo() {
+        let payment = withdrawal_payment_from_transaction(&serde_json::json!({
+            "id": "tx-1",
+            "kind": "withdrawal",
+            "status": "pending_user_transfer_start",
+            "withdraw_anchor_account": ISSUER,
+            "withdraw_memo_type": "id",
+            "withdraw_memo": "123",
+            "amount_in": "5.2500000"
+        }))
+        .unwrap();
+        assert_eq!(payment.destination, ISSUER);
+        assert_eq!(payment.amount, "5.2500000");
+        assert_eq!(payment.memo, PaymentMemo::Id(123));
+
+        assert!(withdrawal_payment_from_transaction(&serde_json::json!({
+            "kind": "withdrawal",
+            "status": "pending_anchor",
+            "withdraw_anchor_account": ISSUER,
+            "amount_in": "5"
         }))
         .is_err());
     }
