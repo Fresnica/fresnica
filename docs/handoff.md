@@ -125,7 +125,7 @@ normal app build
     -> no adapter-source rebuild
 ```
 
-For Mobile, React Native is the first adapter target. Canonical Android/Apple adapter source lives under `adapters/react-native` and targets the generalized Native SDK. Both platforms have one-time consumer build commands plus compatibility manifest/rebuild checks. The underlying Apple `FresnicaSDK` module is now validated on real macOS/Xcode; the remaining Apple adapter checkpoint is building the static adapter against a real React Native consumer's CocoaPods headers. Flutter/Desktop adapters should follow the same architecture when implemented.
+For Mobile, React Native is the first adapter target. Canonical Android/Apple adapter source lives under `adapters/react-native` and targets the generalized Native SDK. Both platforms have one-time consumer build commands plus compatibility manifest/rebuild checks. The underlying Apple `FresnicaSDK` module is now validated on real macOS/Xcode; the remaining Apple adapter checkpoint is building the static adapter against a real React Native consumer's CocoaPods headers. Run `bash adapters/react-native/apple/validate-consumer.sh /path/to/mobile` after `pod install` to execute that gate in one step. Flutter/Desktop adapters should follow the same architecture when implemented.
 
 An adapter may perform argument/result conversion, Promise/Future/callback mapping, thread dispatch and framework registration. It must not own cryptography, envelope mutation, signer identity verification, transaction signing logic or native key-protection policy.
 

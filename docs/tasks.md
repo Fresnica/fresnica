@@ -99,6 +99,7 @@
 - [x] Canonical React Native adapter source targets `fresnica-native-sdk` instead of the transitional Mobile facade
 - [x] React Native Android one-time adapter build entry point + compatibility manifest/rebuild diagnostics
 - [x] Apple one-time React Native adapter binary build path targets compiled `FresnicaSDK`
+- [x] One-command real-consumer Apple RN adapter validation wrapper (`adapters/react-native/apple/validate-consumer.sh`)
 - [ ] Validate static `FresnicaRNAdapter.xcframework` against a real React Native consumer (Native SDK XCFramework validated)
 - [x] WASM/Web API filtering and fresh-passcode routine-signing security boundary
 - [x] WASM source-boundary and generated-package surface tests

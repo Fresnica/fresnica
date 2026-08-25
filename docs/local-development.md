@@ -161,6 +161,24 @@ Run the test suite with:
 uv run pytest -q
 ```
 
+## Native SDK Apple validation
+
+Run the direct-consumer Apple SDK gate on a real macOS/Xcode toolchain:
+
+```bash
+bash bindings/native/scripts/validate-apple-local.sh
+```
+
+The validator now covers both iOS and macOS slices in `FresnicaSDK.xcframework` and `FresnicaSDKFFI.xcframework`. It type-checks SDK-owned Keychain/LocalAuthentication code on both platforms and verifies that independent Swift consumers can `import FresnicaSDK`.
+
+After a React Native consumer has run `pod install`, validate the one-time Apple adapter build with:
+
+```bash
+bash adapters/react-native/apple/validate-consumer.sh /path/to/react-native-project
+```
+
+That command compiles only the canonical RN glue against the consumer's actual CocoaPods headers, verifies the adapter compatibility manifest, and checks the device/simulator adapter slices. It does not make adapter-source compilation part of normal application builds.
+
 ## GitHub main bundle artifact
 
 A push to `main` runs the lightweight `Main bundle` workflow. It does not run the Rust, Android, Apple, or WASM validation suites. The job checks out complete history, creates a cloneable `fresnica-main.bundle`, verifies that its `main` ref and default checkout equal the pushed commit, then uploads it as the `fresnica-main-bundle` Actions artifact.
