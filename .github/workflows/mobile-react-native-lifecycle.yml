@@ -1,0 +1,24 @@
+name: Mobile React Native lifecycle
+
+on:
+  push:
+    paths:
+      - "bindings/mobile/react-native/**"
+      - ".github/workflows/mobile-react-native-lifecycle.yml"
+  pull_request:
+    paths:
+      - "bindings/mobile/react-native/**"
+      - ".github/workflows/mobile-react-native-lifecycle.yml"
+
+jobs:
+  account-signer-lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Type-check lifecycle source
+        run: npx --yes -p typescript@5.8.3 tsc -p bindings/mobile/react-native/tsconfig.json
+      - name: Test lifecycle behavior
+        run: npm test --prefix bindings/mobile/react-native
