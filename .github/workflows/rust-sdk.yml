@@ -22,18 +22,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Format universal SDK workspace
-        run: cargo fmt --manifest-path sdk/rust/Cargo.toml
+      - name: Check universal SDK formatting
+        run: cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
       - name: Test Rust Core
         run: cargo test --manifest-path core/rust/Cargo.toml
       - name: Test universal SDK
         run: cargo test --manifest-path sdk/rust/Cargo.toml
-      - name: Package formatted SDK source
-        run: zip -j /tmp/fresnica-sdk-formatted.zip sdk/rust/src/lib.rs
-      - name: Upload formatted SDK source
-        uses: actions/upload-artifact@v4
-        with:
-          name: fresnica-sdk-formatted
-          path: /tmp/fresnica-sdk-formatted.zip
-      - name: Require committed formatting
-        run: git diff --exit-code -- sdk/rust/src/lib.rs
