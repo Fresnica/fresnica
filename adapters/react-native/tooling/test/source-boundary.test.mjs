@@ -77,3 +77,14 @@ test('Apple binary build compiles framework glue without absorbing Native SDK so
   assert.match(build, /-create-xcframework/);
   assert.match(build, /! -path '\*macos\*'/, 'iOS device lookup must exclude the macOS Native SDK slice');
 });
+
+
+test('Apple real-consumer validator reuses Native SDK and checks adapter slices', async () => {
+  const validate = await readFile(path.join(ADAPTER_DIR, 'apple/validate-consumer.sh'), 'utf8');
+  assert.match(validate, /validate-apple-local\.sh/);
+  assert.match(validate, /fresnica-adapter\.mjs/);
+  assert.match(validate, /adapter-manifest\.mjs/);
+  assert.match(validate, /Pods\/Headers\/Public/);
+  assert.match(validate, /x86_64/);
+  assert.match(validate, /arm64/);
+});

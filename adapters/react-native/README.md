@@ -113,6 +113,14 @@ FresnicaRNAdapter.xcframework
 adapter-manifest.json
 ```
 
+For the real-consumer validation gate, use the one-command wrapper after `pod install`:
+
+```sh
+bash adapters/react-native/apple/validate-consumer.sh /path/to/mobile
+```
+
+It reuses `bindings/native/build/apple` when present (or runs the Apple Native SDK validator first), compiles the adapter against the consumer's actual React Native CocoaPods headers, verifies the compatibility manifest, and checks arm64 device plus arm64/x86_64 simulator slices.
+
 `FresnicaRNAdapter.xcframework` is a static XCFramework containing the Swift adapter implementation and Objective-C React Native registration shim. The normal application build links the pinned adapter binary plus the pinned Fresnica Native SDK; it does not compile adapter source. Keep `-ObjC` in the Apple host linker flags so the React Native registration category/constructor is retained.
 
 The underlying `FresnicaSDK.xcframework` iOS path has passed real macOS/Xcode validation. The remaining release gate is to run this adapter build against a real React Native consumer with CocoaPods headers and validate the resulting `FresnicaRNAdapter.xcframework`. The adapter's iOS-device slice selection explicitly excludes the macOS Native SDK slice now carried by the shared Apple XCFrameworks.
