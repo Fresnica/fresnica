@@ -21,6 +21,39 @@ pub fn transaction_hash(
         .map_err(TransactionSigningError::Xdr)
 }
 
+pub fn transaction_envelope_has_valid_signature(
+    envelope: &TransactionEnvelope,
+    network_passphrase: &str,
+    signer_public_key: &str,
+) -> Result<bool, TransactionSigningError> {
+    let public =
+        PublicKey::from_string(signer_public_key).map_err(|_| SignerError::InvalidPublicKey)?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&public.0).map_err(|_| SignerError::InvalidPublicKey)?;
+    let hash = transaction_hash(envelope, network_passphrase)?;
+    let hint = SignatureHint(public.0[28..32].try_into().expect("fixed public key length"));
+    let signatures = match envelope {
+        TransactionEnvelope::TxV0(value) => &value.signatures,
+        TransactionEnvelope::Tx(value) => &value.signatures,
+        TransactionEnvelope::TxFeeBump(value) => &value.signatures,
+    };
+
+    for decorated in signatures {
+        if decorated.hint != hint {
+            continue;
+        }
+        let Ok(signature_bytes) = <[u8; 64]>::try_from(decorated.signature.0.as_slice()) else {
+            continue;
+        };
+        let signature = Ed25519Signature::from_bytes(&signature_bytes);
+        if verifying_key.verify_strict(&hash, &signature).is_ok() {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 pub fn sign_transaction_envelope<S: ClassicSigner + ?Sized>(
     envelope: &mut TransactionEnvelope,
     network_passphrase: &str,
@@ -233,5 +266,25 @@ mod tests {
             sign_transaction_envelope(&mut envelope, TESTNET, &signer),
             Err(TransactionSigningError::DuplicateSignature)
         ));
+    }
+
+    #[test]
+    fn detects_valid_existing_signature_for_expected_key_and_network() {
+        let envelope = parse_transaction_envelope_xdr(&decode_hex(SIGNED_XDR_HEX)).unwrap();
+
+        assert!(transaction_envelope_has_valid_signature(&envelope, TESTNET, PUBLIC).unwrap());
+        assert!(!transaction_envelope_has_valid_signature(
+            &envelope,
+            "Public Global Stellar Network ; September 2015",
+            PUBLIC,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn unsigned_envelope_has_no_valid_signature() {
+        let envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
+
+        assert!(!transaction_envelope_has_valid_signature(&envelope, TESTNET, PUBLIC).unwrap());
     }
 }
