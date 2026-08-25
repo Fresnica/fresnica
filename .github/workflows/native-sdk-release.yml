@@ -157,7 +157,7 @@ jobs:
           gradle-version: "7.5.1"
       - name: Build and lint Native SDK AAR
         run: gradle -p bindings/native/platform/android assembleRelease lintRelease --stacktrace
-      - name: Validate and stage Android Native SDK
+      - name: Validate Android Native SDK
         shell: bash
         run: |
           set -euo pipefail
@@ -174,6 +174,15 @@ jobs:
           grep -q 'com/fresnica/sdk/security/WalletUnlockKeyStore.class' /tmp/fresnica-native-classes.txt
           grep -q 'com/fresnica/sdk/security/FresnicaSignerAuthorization.class' /tmp/fresnica-native-classes.txt
           ! grep -q -E 'reactnative|facebook/react|flutter' /tmp/fresnica-native-classes.txt
+      - name: Compile standalone raw-AAR consumer
+        run: |
+          AAR="$(find bindings/native/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          bash bindings/native/scripts/validate-android-consumer.sh "$AAR"
+      - name: Stage Android Native SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAR="$(find bindings/native/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
           mkdir -p dist
           cp "$AAR" "dist/fresnica-native-sdk-${{ needs.prepare.outputs.version }}.aar"
       - uses: actions/upload-artifact@v4

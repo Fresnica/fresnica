@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.library' version '7.4.0'
+    id 'org.jetbrains.kotlin.android' version '1.9.24'
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+android {
+    namespace 'com.fresnica.sdk.smoke'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 26
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+
+def nativeSdkAar = System.getenv('FRESNICA_NATIVE_AAR')
+if (!nativeSdkAar) {
+    throw new GradleException('FRESNICA_NATIVE_AAR is required')
+}
+
+dependencies {
+    implementation files(nativeSdkAar)
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
+    implementation 'net.java.dev.jna:jna:5.12.1@aar'
+    implementation 'androidx.annotation:annotation:1.8.2'
+}

@@ -89,6 +89,7 @@
 - [x] Mobile v0.1.0 compatibility facade delegates to `fresnica-sdk`
 - [x] Generalized `fresnica-native-sdk` UniFFI binding
 - [x] Android Native SDK AAR without framework adapter code
+- [x] Standalone Android raw-AAR consumer compile gate + explicit host dependency contract
 - [x] Apple Native SDK Rust FFI XCFramework/package without framework adapter code
 - [x] Validate compiled importable `FresnicaSDK.xcframework` packaging on real macOS/Xcode (`validate-apple-local.sh`, 2026-08-25)
 - [x] Android Keystore/native signer-authorization helpers in Native SDK package

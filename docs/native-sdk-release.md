@@ -91,6 +91,8 @@ dependencies {
 
 JNA is required by the UniFFI Kotlin runtime. Fresnica intentionally does not build a fat AAR just to hide these dependencies. A future Maven publication may carry the same dependency contract in POM/module metadata without changing the Native SDK API.
 
+Before staging the release AAR, CI compiles `bindings/native/tests/android-consumer` through `validate-android-consumer.sh` against the raw AAR and the marker-declared dependency set. This is the direct-consumer acceptance check for the GitHub-file distribution shape.
+
 ### Apple
 
 `FresnicaSDK-VERSION-apple.zip` contains:

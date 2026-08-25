@@ -51,6 +51,8 @@ On macOS, run `bash bindings/native/scripts/validate-apple-local.sh` to validate
 
 The current GitHub release shape distributes a raw AAR. Direct file consumers must also declare Kotlin stdlib 1.9.24, JNA 5.12.1 (`@aar`) and AndroidX annotation 1.8.2. These versions are part of the release manifest contract. A later Maven publication can express the same dependencies transitively; the Native SDK should not become a fat AAR.
 
+The standalone smoke consumer under `tests/android-consumer` is compiled by `scripts/validate-android-consumer.sh` in Native SDK packaging/release CI to prove that this raw-AAR dependency contract is sufficient.
+
 ## Platform signer authorization
 
 The generalized native packages now own the reusable platform security helpers that previously lived only in the transitional Mobile package:

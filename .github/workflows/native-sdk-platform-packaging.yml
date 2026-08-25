@@ -54,6 +54,10 @@ jobs:
           grep -q 'com/fresnica/sdk/security/WalletUnlockKeyStore.class' /tmp/fresnica-native-classes.txt
           grep -q 'com/fresnica/sdk/security/FresnicaSignerAuthorization.class' /tmp/fresnica-native-classes.txt
           ! grep -q -E 'reactnative|facebook/react|flutter' /tmp/fresnica-native-classes.txt
+      - name: Compile standalone raw-AAR consumer
+        run: |
+          AAR="$(find bindings/native/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          bash bindings/native/scripts/validate-android-consumer.sh "$AAR"
       - uses: actions/upload-artifact@v4
         with:
           name: fresnica-native-sdk-android-aar
