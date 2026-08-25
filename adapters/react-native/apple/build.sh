@@ -89,55 +89,32 @@ for headers_dir in "$PODS_PUBLIC" "$PODS_PRIVATE"; do
   fi
 done
 
-find_react_native_root() {
-  search_dir="$PROJECT_DIR"
-  while :; do
-    candidate="$search_dir/node_modules/react-native"
-    if [ -s "$candidate/React/Base/RCTBridgeModule.h" ]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-
-    parent_dir="$(dirname "$search_dir")"
-    if [ "$parent_dir" = "$search_dir" ]; then
-      break
-    fi
-    search_dir="$parent_dir"
-  done
-  return 1
-}
-
 REACT_BRIDGE_HEADER="$(find "$PODS_DIR" \
   \( -type f -o -type l \) \
   -path '*/React/RCTBridgeModule.h' \
   -print -quit)"
 
+REACT_DEVICE_FRAMEWORK=""
+REACT_SIMULATOR_FRAMEWORK=""
 if [ -n "$REACT_BRIDGE_HEADER" ]; then
   REACT_BRIDGE_ROOT="$(dirname "$(dirname "$REACT_BRIDGE_HEADER")")"
   react_header_flags+=("-I" "$REACT_BRIDGE_ROOT")
 else
-  REACT_NATIVE_ROOT="$(find_react_native_root || true)"
-  if [ -z "$REACT_NATIVE_ROOT" ]; then
-    echo "unable to locate React/RCTBridgeModule.h under $PODS_DIR or react-native under node_modules" >&2
-    exit 1
-  fi
-  if ! command -v ruby >/dev/null 2>&1; then
-    echo "ruby is required to reconstruct CocoaPods React Native source header namespaces" >&2
-    exit 1
-  fi
+  REACT_DEVICE_FRAMEWORK="$(find "$PODS_DIR" \
+    -type d -name React.framework \
+    -path '*React.xcframework/*/React.framework' \
+    ! -path '*simulator*' ! -path '*maccatalyst*' \
+    -exec test -s '{}/Headers/RCTBridgeModule.h' \; -print -quit)"
+  REACT_SIMULATOR_FRAMEWORK="$(find "$PODS_DIR" \
+    -type d -name React.framework \
+    -path '*React.xcframework/*simulator*/React.framework' \
+    -exec test -s '{}/Headers/RCTBridgeModule.h' \; -print -quit)"
 
-  POD_HEADER_SHIM="$SCRIPT_DIR/pod-header-shim.rb"
-  if [ ! -s "$POD_HEADER_SHIM" ]; then
-    echo "missing CocoaPods header resolver: $POD_HEADER_SHIM" >&2
+  if [ -z "$REACT_DEVICE_FRAMEWORK" ] || [ -z "$REACT_SIMULATOR_FRAMEWORK" ]; then
+    echo "unable to locate React/RCTBridgeModule.h in CocoaPods headers or installed React.xcframework" >&2
+    echo "run pod install for the consumer project and use the generated CocoaPods integration artifacts" >&2
     exit 1
   fi
-
-  while IFS= read -r header_root; do
-    [ -n "$header_root" ] && react_header_flags+=("-I" "$header_root")
-  done < <(ruby "$POD_HEADER_SHIM" \
-    "$REACT_NATIVE_ROOT" \
-    "$PODS_DIR" \
-    "$BUILD_DIR/react-source-headers")
 fi
 
 compile_slice() {
@@ -145,9 +122,14 @@ compile_slice() {
   target="$2"
   framework="$3"
   ffi_headers="$4"
-  slice_dir="$5"
+  react_framework="$5"
+  slice_dir="$6"
 
   sdk_root="$(xcrun --sdk "$sdk_name" --show-sdk-path)"
+  react_framework_flags=()
+  if [ -n "$react_framework" ]; then
+    react_framework_flags+=("-F" "$(dirname "$react_framework")")
+  fi
   xcrun --sdk "$sdk_name" swiftc \
     -target "$target" \
     -sdk "$sdk_root" \
@@ -164,6 +146,7 @@ compile_slice() {
     -isysroot "$sdk_root" \
     -fobjc-arc \
     -fmodules \
+    "${react_framework_flags[@]}" \
     "${react_header_flags[@]}" \
     -c "$OBJC_SOURCE" \
     -o "$slice_dir/FresnicaCoreModuleBridge.o"
@@ -179,6 +162,7 @@ compile_slice \
   "arm64-apple-ios${DEPLOYMENT_TARGET}" \
   "$DEVICE_FRAMEWORK" \
   "$DEVICE_FFI_HEADERS" \
+  "$REACT_DEVICE_FRAMEWORK" \
   "$BUILD_DIR/device"
 
 compile_slice \
@@ -186,6 +170,7 @@ compile_slice \
   "arm64-apple-ios${DEPLOYMENT_TARGET}-simulator" \
   "$SIMULATOR_FRAMEWORK" \
   "$SIMULATOR_FFI_HEADERS" \
+  "$REACT_SIMULATOR_FRAMEWORK" \
   "$BUILD_DIR/sim-arm64"
 
 compile_slice \
@@ -193,6 +178,7 @@ compile_slice \
   "x86_64-apple-ios${DEPLOYMENT_TARGET}-simulator" \
   "$SIMULATOR_FRAMEWORK" \
   "$SIMULATOR_FFI_HEADERS" \
+  "$REACT_SIMULATOR_FRAMEWORK" \
   "$BUILD_DIR/sim-x86_64"
 
 xcrun lipo -create \
