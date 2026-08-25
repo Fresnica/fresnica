@@ -19,4 +19,9 @@ node --check "$PROVIDER_DIR/scripts/verify-fixture.mjs"
 npm run --prefix "$PROVIDER_DIR" check:installed
 npm run --prefix "$PROVIDER_DIR" testnet:build
 
+FIXTURE="$PROVIDER_DIR/../../spec/test-vectors/smart-account-auth-v1.json"
+if [ -f "$FIXTURE" ]; then
+  npm run --prefix "$PROVIDER_DIR" fixture:verify -- "$FIXTURE"
+fi
+
 printf 'Fresnica smart-account provider local validation: OK\n'

@@ -110,8 +110,8 @@
 - [x] Pinned `smart-account-kit` provider boundary + Testnet deployment fixture + mock conformance tests
 - [x] Localhost WebAuthn/Testnet smoke harness for create/fund/discover/transfer
 - [x] Real-Testnet auth-XDR capture + Protocol-27/context-rule/WebAuthn fixture verifier harness
-- [ ] Real browser/Testnet passkey create/connect/sign-and-submit smoke validation
-- [ ] Smart-account auth-XDR/context-rule conformance fixtures from real Testnet transactions
+- [x] Real browser/Testnet passkey create/connect/sign-and-submit smoke validation
+- [x] Smart-account auth-XDR/context-rule conformance fixture from real Testnet transaction (`spec/test-vectors/smart-account-auth-v1.json`)
 - [ ] Platform-native Mobile passkey provider after the Testnet provider boundary is proven
 
 ## Mobile Binding

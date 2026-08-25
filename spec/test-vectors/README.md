@@ -8,8 +8,9 @@ Current sets:
 - `protection-v1.json`: password and system-key wallet-secret encryption compatibility.
 - `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
+- `smart-account-auth-v1.json`: real Protocol 27 Testnet smart-account authorization captured after a confirmed WebAuthn/passkey transfer and accepted by the provider fixture verifier.
 
-The first smart-account/WebAuthn vector is intentionally **not checked in yet**. `providers/smart-account-kit` contains a real-Testnet recorder/verifier that exports the signed Soroban auth XDR only after a confirmed Protocol 27 Testnet transaction and independently validates its context-rule binding and WebAuthn signature. The resulting real fixture should be added here; do not substitute a synthetic passkey vector for that checkpoint.
+The smart-account vector is captured public authorization material from Testnet, not a synthetic passkey fixture. It contains the confirmed transaction identity, host-function XDR and signed Soroban auth XDR required to replay the provider conformance checks; it does not contain a passkey private key or Fresnica software-wallet secret.
 
 ## Versioning
 
