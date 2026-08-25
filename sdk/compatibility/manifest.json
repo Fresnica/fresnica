@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "core": {
+    "packageVersion": "0.1.0",
+    "clientApiVersion": 2
+  },
+  "sdk": {
+    "packageVersion": "0.1.0",
+    "apiVersion": 2,
+    "requiresCoreClientApiVersion": 2
+  },
+  "native": {
+    "packageVersion": "0.1.0",
+    "bindingApiVersion": 1,
+    "requiresSdkApiVersion": 2
+  },
+  "mobileCompatibility": {
+    "packageVersion": "0.1.0",
+    "bindingApiVersion": 2,
+    "requiresSdkApiVersion": 2
+  },
+  "wasm": {
+    "packageVersion": "0.1.0",
+    "bindingApiVersion": 1,
+    "requiresSdkApiVersion": 2
+  },
+  "adapters": {
+    "reactNative": {
+      "sourceVersion": "0.1.0",
+      "requiresNativeBindingApiVersion": 1
+    }
+  }
+}

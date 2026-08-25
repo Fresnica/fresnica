@@ -205,6 +205,8 @@ The universal SDK work should provide:
 - adapter build entry point/tooling
 - clear rebuild-required diagnostics rather than silent adapter recompilation
 
+The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, and React Native adapter contract without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
+
 ## Phase 5 - Wallet Functional Foundation and Standards
 
 Continue wallet functionality while the SDK foundation is being completed. The goal is to stabilize reusable wallet behavior before investing heavily in final product UX.

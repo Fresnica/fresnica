@@ -360,6 +360,8 @@ Do not rewrite existing user trustline limits automatically and do not change th
 
 Validation workflows are PR/manual only so branch pushes and merges to `main` do not duplicate expensive builds. The Mobile SDK release workflow remains the exception: a release-marker change on `main` may publish the explicit release. Heavy Android/Apple packaging should be run only when the relevant Native SDK/platform boundary changes.
 
+`sdk/compatibility/manifest.json` now records the compatible Core/SDK/Native/Mobile/WASM/React-Native version set. Run `node sdk/compatibility/validate.mjs` after changing any API/version constant or adapter contract; the matching GitHub check is lightweight and PR/manual-only.
+
 ## Immediate Next Work
 
 The next coherent implementation batches are:

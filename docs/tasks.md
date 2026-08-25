@@ -103,6 +103,7 @@
 - [x] WASM source-boundary and generated-package surface tests
 - [x] WASM target/package compile validation
 - [x] Browser-package runtime/shared-vector conformance harness
+- [x] Machine-readable SDK compatibility manifest + source drift validator
 - [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
 - [x] Passkey/smart-account architecture decision: contract-account signer, not WalletUnlockKey wrapper
 - [x] Pinned `smart-account-kit` provider boundary + Testnet deployment fixture + mock conformance tests

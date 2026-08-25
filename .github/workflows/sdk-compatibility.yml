@@ -1,0 +1,31 @@
+name: SDK compatibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "core/rust/Cargo.toml"
+      - "core/rust/src/client_api.rs"
+      - "sdk/rust/Cargo.toml"
+      - "sdk/rust/src/lib.rs"
+      - "sdk/compatibility/**"
+      - "bindings/native/Cargo.toml"
+      - "bindings/native/src/lib.rs"
+      - "bindings/mobile/Cargo.toml"
+      - "bindings/mobile/src/lib.rs"
+      - "bindings/wasm/Cargo.toml"
+      - "bindings/wasm/src/lib.rs"
+      - "adapters/react-native/package.json"
+      - "adapters/react-native/adapter-contract.json"
+      - ".github/workflows/sdk-compatibility.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate SDK compatibility manifest
+        run: node sdk/compatibility/validate.mjs
