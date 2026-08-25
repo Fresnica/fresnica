@@ -36,6 +36,7 @@ Usage:
   fresnica [--home PATH] [--network mainnet|testnet] dex orderbook SELLING BUYING [--json]
   fresnica [--home PATH] [--network mainnet|testnet] dex offers [--wallet NAME] [--limit N] [--json]
   fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]
   fresnica [--home PATH] [--network mainnet|testnet] wallet COMMAND ...
 
 Network commands:
@@ -45,7 +46,7 @@ Network commands:
   send                          Review, sign through Fresnica SDK/Core, and submit a payment
   trust                         Add, change, or remove an issued-asset trustline
   dex                           Read and trade on the Stellar DEX
-  anchor                        Discover SEP-1/6/24 anchor capabilities
+  anchor                        Discover anchor capabilities and establish SEP-10 sessions
 
 Contact commands:
   list
@@ -114,7 +115,7 @@ fn run() -> Result<(), String> {
         "contact" => contacts::command_contact(&storage, &global.command[1..]),
         "trust" => trust::command_trust(&storage, &global.network, &global.command[1..]),
         "dex" => dex::command_dex(&storage, &global.network, &global.command[1..]),
-        "anchor" => anchor::command_anchor(&global.network, &global.command[1..]),
+        "anchor" => anchor::command_anchor(&storage, &global.network, &global.command[1..]),
         "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }
