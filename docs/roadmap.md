@@ -70,6 +70,8 @@ Implemented in the Python reference and increasingly ported to the native Rust C
 - Watch-only upgrade/downgrade with stable account identity
 - Realm-ready Account / Signer / reference schemas and WalletStore adapter
 - Staged/atomic app-passcode re-protection across protected software signers
+- Atomic protected-account secret/mnemonic import and mnemonic generation provisioning
+- Signer-centric explicit Reveal / Export with a fresh app passcode
 - CI isolation so React Native/persistence changes do not rebuild Rust bindings or four native ABIs
 
 ### Current
@@ -77,13 +79,14 @@ Implemented in the Python reference and increasingly ported to the native Rust C
 - Xaman-derived mobile host integration for the `FresnicaCore` React Native module
 - Connect the host application's Realm instance to `RealmWalletStore`
 - Account list/create/import/watch-only UX over the new Account/Signer model
+- Connect passcode rotation results to system-auth re-enrollment UX
 
 ### Next
 
 1. Wire the host-owned Realm configuration, migration boundary and `RealmWalletStore` into the mobile app shell.
-2. Add create/import/generate account workflows that persist AccountRecord and SignerRecord atomically.
+2. Connect create/import/generate/watch-only flows to the mobile account-management UI.
 3. Connect passcode rotation results to the actual app settings flow and system-auth re-enrollment UX.
-4. Add explicit mobile Reveal / Export handling with a fresh app passcode.
+4. Connect explicit signer Reveal / Export to a confirmation/display flow with fresh-passcode entry.
 5. Add a first real hardware signer transport using the existing external Ed25519 prepare/apply API.
 6. Continue desktop client work against the same Core/mobile-neutral facade where applicable.
 
@@ -95,7 +98,7 @@ Target product work after native security/module integration:
 - host Realm configuration/migration integration
 - system-auth enrollment and recovery fallback
 - software signing with no private key or unlock key crossing React Native for routine use
-- explicit Reveal / Export flow
+- explicit Reveal / Export confirmation/display UX
 - passcode rotation UI with post-commit system-auth re-enrollment
 - hardware/external signer UX
 - migration policy before first public wallet release
