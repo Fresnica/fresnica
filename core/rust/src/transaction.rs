@@ -63,6 +63,37 @@ pub fn sign_transaction_envelope<S: ClassicSigner + ?Sized>(
     Ok(())
 }
 
+pub fn verify_transaction_envelope_signature(
+    envelope: &TransactionEnvelope,
+    network_passphrase: &str,
+    signer_public_key: &str,
+) -> Result<(), TransactionSigningError> {
+    let hash = transaction_hash(envelope, network_passphrase)?;
+    let public = PublicKey::from_string(signer_public_key)
+        .map_err(|_| SignerError::InvalidPublicKey)?;
+    let mut hint = [0_u8; 4];
+    hint.copy_from_slice(&public.0[28..]);
+    let expected_hint = SignatureHint(hint);
+    let signatures = match envelope {
+        TransactionEnvelope::TxV0(value) => &value.signatures,
+        TransactionEnvelope::Tx(value) => &value.signatures,
+        TransactionEnvelope::TxFeeBump(value) => &value.signatures,
+    };
+
+    for decorated in signatures.iter().filter(|value| value.hint == expected_hint) {
+        let Ok(signature_bytes): Result<[u8; 64], _> =
+            decorated.signature.0.as_slice().try_into()
+        else {
+            continue;
+        };
+        if verify_signature(signer_public_key, &hash, &signature_bytes).is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err(TransactionSigningError::InvalidSignature)
+}
+
 fn verify_signature(
     public_key: &str,
     transaction_hash: &[u8; 32],
@@ -171,6 +202,21 @@ mod tests {
         sign_transaction_envelope(&mut envelope, TESTNET, &signer).unwrap();
 
         assert_eq!(transaction_envelope_xdr(&envelope).unwrap(), decode_hex(SIGNED_XDR_HEX));
+    }
+
+    #[test]
+    fn verifies_existing_envelope_signature_for_expected_signer() {
+        let envelope = parse_transaction_envelope_xdr(&decode_hex(SIGNED_XDR_HEX)).unwrap();
+
+        verify_transaction_envelope_signature(&envelope, TESTNET, PUBLIC).unwrap();
+        assert!(matches!(
+            verify_transaction_envelope_signature(
+                &envelope,
+                "Public Global Stellar Network ; September 2015",
+                PUBLIC,
+            ),
+            Err(TransactionSigningError::InvalidSignature)
+        ));
     }
 
     #[test]
