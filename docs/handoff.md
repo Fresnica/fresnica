@@ -102,6 +102,8 @@ Do not copy Mobile security assumptions blindly into browsers. Browser key prote
 
 Web may consume WASM directly. Add framework glue only where a real framework integration requires it.
 
+Passkey smart accounts are explicitly **not** a WebAuthn wrapper around `WalletUnlockKey`. `passkey-smart-account.md` defines them as `C...` contract accounts with provider/on-chain authorization. The first interoperability target is Stellar `smart-account-kit`; keep that integration outside protected Ed25519 signer records and outside Core platform-auth APIs.
+
 ## Framework Adapter Contract
 
 Authoritative document: `mobile-framework-adapter-contract.md`.
@@ -365,7 +367,7 @@ The next coherent implementation batches are:
 1. **Validate Apple binary packaging**: run `bindings/native/scripts/validate-apple-local.sh` on real macOS/Xcode, then validate the static `FresnicaRNAdapter.xcframework` path against a real React Native consumer; keep SDK-owned Swift/security code out of framework adapters.
 2. **Keep the RN adapter contract stable**: Android and Apple now have one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
 3. **Desktop Native SDK execution**: the direct-consumer contract is defined; after Apple validation, extend `FresnicaSDK` to macOS Swift. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
-4. **WASM/Web boundary**: the filtered fresh-passcode WASM API is implemented and has passed `wasm32-unknown-unknown` compilation, generated-package surface validation, and Node-hosted shared-vector runtime conformance on macOS. Keep persistent WebAuthn/passkey authorization as a separate design.
+4. **WASM/Web + smart account**: the filtered fresh-passcode WASM API is validated for classic protected Ed25519 accounts. The passkey design is now separate and explicit: prototype the `smart-account-kit` contract-account provider on Testnet rather than adding passkey-derived unlock-key APIs to WASM.
 5. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
 6. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
 7. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.

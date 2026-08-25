@@ -104,7 +104,9 @@
 - [x] WASM target/package compile validation
 - [x] Browser-package runtime/shared-vector conformance harness
 - [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
-- [ ] Persistent WebAuthn/passkey authorization design (separate review)
+- [x] Passkey/smart-account architecture decision: contract-account signer, not WalletUnlockKey wrapper
+- [ ] Testnet `smart-account-kit` provider prototype and smart-account auth conformance fixtures
+- [ ] Platform-native Mobile passkey provider after the Testnet provider boundary is proven
 
 ## Mobile Binding
 

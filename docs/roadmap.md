@@ -161,7 +161,7 @@ Validated on macOS with the Rust + `wasm-bindgen` toolchain via `bindings/wasm/s
 - generated JS/TypeScript surface validation;
 - Node-hosted runtime conformance against shared transaction vectors.
 
-The remaining Web security work is intentionally separate from this SDK checkpoint: design any persistent WebAuthn/passkey authorization model before adding browser-persistent authorization.
+The passkey architecture is now defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. The next passkey work is a Testnet provider prototype and auth-XDR conformance, not an unlock-key API added to WASM.
 
 Web should normally consume the WASM SDK directly. Add a web-framework adapter only if a framework creates a real integration need.
 
@@ -283,7 +283,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 2. Separate framework-specific code from future Native SDK release binaries; retain `v0.1.0` only as the transitional baseline.
 3. Make React Native the first canonical one-time-build adapter implementation, with generated binary + compatibility manifest tooling.
 4. Define Desktop Native SDK targets and WASM/Web contract boundaries; reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
-5. Continue wallet functional coverage and SEP-aligned behavior, including hardware/external signer work when appropriate.
+5. Continue wallet functional coverage and SEP-aligned behavior, including hardware/external signer work and the separate smart-account/passkey provider prototype when appropriate.
 6. Keep the Rust CLI as the reference native client and evaluate a Rust TUI as an engineering client.
 7. Once these foundations are stable, move concentrated effort into Mobile/Desktop/Web wallet experience.
 

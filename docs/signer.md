@@ -126,7 +126,11 @@ This keeps transaction-hash/signature semantics authoritative in Core without re
 
 A `C...` contract address is not an Ed25519 signer public key. Supplying a mnemonic or `S...` key cannot by itself be treated as upgrading a contract account.
 
-Future contract/passkey signing must use an authorization model appropriate to Soroban contract authentication rather than being forced through the classic Ed25519 signer contract.
+Passkey smart accounts are a separate contract-account authorization model rather than a `WalletUnlockKey` mechanism for an existing Ed25519 software signer. Fresnica should target Stellar's smart-account/OpenZeppelin authorization model through a provider adapter and preserve the authenticator + on-chain verifier as the passkey security authority.
+
+Do not overload `ProtectedSoftwareSigner` / `signer_public_key: G...` for passkeys. A future passkey signer record needs separate credential/verifier/provider identity and must remain attached to a `C...` AccountRecord through the ordinary Account != Signer relationship.
+
+See `passkey-smart-account.md` for the current design contract.
 
 ## Client/Core responsibility split
 
