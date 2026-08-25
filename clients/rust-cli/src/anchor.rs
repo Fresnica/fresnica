@@ -1,8 +1,9 @@
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use stellar_xdr::{
     AccountId, Memo, MuxedAccount, OperationBody, Preconditions, PublicKey, TimeBounds,
@@ -10,9 +11,12 @@ use stellar_xdr::{
 };
 use toml::Value as TomlValue;
 use url::Url;
+use zeroize::Zeroizing;
 
+use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction_flow::{
-    has_valid_transaction_signature, network_client, parse_transaction_xdr,
+    has_valid_transaction_signature, network_client, network_passphrase, parse_transaction_xdr,
+    resolve_local_signing_wallet, sign_transaction_xdr_with_wallet,
 };
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
@@ -76,12 +80,17 @@ pub struct AnchorCapabilities {
     pub warnings: Vec<String>,
 }
 
-pub fn command_anchor(network: &str, arguments: &[String]) -> Result<(), String> {
+pub fn command_anchor(
+    storage: &WalletStorage,
+    network: &str,
+    arguments: &[String],
+) -> Result<(), String> {
     let Some(command) = arguments.first().map(String::as_str) else {
         return Err(usage().to_owned());
     };
     match command {
         "discover" => command_discover(network, &arguments[1..]),
+        "auth" => command_auth(storage, network, &arguments[1..]),
         _ => Err(usage().to_owned()),
     }
 }
@@ -99,14 +108,7 @@ fn command_discover(network: &str, arguments: &[String]) -> Result<(), String> {
         }
     }
 
-    let issuer = network_client(network)?.get_account(&asset.issuer)?;
-    let home_domain = issuer
-        .get("home_domain")
-        .and_then(JsonValue::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("Asset issuer {} has no home_domain", asset.issuer))?;
-    let capabilities = discover(&asset, home_domain)?;
+    let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
 
     if json {
         println!(
@@ -156,6 +158,73 @@ fn command_discover(network: &str, arguments: &[String]) -> Result<(), String> {
         println!("Warning:    {warning}");
     }
     Ok(())
+}
+
+fn command_auth(
+    storage: &WalletStorage,
+    network: &str,
+    arguments: &[String],
+) -> Result<(), String> {
+    if arguments.is_empty() {
+        return Err(usage().to_owned());
+    }
+    let asset = IssuedAsset::parse(&arguments[0])?;
+    let mut wallet = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--wallet" => {
+                index += 1;
+                wallet = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--wallet requires a wallet name".to_owned())?
+                        .as_str(),
+                );
+                index += 1;
+            }
+            _ => return Err(usage().to_owned()),
+        }
+    }
+
+    let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
+    let web_auth_endpoint = capabilities.web_auth_url.as_deref().ok_or_else(|| {
+        format!("{} does not advertise a SEP-10 WEB_AUTH_ENDPOINT", capabilities.domain)
+    })?;
+    let signing_key = capabilities.signing_key.as_deref().ok_or_else(|| {
+        format!("{} does not advertise a SEP-10 SIGNING_KEY", capabilities.domain)
+    })?;
+    let record = resolve_local_signing_wallet(storage, network, wallet)?;
+    let token = authenticate_sep10(
+        &record,
+        network,
+        &home_domain,
+        web_auth_endpoint,
+        signing_key,
+    )?;
+
+    println!("Authenticated · {} [{}]", capabilities.domain, network);
+    println!("Wallet:        {}", record.name);
+    println!("Address:       {}", record.address);
+    println!("Token:         verified in memory, then discarded");
+    drop(token);
+    Ok(())
+}
+
+fn resolve_anchor(
+    network: &str,
+    asset: &IssuedAsset,
+) -> Result<(String, AnchorCapabilities), String> {
+    let issuer = network_client(network)?.get_account(&asset.issuer)?;
+    let home_domain = issuer
+        .get("home_domain")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("Asset issuer {} has no home_domain", asset.issuer))?;
+    let home_domain = valid_domain(home_domain)?;
+    let capabilities = discover(asset, &home_domain)?;
+    Ok((home_domain, capabilities))
 }
 
 fn discover(asset: &IssuedAsset, home_domain: &str) -> Result<AnchorCapabilities, String> {
@@ -289,6 +358,103 @@ where
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct Sep10ChallengeResponse {
+    transaction: String,
+    #[serde(default)]
+    network_passphrase: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Sep10TokenResponse {
+    token: String,
+}
+
+fn authenticate_sep10(
+    record: &WalletRecord,
+    network: &str,
+    home_domain: &str,
+    web_auth_endpoint: &str,
+    signing_key: &str,
+) -> Result<Zeroizing<String>, String> {
+    let challenge = request_sep10_challenge(web_auth_endpoint, &record.address)?;
+    validate_sep10_network_passphrase(network, challenge.network_passphrase.as_deref())?;
+
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "system clock is before Unix epoch".to_owned())?
+        .as_secs();
+    let verified_xdr = verify_sep10_challenge(
+        &challenge.transaction,
+        network,
+        &record.address,
+        signing_key,
+        home_domain,
+        web_auth_endpoint,
+        now_unix,
+    )?;
+    let signed_xdr = sign_transaction_xdr_with_wallet(record, network, verified_xdr)?;
+    let signed_envelope = parse_transaction_xdr(&signed_xdr)?;
+    if !has_valid_transaction_signature(&signed_envelope, network, &record.address)? {
+        return Err("Fresnica SDK did not return a valid client signature for SEP-10".to_owned());
+    }
+
+    exchange_sep10_challenge(web_auth_endpoint, &STANDARD.encode(signed_xdr))
+}
+
+fn validate_sep10_network_passphrase(
+    network: &str,
+    server_network_passphrase: Option<&str>,
+) -> Result<(), String> {
+    if let Some(server_network_passphrase) = server_network_passphrase {
+        if server_network_passphrase != network_passphrase(network)? {
+            return Err(format!(
+                "SEP-10 server network_passphrase does not match local {network} configuration"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn request_sep10_challenge(
+    web_auth_endpoint: &str,
+    account: &str,
+) -> Result<Sep10ChallengeResponse, String> {
+    let url = sep10_challenge_url(web_auth_endpoint, account)?;
+    let value = fetch_json(url.as_str())?;
+    serde_json::from_value(value)
+        .map_err(|error| format!("Invalid SEP-10 challenge response from {web_auth_endpoint}: {error}"))
+}
+
+fn sep10_challenge_url(
+    web_auth_endpoint: &str,
+    account: &str,
+) -> Result<Url, String> {
+    let mut url = Url::parse(web_auth_endpoint)
+        .map_err(|_| "WEB_AUTH_ENDPOINT must be a valid URL".to_owned())?;
+    url.query_pairs_mut().append_pair("account", account);
+    Ok(url)
+}
+
+fn exchange_sep10_challenge(
+    web_auth_endpoint: &str,
+    signed_transaction: &str,
+) -> Result<Zeroizing<String>, String> {
+    let mut response = ureq::post(web_auth_endpoint)
+        .send_json(serde_json::json!({"transaction": signed_transaction}))
+        .map_err(|error| format!("Unable to exchange SEP-10 challenge at {web_auth_endpoint}: {error}"))?;
+    let value = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_ANCHOR_DOCUMENT_BYTES)
+        .read_json::<Sep10TokenResponse>()
+        .map_err(|error| format!("Invalid SEP-10 token response from {web_auth_endpoint}: {error}"))?;
+    if value.token.trim().is_empty() {
+        return Err("SEP-10 token response did not include a token".to_owned());
+    }
+    Ok(Zeroizing::new(value.token))
+}
+
 fn verify_sep10_challenge(
     challenge_xdr: &str,
     network: &str,
@@ -419,10 +585,7 @@ fn web_auth_domain(endpoint: &str) -> Result<String, String> {
     let host = url
         .host_str()
         .ok_or_else(|| "WEB_AUTH_ENDPOINT must include a host".to_owned())?;
-    Ok(match url.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_owned(),
-    })
+    Ok(host.to_owned())
 }
 
 fn valid_domain(value: &str) -> Result<String, String> {
@@ -557,7 +720,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]"
+    "usage:\n  fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]"
 }
 
 #[cfg(test)]
@@ -582,6 +745,39 @@ mod tests {
 
     fn asset() -> IssuedAsset {
         IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap()
+    }
+
+    #[test]
+    fn sep10_challenge_request_binds_account_without_optional_extensions() {
+        let url = sep10_challenge_url(WEB_AUTH_ENDPOINT, ISSUER).unwrap();
+        let pairs = url.query_pairs().collect::<Vec<_>>();
+
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("auth.example.com"));
+        assert!(pairs.iter().any(|(key, value)| key == "account" && value == ISSUER));
+        assert_eq!(pairs.len(), 1);
+    }
+
+    #[test]
+    fn sep10_server_network_is_consistency_check_not_authority() {
+        assert!(validate_sep10_network_passphrase(TESTNET, None).is_ok());
+        assert!(validate_sep10_network_passphrase(TESTNET, Some(TESTNET_PASSPHRASE)).is_ok());
+        assert_eq!(
+            validate_sep10_network_passphrase(
+                TESTNET,
+                Some("Public Global Stellar Network ; September 2015"),
+            )
+            .unwrap_err(),
+            "SEP-10 server network_passphrase does not match local testnet configuration"
+        );
+    }
+
+    #[test]
+    fn sep10_web_auth_domain_is_hostname_not_transport_port() {
+        assert_eq!(
+            web_auth_domain("https://auth.example.com:8443/sep10").unwrap(),
+            "auth.example.com"
+        );
     }
 
     fn manage_data(source: &str, key: &str, value: Vec<u8>) -> Operation {

@@ -71,6 +71,19 @@ pub fn resolve_signing_wallet(
     network: &str,
     name: Option<&str>,
 ) -> Result<WalletRecord, String> {
+    let record = resolve_local_signing_wallet(storage, network, name)?;
+
+    set_active_client_home(storage.home());
+    PendingTransactionStore::for_home(storage.home())
+        .reconcile_and_ensure_clear(network, &record.address)?;
+    Ok(record)
+}
+
+pub(crate) fn resolve_local_signing_wallet(
+    storage: &WalletStorage,
+    network: &str,
+    name: Option<&str>,
+) -> Result<WalletRecord, String> {
     let record = storage.resolve(name)?;
     if record.network != network {
         return Err(format!(
@@ -81,10 +94,6 @@ pub fn resolve_signing_wallet(
     if record.watch_only() || record.secret.is_none() {
         return Err(format!("wallet \"{}\" is watch-only", record.name));
     }
-
-    set_active_client_home(storage.home());
-    PendingTransactionStore::for_home(storage.home())
-        .reconcile_and_ensure_clear(network, &record.address)?;
     Ok(record)
 }
 
@@ -176,31 +185,12 @@ pub fn sign_and_submit(
     envelope: &mut TransactionEnvelope,
     horizon: &HorizonClient,
 ) -> Result<(), String> {
-    let passcode = crate::prompt_hidden("Fresnica passcode: ")?;
-    let protected = record
-        .secret
-        .as_ref()
-        .ok_or_else(|| "wallet has no protected signing material".to_owned())?;
-    let protected_json = serde_json::to_string(protected)
-        .map_err(|error| format!("Unable to encode protected signing material: {error}"))?;
     let network_passphrase = network_passphrase(network)?;
     let unsigned_xdr = transaction_envelope_xdr(envelope)
         .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
-    let signed_xdr = FresnicaSdk::new()
-        .sign_transaction_xdr_with_passcode(
-            protected_json,
-            passcode.as_str().to_owned(),
-            record.address.clone(),
-            unsigned_xdr,
-            network_passphrase.to_owned(),
-        )
-        .map_err(|error| match error.code {
-            SdkErrorCode::InvalidPasscode => "Unable to unlock wallet: invalid Fresnica passcode".to_owned(),
-            _ => format!("Unable to sign transaction: {error}"),
-        })?;
+    let signed_xdr = sign_transaction_xdr_with_wallet(record, network, unsigned_xdr)?;
     *envelope = parse_transaction_envelope_xdr(&signed_xdr)
         .map_err(|error| format!("Unable to decode transaction returned by Fresnica SDK: {error}"))?;
-    drop(passcode);
 
     let tx_hash = transaction_hash(envelope, network_passphrase)
         .map_err(|error| format!("Unable to hash signed transaction: {error}"))?;
@@ -243,6 +233,39 @@ pub fn sign_and_submit(
             }
         }
     }
+}
+
+pub(crate) fn sign_transaction_xdr_with_wallet(
+    record: &WalletRecord,
+    network: &str,
+    transaction_xdr: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    if record.watch_only() || record.secret.is_none() {
+        return Err(format!("wallet \"{}\" is watch-only", record.name));
+    }
+    let passcode = crate::prompt_hidden("Fresnica passcode: ")?;
+    let protected = record
+        .secret
+        .as_ref()
+        .ok_or_else(|| "wallet has no protected signing material".to_owned())?;
+    let protected_json = serde_json::to_string(protected)
+        .map_err(|error| format!("Unable to encode protected signing material: {error}"))?;
+    let signed_xdr = FresnicaSdk::new()
+        .sign_transaction_xdr_with_passcode(
+            protected_json,
+            passcode.as_str().to_owned(),
+            record.address.clone(),
+            transaction_xdr,
+            network_passphrase(network)?.to_owned(),
+        )
+        .map_err(|error| match error.code {
+            SdkErrorCode::InvalidPasscode => {
+                "Unable to unlock wallet: invalid Fresnica passcode".to_owned()
+            }
+            _ => format!("Unable to sign transaction: {error}"),
+        })?;
+    drop(passcode);
+    Ok(signed_xdr)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -571,7 +594,7 @@ fn account_id_to_muxed(account: &AccountId) -> MuxedAccount {
     }
 }
 
-fn network_passphrase(network: &str) -> Result<&'static str, String> {
+pub(crate) fn network_passphrase(network: &str) -> Result<&'static str, String> {
     match network {
         "mainnet" => Ok(MAINNET_PASSPHRASE),
         "testnet" => Ok(TESTNET_PASSPHRASE),
