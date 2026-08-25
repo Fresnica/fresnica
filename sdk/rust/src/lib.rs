@@ -645,7 +645,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(revealed.kind, SdkSigningMaterialKind::Mnemonic);
-        assert_eq!(revealed.mnemonic.as_deref(), Some(generated.mnemonic.as_str()));
+        assert_eq!(
+            revealed.mnemonic.as_deref(),
+            Some(generated.mnemonic.as_str())
+        );
         assert_eq!(revealed.index, Some(0));
         assert_eq!(revealed.language.as_deref(), Some("english"));
     }
