@@ -242,7 +242,9 @@ mod tests {
         let OperationBody::ManageData(data) = &mut value.tx.operations[0].body else {
             unreachable!();
         };
-        data.data_name = StringM::<64>::try_from("attacker.example auth").unwrap();
+        data.data_name = stellar_xdr::String64(
+            StringM::<64>::try_from("attacker.example auth").unwrap(),
+        );
         let mutated = fresnica_core::transaction_envelope_xdr(&envelope).unwrap();
 
         assert!(verify(&mutated, 1_597_691_000).is_err());
