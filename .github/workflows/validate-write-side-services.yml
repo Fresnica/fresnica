@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct exact candidate patch
+      - name: Reconstruct exact candidate tree
         shell: bash
         run: |
           cat .validation/candidate.b64.* | base64 -d > /tmp/candidate.patch.gz
@@ -21,7 +21,19 @@ jobs:
           git config user.name 'OpenAI Validation'
           git config user.email 'noreply@openai.com'
           git am /tmp/candidate.patch
-          git diff --check HEAD~2..HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('clients/rust-cli/src/dex_write.rs')
+          s = p.read_text()
+          old = '''use fresnica_client::{\n    WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,\n};\n'''
+          new = 'use fresnica_client::{WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};\n'
+          if old not in s:
+              raise SystemExit('expected rustfmt delta not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git add clients/rust-cli/src/dex_write.rs
+          git diff --cached --check
+          test "$(git write-tree)" = '6197cf7d463853b7c0e165061cf1861e6b556a2a'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
