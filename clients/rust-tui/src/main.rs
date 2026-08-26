@@ -274,6 +274,7 @@ impl TrustlineForm {
 enum OfferFormAction {
     Buy,
     Sell,
+    Update,
     Cancel,
 }
 
@@ -282,6 +283,7 @@ impl OfferFormAction {
         match self {
             Self::Buy => "buy",
             Self::Sell => "sell",
+            Self::Update => "update",
             Self::Cancel => "cancel",
         }
     }
@@ -290,14 +292,16 @@ impl OfferFormAction {
         match self {
             Self::Buy => Self::Cancel,
             Self::Sell => Self::Buy,
-            Self::Cancel => Self::Sell,
+            Self::Update => Self::Sell,
+            Self::Cancel => Self::Update,
         }
     }
 
     fn next(self) -> Self {
         match self {
             Self::Buy => Self::Sell,
-            Self::Sell => Self::Cancel,
+            Self::Sell => Self::Update,
+            Self::Update => Self::Cancel,
             Self::Cancel => Self::Buy,
         }
     }
@@ -353,6 +357,11 @@ impl OfferForm {
     fn current_mut(&mut self) -> Option<&mut String> {
         match (self.action, self.active) {
             (OfferFormAction::Cancel, 1) => Some(&mut self.offer_id),
+            (OfferFormAction::Update, 1) => Some(&mut self.offer_id),
+            (OfferFormAction::Update, 2) => Some(&mut self.base),
+            (OfferFormAction::Update, 3) => Some(&mut self.counter),
+            (OfferFormAction::Update, 4) => Some(&mut self.amount),
+            (OfferFormAction::Update, 5) => Some(&mut self.price),
             (OfferFormAction::Buy | OfferFormAction::Sell, 1) => Some(&mut self.base),
             (OfferFormAction::Buy | OfferFormAction::Sell, 2) => Some(&mut self.counter),
             (OfferFormAction::Buy | OfferFormAction::Sell, 3) => Some(&mut self.amount),
@@ -377,16 +386,27 @@ impl OfferForm {
                 price: self.price.clone(),
                 allow_trustline: self.allow_trustline,
             }),
-            OfferFormAction::Cancel => {
-                let offer_id = self
-                    .offer_id
-                    .parse::<i64>()
-                    .ok()
-                    .filter(|value| *value > 0)
-                    .ok_or_else(|| "offer id must be a positive integer".to_owned())?;
-                Ok(OfferRequest::Cancel { wallet, offer_id })
-            }
+            OfferFormAction::Update => Ok(OfferRequest::Update {
+                wallet,
+                offer_id: self.offer_id()?,
+                base: self.base.clone(),
+                counter: self.counter.clone(),
+                amount: self.amount.clone(),
+                price: self.price.clone(),
+            }),
+            OfferFormAction::Cancel => Ok(OfferRequest::Cancel {
+                wallet,
+                offer_id: self.offer_id()?,
+            }),
         }
+    }
+
+    fn offer_id(&self) -> Result<i64, String> {
+        self.offer_id
+            .parse::<i64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "offer id must be a positive integer".to_owned())
     }
 }
 
@@ -600,11 +620,18 @@ impl App {
                 }
                 KeyCode::Char('b') if form.active == 0 => form.action = OfferFormAction::Buy,
                 KeyCode::Char('s') if form.active == 0 => form.action = OfferFormAction::Sell,
+                KeyCode::Char('u') if form.active == 0 => {
+                    form.action = OfferFormAction::Update;
+                    form.normalize_active();
+                }
                 KeyCode::Char('c') if form.active == 0 => {
                     form.action = OfferFormAction::Cancel;
                     form.normalize_active();
                 }
-                KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if form.active == 5 => {
+                KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                    if form.active == 5
+                        && matches!(form.action, OfferFormAction::Buy | OfferFormAction::Sell) =>
+                {
                     form.allow_trustline = !form.allow_trustline;
                 }
                 KeyCode::Enter if form.active + 1 < form.field_count() => form.next_field(),
@@ -966,6 +993,15 @@ impl App {
                 ("Action", form.action.label().to_owned()),
                 ("Offer ID", form.offer_id.clone()),
             ]
+        } else if form.action == OfferFormAction::Update {
+            vec![
+                ("Action", form.action.label().to_owned()),
+                ("Offer ID", form.offer_id.clone()),
+                ("Base", form.base.clone()),
+                ("Counter", form.counter.clone()),
+                ("Amount", form.amount.clone()),
+                ("Price", form.price.clone()),
+            ]
         } else {
             vec![
                 ("Action", form.action.label().to_owned()),
@@ -992,7 +1028,7 @@ impl App {
             })
             .chain(std::iter::once(Line::from("")))
             .chain(std::iter::once(Line::from(
-                "Pair assets use XLM or CODE:GISSUER. Price is counter units per base unit.",
+                "Action: b buy, s sell, u update, c cancel. Price is counter per base.",
             )))
             .collect::<Vec<_>>();
         frame.render_widget(Clear, area);
@@ -1254,6 +1290,27 @@ mod tests {
                 wallet: Some(ref wallet),
                 offer_id: 42,
             } if wallet == "primary"
+        ));
+    }
+
+    #[test]
+    fn offer_form_builds_shared_update_request() {
+        let mut form = OfferForm::new();
+        form.action = OfferFormAction::Update;
+        form.offer_id = "42".to_owned();
+        form.base = "XLM".to_owned();
+        form.counter = "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".to_owned();
+        form.amount = "3.5".to_owned();
+        form.price = "1.75".to_owned();
+        assert!(matches!(
+            form.request("primary").unwrap(),
+            OfferRequest::Update {
+                wallet: Some(ref wallet),
+                offer_id: 42,
+                ref amount,
+                ref price,
+                ..
+            } if wallet == "primary" && amount == "3.5" && price == "1.75"
         ));
     }
 
