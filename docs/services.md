@@ -1,40 +1,9 @@
-# Fresnica Services
+# Fresnica Services — Legacy Terminology
 
-## Principle
+`Service` is an older implementation-oriented term.
 
-Fresnica uses Stellar SDK for Stellar protocol operations. Fresnica services organize user workflows.
+The cross-platform architecture now uses **Application Capabilities** as the canonical name for reusable wallet/application semantics below product Features.
 
-## Services
+See [Fresnica Application Capabilities](application-capabilities.md).
 
-### BalanceService
-
-Combines Wallet identity, StellarAdapter and DataStore.
-
-### AvailabilityService
-
-Calculates spendable amounts from raw account data.
-
-Example:
-
-```
-available = balance - selling_liabilities
-```
-
-### TransactionService
-
-Flow:
-
-```
-TransactionIntent
-        |
-        v
-Prepare
-        |
-        v
-Sign
-        |
-        v
-Submit
-```
-
-Transaction construction and signing delegate to Stellar SDK and Signer.
+Existing code symbols such as `AnchorService` may remain until there is a concrete reason to rename them. Do not perform mechanical renames solely for terminology consistency.
