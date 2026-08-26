@@ -4,92 +4,67 @@ import com.fresnica.sdk.FresnicaSdkApi
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
-/**
- * Native-only orchestration for Fresnica protected-software signing on Android.
- *
- * A native host or reviewed framework adapter may drive this service with reviewed XDR, encrypted
- * signer envelopes, signer public keys, and an app passcode when explicitly requested, but it never
- * receives WalletUnlockKey bytes from this service.
- */
+/** Native-only authorization for Fresnica protected software signers on Android. */
 class FresnicaSignerAuthorization(
     private val keyStore: WalletUnlockKeyStore,
     private val core: FresnicaSdkApi = FresnicaSdkApi(),
 ) : AutoCloseable {
 
-    /**
-     * Derives a verified WalletUnlockKey inside native code and prepares the exact Cipher that
-     * BiometricPrompt must authenticate before the key can be enrolled.
-     */
-    fun beginSystemAuthEnrollment(
+    fun beginSystemAuthDomainEnrollment(): DomainEnrollmentSession =
+        DomainEnrollmentSession(keyStore.beginDomainEnrollment())
+
+    fun finishSystemAuthDomainEnrollment(session: DomainEnrollmentSession) {
+        session.consume()
+        keyStore.finishDomainEnrollment(session.storeSession)
+    }
+
+    fun cancelSystemAuthDomainEnrollment(session: DomainEnrollmentSession) {
+        if (session.tryConsume()) keyStore.cancelDomainEnrollment(session.storeSession)
+    }
+
+    fun hasSystemAuthDomain(): Boolean = keyStore.hasDomain()
+
+    /** Passcode-authenticated signer registration; no biometric operation occurs here. */
+    fun registerSignerSystemAuth(
         envelopeJson: String,
         appPasscode: String,
         expectedSignerPublicKey: String,
-    ): EnrollmentSession {
-        val unlockKey = core.deriveUnlockKey(
-            envelopeJson,
-            appPasscode,
-            expectedSignerPublicKey,
-        )
-        require(unlockKey.size == WalletUnlockKeyStore.UNLOCK_KEY_BYTES) {
-            "SDK returned an invalid WalletUnlockKey length"
-        }
-
-        return try {
-            EnrollmentSession(
-                keyStore.beginEnrollment(expectedSignerPublicKey),
-                unlockKey,
-            )
-        } catch (error: Throwable) {
-            unlockKey.fill(0)
-            throw error
-        }
-    }
-
-    /** Completes enrollment only after BiometricPrompt authenticated session.cipher. */
-    fun finishSystemAuthEnrollment(session: EnrollmentSession) {
-        val unlockKey = session.takeUnlockKey()
+    ) {
+        val unlockKey = core.deriveUnlockKey(envelopeJson, appPasscode, expectedSignerPublicKey)
         try {
-            keyStore.finishEnrollment(session.storeSession, unlockKey)
-        } catch (error: Throwable) {
-            runCatching { keyStore.cancelEnrollment(session.storeSession) }
-            throw error
+            require(unlockKey.size == WalletUnlockKeyStore.UNLOCK_KEY_BYTES) {
+                "SDK returned an invalid WalletUnlockKey length"
+            }
+            keyStore.enrollSigner(expectedSignerPublicKey, unlockKey)
         } finally {
             unlockKey.fill(0)
         }
     }
 
-    /** Cancels a pending enrollment and removes its temporary AndroidKeyStore alias. */
-    fun cancelSystemAuthEnrollment(session: EnrollmentSession) {
-        check(session.discardUnlockKey()) {
-            "Enrollment session has already been completed"
-        }
-        keyStore.cancelEnrollment(session.storeSession)
+    fun isSignerSystemAuthEnrolled(expectedSignerPublicKey: String): Boolean =
+        keyStore.isEnrolled(expectedSignerPublicKey)
+
+    fun removeSignerSystemAuth(expectedSignerPublicKey: String) {
+        keyStore.deleteSigner(expectedSignerPublicKey)
     }
 
-    /**
-     * Freezes the reviewed signing inputs and returns the exact decrypt Cipher to authenticate.
-     * The transaction bytes are copied so the caller cannot mutate the pending reviewed payload.
-     */
+    fun removeSystemAuthDomain() {
+        keyStore.deleteDomain()
+    }
+
     fun beginSystemAuthSign(
         envelopeJson: String,
         expectedSignerPublicKey: String,
         transactionXdr: ByteArray,
         networkPassphrase: String,
-    ): SigningSession {
-        val storeSession = keyStore.beginUnlock(expectedSignerPublicKey)
-        return SigningSession(
-            storeSession = storeSession,
-            envelopeJson = envelopeJson,
-            expectedSignerPublicKey = expectedSignerPublicKey,
-            transactionXdr = transactionXdr.copyOf(),
-            networkPassphrase = networkPassphrase,
-        )
-    }
+    ): SigningSession = SigningSession(
+        storeSession = keyStore.beginUnlock(expectedSignerPublicKey),
+        envelopeJson = envelopeJson,
+        expectedSignerPublicKey = expectedSignerPublicKey,
+        transactionXdr = transactionXdr.copyOf(),
+        networkPassphrase = networkPassphrase,
+    )
 
-    /**
-     * Decrypts the native-only WalletUnlockKey after biometric success, signs through the Fresnica SDK,
-     * and zeros the temporary key bytes before returning signed XDR.
-     */
     fun finishSystemAuthSign(session: SigningSession): ByteArray {
         session.consume()
         try {
@@ -113,15 +88,11 @@ class FresnicaSignerAuthorization(
         }
     }
 
-    /** Cancels a pending biometric sign and clears its frozen reviewed transaction bytes. */
     fun cancelSystemAuthSign(session: SigningSession) {
         session.consume()
         session.clearTransaction()
     }
 
-    /**
-     * App-passcode recovery/fallback path. The derived unlock key never leaves this native method.
-     */
     fun signWithPasscode(
         envelopeJson: String,
         appPasscode: String,
@@ -129,11 +100,7 @@ class FresnicaSignerAuthorization(
         transactionXdr: ByteArray,
         networkPassphrase: String,
     ): ByteArray {
-        val unlockKey = core.deriveUnlockKey(
-            envelopeJson,
-            appPasscode,
-            expectedSignerPublicKey,
-        )
+        val unlockKey = core.deriveUnlockKey(envelopeJson, appPasscode, expectedSignerPublicKey)
         try {
             return core.signTransactionXdr(
                 envelopeJson,
@@ -147,41 +114,15 @@ class FresnicaSignerAuthorization(
         }
     }
 
-    fun isSystemAuthEnrolled(expectedSignerPublicKey: String): Boolean =
-        keyStore.isEnrolled(expectedSignerPublicKey)
+    override fun close() { core.close() }
 
-    fun removeSystemAuth(expectedSignerPublicKey: String) {
-        keyStore.delete(expectedSignerPublicKey)
-    }
-
-    override fun close() {
-        core.close()
-    }
-
-    class EnrollmentSession internal constructor(
-        internal val storeSession: WalletUnlockKeyStore.EnrollmentSession,
-        unlockKey: ByteArray,
+    class DomainEnrollmentSession internal constructor(
+        internal val storeSession: WalletUnlockKeyStore.DomainEnrollmentSession,
     ) {
-        private var pendingUnlockKey: ByteArray? = unlockKey
-
-        val cipher: Cipher
-            get() = storeSession.cipher
-
-        @Synchronized
-        internal fun takeUnlockKey(): ByteArray {
-            val key = pendingUnlockKey
-                ?: throw IllegalStateException("Enrollment session has already been completed")
-            pendingUnlockKey = null
-            return key
-        }
-
-        @Synchronized
-        internal fun discardUnlockKey(): Boolean {
-            val key = pendingUnlockKey ?: return false
-            key.fill(0)
-            pendingUnlockKey = null
-            return true
-        }
+        private val consumed = AtomicBoolean(false)
+        val cipher: Cipher get() = storeSession.cipher
+        internal fun consume() { check(consumed.compareAndSet(false, true)) { "Domain enrollment session has already been consumed" } }
+        internal fun tryConsume(): Boolean = consumed.compareAndSet(false, true)
     }
 
     class SigningSession internal constructor(
@@ -194,19 +135,8 @@ class FresnicaSignerAuthorization(
         private val consumed = AtomicBoolean(false)
         internal var transactionXdr: ByteArray = transactionXdr
             private set
-
-        val cipher: Cipher
-            get() = storeSession.cipher
-
-        internal fun consume() {
-            check(consumed.compareAndSet(false, true)) {
-                "Signing session has already been consumed"
-            }
-        }
-
-        internal fun clearTransaction() {
-            transactionXdr.fill(0)
-            transactionXdr = ByteArray(0)
-        }
+        val cipher: Cipher get() = storeSession.cipher
+        internal fun consume() { check(consumed.compareAndSet(false, true)) { "Signing session has already been consumed" } }
+        internal fun clearTransaction() { transactionXdr.fill(0); transactionXdr = ByteArray(0) }
     }
 }

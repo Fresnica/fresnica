@@ -13,7 +13,7 @@ use crate::{
     WalletMaterialError, WalletUnlockKey,
 };
 
-pub const CLIENT_API_VERSION: u64 = 2;
+pub const CLIENT_API_VERSION: u64 = 3;
 
 /// Transport-neutral Core boundary for process, mobile, desktop, and SDK hosts.
 ///
@@ -123,6 +123,38 @@ impl CoreClientApi {
             language: language.to_owned(),
             index,
         })
+    }
+
+    pub fn derive_mnemonic_signer(
+        &self,
+        source_envelope: &Value,
+        passcode: &str,
+        expected_source_signer_public_key: &str,
+        index: usize,
+    ) -> Result<ClientProtectedSoftwareSigner, ClientApiError> {
+        let material = self.reveal(
+            source_envelope,
+            passcode,
+            expected_source_signer_public_key,
+        )?;
+        match material {
+            ExportedSigningMaterial::Mnemonic {
+                mnemonic,
+                mnemonic_passphrase,
+                language,
+                ..
+            } => self.protect_mnemonic(
+                mnemonic.as_str(),
+                mnemonic_passphrase.as_str(),
+                index,
+                Some(language.as_str()),
+                passcode,
+                None,
+            ),
+            ExportedSigningMaterial::Secret { .. } => Err(ClientApiError::invalid_input(
+                "source protected signer is not mnemonic-backed",
+            )),
+        }
     }
 
     pub fn reprotect(
@@ -579,6 +611,55 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.code(), ClientApiErrorCode::IdentityMismatch);
+    }
+
+    #[test]
+    fn derives_new_mnemonic_signer_without_exporting_mnemonic() {
+        let api = CoreClientApi::new();
+        let generated = api
+            .generate_mnemonic("english", 128, "", 0, "passcode")
+            .unwrap();
+        let source_public_key = generated.signer.signer_public_key.clone();
+        let derived = api
+            .derive_mnemonic_signer(
+                &generated.signer.envelope,
+                "passcode",
+                &source_public_key,
+                1,
+            )
+            .unwrap();
+
+        assert_ne!(derived.signer_public_key, source_public_key);
+        let revealed = api
+            .reveal(&derived.envelope, "passcode", &derived.signer_public_key)
+            .unwrap();
+        match revealed {
+            ExportedSigningMaterial::Mnemonic { index, .. } => assert_eq!(index, 1),
+            _ => panic!("derived signer must remain mnemonic-backed"),
+        }
+    }
+
+    #[test]
+    fn derive_mnemonic_signer_authenticates_source_and_rejects_secret_source() {
+        let api = CoreClientApi::new();
+        let generated = api
+            .generate_mnemonic("english", 128, "", 0, "passcode")
+            .unwrap();
+        let error = api
+            .derive_mnemonic_signer(
+                &generated.signer.envelope,
+                "passcode",
+                OTHER_PUBLIC,
+                1,
+            )
+            .unwrap_err();
+        assert_eq!(error.code(), ClientApiErrorCode::IdentityMismatch);
+
+        let secret = api.protect_secret(SECRET, "passcode", None).unwrap();
+        let error = api
+            .derive_mnemonic_signer(&secret.envelope, "passcode", PUBLIC, 1)
+            .unwrap_err();
+        assert_eq!(error.code(), ClientApiErrorCode::InvalidInput);
     }
 
     #[test]

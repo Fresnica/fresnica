@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
 
-pub const NATIVE_BINDING_API_VERSION: u64 = 1;
+pub const NATIVE_BINDING_API_VERSION: u64 = 2;
 
 #[derive(uniffi::Object)]
 pub struct FresnicaSdkApi;
@@ -107,6 +107,24 @@ impl FresnicaSdkApi {
         self.sdk()
             .generate_mnemonic(language, strength, mnemonic_passphrase, index, passcode)
             .map(native_generated_mnemonic)
+            .map_err(NativeSdkError::from)
+    }
+
+    pub fn derive_mnemonic_signer(
+        &self,
+        source_envelope_json: String,
+        app_passcode: String,
+        expected_source_signer_public_key: String,
+        index: u32,
+    ) -> Result<NativeProtectedSoftwareSigner, NativeSdkError> {
+        self.sdk()
+            .derive_mnemonic_signer(
+                source_envelope_json,
+                app_passcode,
+                expected_source_signer_public_key,
+                index,
+            )
+            .map(native_protected_signer)
             .map_err(NativeSdkError::from)
     }
 
@@ -457,6 +475,30 @@ mod tests {
         let contract = api.parse_account(CONTRACT.to_owned()).unwrap();
         assert_eq!(contract.kind, NativeAccountKind::Contract);
         assert_eq!(contract.public_key, None);
+    }
+
+    #[test]
+    fn derives_mnemonic_signer_through_native_binding() {
+        let api = FresnicaSdkApi::new();
+        let generated = api
+            .generate_mnemonic(
+                "english".to_owned(),
+                128,
+                String::new(),
+                0,
+                "passcode".to_owned(),
+            )
+            .unwrap();
+        let source_public_key = generated.signer.signer_public_key.clone();
+        let derived = api
+            .derive_mnemonic_signer(
+                generated.signer.envelope_json,
+                "passcode".to_owned(),
+                source_public_key.clone(),
+                1,
+            )
+            .unwrap();
+        assert_ne!(derived.signer_public_key, source_public_key);
     }
 
     #[test]
