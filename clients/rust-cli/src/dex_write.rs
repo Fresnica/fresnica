@@ -12,7 +12,7 @@ use crate::transaction_flow::{
     sign_and_submit, STROOPS_PER_XLM,
 };
 use fresnica_client::{
-    HorizonClient, WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
+    WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
 };
 
 const FRESNICA_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -158,7 +158,7 @@ fn command_create(
         println!("Transaction cancelled.");
         return Ok(());
     }
-    sign_and_submit(&record, network, &mut envelope, &horizon)
+    sign_and_submit(storage, &record, network, &mut envelope, &horizon)
 }
 
 fn command_update(
@@ -223,7 +223,7 @@ fn command_update(
         println!("Transaction cancelled.");
         return Ok(());
     }
-    sign_and_submit(&record, network, &mut envelope, &horizon)
+    sign_and_submit(storage, &record, network, &mut envelope, &horizon)
 }
 
 fn command_cancel(
@@ -284,7 +284,7 @@ fn command_cancel(
         println!("Transaction cancelled.");
         return Ok(());
     }
-    sign_and_submit(&record, network, &mut envelope, &horizon)
+    sign_and_submit(storage, &record, network, &mut envelope, &horizon)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -127,7 +127,7 @@ pub fn command_trust(
         println!("Transaction cancelled.");
         return Ok(());
     }
-    sign_and_submit(&record, network, &mut envelope, &horizon)
+    sign_and_submit(storage, &record, network, &mut envelope, &horizon)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

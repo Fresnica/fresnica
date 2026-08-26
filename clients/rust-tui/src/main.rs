@@ -4,15 +4,16 @@ use std::process;
 
 use fresnica_client::{
     balance_asset_label, operation_summary, BalanceSnapshot, FresnicaClient, HistorySnapshot,
-    WalletRecord,
+    PaymentRequest, PreparedPayment, WalletRecord,
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, List, ListItem, Paragraph, Row, Table};
+use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Row, Table};
 use ratatui::Frame;
 use serde_json::Value;
+use zeroize::Zeroize;
 
 const HELP: &str = r#"Fresnica native Rust TUI
 
@@ -23,9 +24,13 @@ Keys:
   q / Esc     quit
   r           refresh balances and recent activity
   [ / ]       previous / next wallet on the selected network
+  s           prepare a payment from the selected signing wallet
+
+Payment flow:
+  form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
 
 The Rust TUI is an engineering/reference UI over fresnica-client. It does not
-implement separate wallet, cryptographic, or Horizon semantics.
+implement separate wallet, cryptographic, transaction, or Horizon semantics.
 "#;
 
 fn main() {
@@ -54,13 +59,11 @@ fn run() -> Result<(), String> {
         loop {
             terminal.draw(|frame| app.render(frame))?;
             match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                    KeyCode::Char('r') => app.refresh(),
-                    KeyCode::Char('[') | KeyCode::Left => app.select_previous(),
-                    KeyCode::Char(']') | KeyCode::Right => app.select_next(),
-                    _ => {}
-                },
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if app.handle_key(key.code) {
+                        break Ok(());
+                    }
+                }
                 _ => {}
             }
         }
@@ -128,6 +131,55 @@ impl Options {
     }
 }
 
+enum Mode {
+    Browse,
+    Send(SendForm),
+    Review(PreparedPayment),
+    Passcode {
+        prepared: PreparedPayment,
+        passcode: String,
+    },
+}
+
+struct SendForm {
+    amount: String,
+    asset: String,
+    destination: String,
+    memo: String,
+    active: usize,
+}
+
+impl SendForm {
+    fn new() -> Self {
+        Self {
+            amount: String::new(),
+            asset: "XLM".to_owned(),
+            destination: String::new(),
+            memo: String::new(),
+            active: 0,
+        }
+    }
+
+    fn current_mut(&mut self) -> &mut String {
+        match self.active {
+            0 => &mut self.amount,
+            1 => &mut self.asset,
+            2 => &mut self.destination,
+            _ => &mut self.memo,
+        }
+    }
+
+    fn request(&self, wallet: &str) -> PaymentRequest {
+        PaymentRequest {
+            wallet: Some(wallet.to_owned()),
+            amount: self.amount.clone(),
+            asset: self.asset.clone(),
+            destination: self.destination.clone(),
+            memo: (!self.memo.is_empty()).then(|| self.memo.clone()),
+        }
+    }
+}
+
 struct App {
     client: FresnicaClient,
     wallets: Vec<WalletRecord>,
@@ -135,6 +187,7 @@ struct App {
     balances: Vec<Value>,
     operations: Vec<Value>,
     status: String,
+    mode: Mode,
 }
 
 impl App {
@@ -175,6 +228,7 @@ impl App {
             balances: Vec::new(),
             operations: Vec::new(),
             status: String::new(),
+            mode: Mode::Browse,
         };
         app.refresh();
         Ok(app)
@@ -224,6 +278,117 @@ impl App {
         }
     }
 
+    fn handle_key(&mut self, code: KeyCode) -> bool {
+        let wallet_name = self.selected_wallet().name.clone();
+        let mut prepare = None;
+        let mut submit = false;
+
+        match &mut self.mode {
+            Mode::Browse => match code {
+                KeyCode::Char('q') | KeyCode::Esc => return true,
+                KeyCode::Char('r') => self.refresh(),
+                KeyCode::Char('[') | KeyCode::Left => self.select_previous(),
+                KeyCode::Char(']') | KeyCode::Right => self.select_next(),
+                KeyCode::Char('s') => {
+                    if self.selected_wallet().watch_only() {
+                        self.status =
+                            "Selected wallet is watch-only; attach a signer before sending"
+                                .to_owned();
+                    } else {
+                        self.mode = Mode::Send(SendForm::new());
+                        self.status = "Preparing payment".to_owned();
+                    }
+                }
+                _ => {}
+            },
+            Mode::Send(form) => match code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Payment cancelled before review".to_owned();
+                }
+                KeyCode::Tab | KeyCode::Down => form.active = (form.active + 1) % 4,
+                KeyCode::BackTab | KeyCode::Up => form.active = (form.active + 3) % 4,
+                KeyCode::Enter if form.active < 3 => form.active += 1,
+                KeyCode::Enter => prepare = Some(form.request(&wallet_name)),
+                KeyCode::Backspace => {
+                    form.current_mut().pop();
+                }
+                KeyCode::Char(character) => form.current_mut().push(character),
+                _ => {}
+            },
+            Mode::Review(prepared) => match code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.mode = Mode::Passcode {
+                        prepared: prepared.clone(),
+                        passcode: String::new(),
+                    };
+                    self.status = "Enter Fresnica passcode; input is masked".to_owned();
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Payment cancelled after review".to_owned();
+                }
+                _ => {}
+            },
+            Mode::Passcode { passcode, .. } => match code {
+                KeyCode::Esc => {
+                    passcode.zeroize();
+                    self.mode = Mode::Browse;
+                    self.status = "Payment cancelled before signing".to_owned();
+                }
+                KeyCode::Enter if passcode.is_empty() => {
+                    self.status = "Fresnica passcode cannot be empty".to_owned();
+                }
+                KeyCode::Enter => submit = true,
+                KeyCode::Backspace => {
+                    passcode.pop();
+                }
+                KeyCode::Char(character) => passcode.push(character),
+                _ => {}
+            },
+        }
+
+        if let Some(request) = prepare {
+            match self.client.prepare_payment(&request) {
+                Ok(prepared) => {
+                    self.mode = Mode::Review(prepared);
+                    self.status = "Review the exact prepared payment before signing".to_owned();
+                }
+                Err(error) => self.status = error,
+            }
+        }
+
+        if submit {
+            let result = match &mut self.mode {
+                Mode::Passcode { prepared, passcode } => {
+                    let submitted_passcode = passcode.clone();
+                    passcode.zeroize();
+                    self.client.submit_payment(prepared, submitted_passcode)
+                }
+                _ => return false,
+            };
+            match result {
+                Ok(submission) => {
+                    self.mode = Mode::Browse;
+                    self.refresh();
+                    self.status = match submission.ledger {
+                        Some(ledger) => format!("Submitted {} in ledger {ledger}", submission.hash),
+                        None => format!("Submitted {}", submission.hash),
+                    };
+                }
+                Err(error) if error.contains("invalid Fresnica passcode") => {
+                    self.status = error;
+                }
+                Err(error) => {
+                    self.mode = Mode::Browse;
+                    self.status = error;
+                }
+            }
+        }
+
+        false
+    }
+
     fn render(&self, frame: &mut Frame) {
         let [header_area, main_area, footer_area] = Layout::vertical([
             Constraint::Length(4),
@@ -247,9 +412,16 @@ impl App {
             self.render_activity(frame, activity_area);
         }
         self.render_footer(frame, footer_area);
+
+        match &self.mode {
+            Mode::Browse => {}
+            Mode::Send(form) => self.render_send_form(frame, form),
+            Mode::Review(prepared) => self.render_review(frame, prepared),
+            Mode::Passcode { passcode, .. } => self.render_passcode(frame, passcode),
+        }
     }
 
-    fn render_header(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_header(&self, frame: &mut Frame, area: Rect) {
         let wallet = self.selected_wallet();
         let capability = if wallet.watch_only() {
             "Watch-only"
@@ -274,7 +446,7 @@ impl App {
         );
     }
 
-    fn render_assets(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_assets(&self, frame: &mut Frame, area: Rect) {
         let header = Row::new(["Asset", "Balance", "Selling", "Buying"])
             .style(Style::new().add_modifier(Modifier::BOLD));
         let rows = self.balances.iter().map(|balance| {
@@ -304,7 +476,7 @@ impl App {
         frame.render_widget(table, area);
     }
 
-    fn render_activity(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_activity(&self, frame: &mut Frame, area: Rect) {
         let address = &self.selected_wallet().address;
         let items = if self.operations.is_empty() {
             vec![ListItem::new("No recent activity")]
@@ -327,13 +499,112 @@ impl App {
         );
     }
 
-    fn render_footer(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let body = format!(
-            "{}\nq quit   r refresh   [ / ] switch wallet (session only)",
-            self.status
-        );
+    fn render_footer(&self, frame: &mut Frame, area: Rect) {
+        let help = match &self.mode {
+            Mode::Browse => "q quit   r refresh   [ / ] switch wallet   s send",
+            Mode::Send(_) => "type value   Tab/Up/Down field   Enter next/prepare   Esc cancel",
+            Mode::Review(_) => "y/Enter sign   n/Esc cancel",
+            Mode::Passcode { .. } => "Enter submit   Backspace edit   Esc cancel",
+        };
+        let body = format!("{}\n{help}", self.status);
         frame.render_widget(Paragraph::new(body).block(Block::bordered()), area);
     }
+
+    fn render_send_form(&self, frame: &mut Frame, form: &SendForm) {
+        let area = popup_area(frame.area());
+        let fields = [
+            ("Amount", &form.amount),
+            ("Asset", &form.asset),
+            ("Destination", &form.destination),
+            ("Memo (optional)", &form.memo),
+        ];
+        let lines = fields
+            .iter()
+            .enumerate()
+            .map(|(index, (label, value))| {
+                let line = Line::from(format!("{label:<18} {value}"));
+                if index == form.active {
+                    line.style(Style::new().add_modifier(Modifier::BOLD))
+                } else {
+                    line
+                }
+            })
+            .chain(std::iter::once(Line::from("")))
+            .chain(std::iter::once(Line::from(
+                "Destination may be a G address or a saved contact name.",
+            )))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Prepare payment")),
+            area,
+        );
+    }
+
+    fn render_review(&self, frame: &mut Frame, prepared: &PreparedPayment) {
+        let review = &prepared.review;
+        let mut lines = vec![
+            Line::from(format!("Operation: {}", review.operation.label())),
+            Line::from(format!(
+                "From:      {} ({})",
+                review.wallet_name, review.source
+            )),
+            Line::from(match &review.contact_name {
+                Some(name) => format!("To:        {name} ({})", review.destination),
+                None => format!("To:        {}", review.destination),
+            }),
+            Line::from(format!("Amount:    {} {}", review.amount, review.asset)),
+            Line::from(format!("Fee:       {} XLM", review.fee_xlm)),
+            Line::from(format!("Network:   {}", review.network)),
+        ];
+        if let Some(memo) = &review.memo {
+            lines.push(Line::from(format!(
+                "Memo:      {} ({})",
+                memo.value, memo.memo_type
+            )));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from("Press y/Enter to continue to signing."));
+        let area = popup_area(frame.area());
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Review transaction")),
+            area,
+        );
+    }
+
+    fn render_passcode(&self, frame: &mut Frame, passcode: &str) {
+        let area = popup_area(frame.area());
+        let masked = "*".repeat(passcode.chars().count());
+        let lines = vec![
+            Line::from("The passcode is passed to the shared client service only after review."),
+            Line::from(""),
+            Line::from(format!("Fresnica passcode: {masked}")),
+            Line::from(""),
+            Line::from("Enter submits the prepared transaction."),
+        ];
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Sign and submit")),
+            area,
+        );
+    }
+}
+
+fn popup_area(area: Rect) -> Rect {
+    let [_, vertical, _] = Layout::vertical([
+        Constraint::Percentage(14),
+        Constraint::Percentage(72),
+        Constraint::Percentage(14),
+    ])
+    .areas(area);
+    let [_, popup, _] = Layout::horizontal([
+        Constraint::Percentage(10),
+        Constraint::Percentage(80),
+        Constraint::Percentage(10),
+    ])
+    .areas(vertical);
+    popup
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -390,5 +661,19 @@ mod tests {
     fn rejects_unknown_network_before_starting_terminal() {
         let error = Options::parse(&["--network".to_owned(), "future".to_owned()]).unwrap_err();
         assert_eq!(error, "unknown network: future");
+    }
+
+    #[test]
+    fn send_form_builds_shared_payment_request() {
+        let mut form = SendForm::new();
+        form.amount = "1.25".to_owned();
+        form.destination = "Alice".to_owned();
+        form.memo = "hello".to_owned();
+        let request = form.request("primary");
+        assert_eq!(request.wallet.as_deref(), Some("primary"));
+        assert_eq!(request.amount, "1.25");
+        assert_eq!(request.asset, "XLM");
+        assert_eq!(request.destination, "Alice");
+        assert_eq!(request.memo.as_deref(), Some("hello"));
     }
 }

@@ -47,6 +47,10 @@ impl FresnicaClient {
         &self.storage
     }
 
+    pub(crate) fn horizon(&self) -> &HorizonClient {
+        &self.horizon
+    }
+
     pub fn wallets(&self) -> Result<Vec<WalletRecord>, String> {
         Ok(self
             .storage

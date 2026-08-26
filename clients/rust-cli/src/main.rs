@@ -108,11 +108,11 @@ fn run() -> Result<(), String> {
         "account" => read_commands::command_account(&client, &global.command[1..]),
         "balance" | "assets" => read_commands::command_balance(&client, &global.command[1..]),
         "history" => read_commands::command_history(&client, &global.command[1..]),
-        "send" => send::command_send(storage, &global.network, &global.command[1..]),
+        "send" => send::command_send(&client, &global.command[1..]),
         "contact" => contacts::command_contact(storage, &global.command[1..]),
         "trust" => trust::command_trust(storage, &global.network, &global.command[1..]),
         "dex" => dex::command_dex(storage, &global.network, &global.command[1..]),
-        "anchor" => anchor::command_anchor(storage, &global.network, &global.command[1..]),
+        "anchor" => anchor::command_anchor(&client, &global.command[1..]),
         "wallet" => command_wallet(storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }

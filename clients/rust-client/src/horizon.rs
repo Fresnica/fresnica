@@ -45,6 +45,23 @@ impl HorizonClient {
         }
     }
 
+    pub fn get_transaction(&self, transaction_hash: &str) -> Result<Option<Value>, String> {
+        let url = format!("{}/transactions/{transaction_hash}", self.base_url);
+        let mut response = match ureq::get(&url).call() {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return Ok(None),
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(format!("Horizon returned HTTP {code} for {url}"))
+            }
+            Err(error) => return Err(format!("Unable to contact Horizon at {url}: {error}")),
+        };
+        response
+            .body_mut()
+            .read_json::<Value>()
+            .map(Some)
+            .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
+    }
+
     pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
         let response = self.get_json(
             &format!("/accounts/{address}/operations?order=desc&limit={limit}"),

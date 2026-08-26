@@ -15,12 +15,12 @@ use ureq::unversioned::multipart::Form;
 use url::Url;
 use zeroize::Zeroizing;
 
-use crate::send::{review_and_submit_payment, PaymentMemo};
+use crate::send::review_and_submit_payment;
 use crate::transaction_flow::{
     has_valid_transaction_signature, network_client, network_passphrase, parse_transaction_xdr,
     resolve_local_signing_wallet, resolve_signing_wallet, sign_transaction_xdr_with_wallet,
 };
-use fresnica_client::{WalletRecord, WalletStorage};
+use fresnica_client::{FresnicaClient, PaymentMemo, WalletRecord, WalletStorage};
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
 
@@ -116,11 +116,9 @@ pub struct AnchorCapabilities {
     pub warnings: Vec<String>,
 }
 
-pub fn command_anchor(
-    storage: &WalletStorage,
-    network: &str,
-    arguments: &[String],
-) -> Result<(), String> {
+pub fn command_anchor(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
+    let storage = client.storage();
+    let network = client.network();
     let Some(command) = arguments.first().map(String::as_str) else {
         return Err(usage().to_owned());
     };
@@ -139,7 +137,7 @@ pub fn command_anchor(
             AnchorTransferKind::Withdraw,
             &arguments[1..],
         ),
-        "status" => command_status(storage, network, &arguments[1..]),
+        "status" => command_status(client, &arguments[1..]),
         _ => Err(usage().to_owned()),
     }
 }
@@ -157,7 +155,7 @@ fn command_discover(network: &str, arguments: &[String]) -> Result<(), String> {
         }
     }
 
-    let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
+    let (_, capabilities) = resolve_anchor(network, &asset)?;
 
     if json {
         println!(
@@ -359,11 +357,9 @@ fn command_transfer(
     }
 }
 
-fn command_status(
-    storage: &WalletStorage,
-    network: &str,
-    arguments: &[String],
-) -> Result<(), String> {
+fn command_status(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
+    let storage = client.storage();
+    let network = client.network();
     if arguments.len() < 2 {
         return Err(usage().to_owned());
     }
@@ -467,8 +463,8 @@ fn command_status(
     }
 
     review_and_submit_payment(
+        client,
         &signing_record,
-        network,
         &payment.amount,
         &asset.display(),
         &payment.destination,
