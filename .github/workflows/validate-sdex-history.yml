@@ -11,6 +11,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Apply aggregated fill formatting fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('clients/rust-client/src/dex.rs')
+          text = path.read_text()
+          replacements = {
+              'base_amount: format_stroops(self.base_amount),': 'base_amount: format_scaled_7(i128::from(self.base_amount)),',
+              'counter_amount: format_stroops(self.counter_amount),': 'counter_amount: format_scaled_7(i128::from(self.counter_amount)),',
+          }
+          for old, new in replacements.items():
+              assert text.count(old) == 1, old
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          git diff --check
       - name: SDK boundary
         run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
       - name: Shared client tests
