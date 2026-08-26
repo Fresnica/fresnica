@@ -19,6 +19,8 @@ A Dapp implementation may support requests involving:
 
 Every request must reuse existing Account, Transaction, Signer and Signing Coordination semantics. Dapp transport must not create an alternate signing/security model.
 
+Remote application names, icons, descriptions, requested amounts and other display metadata are **untrusted metadata**. When a request asks the wallet to sign a Stellar transaction, the authoritative review must be derived from the exact transaction/envelope semantics that will be signed, not from the remote application's claim about what that transaction does. Remote metadata may supplement that review but cannot replace or contradict it.
+
 ## Platform-specific mechanisms
 
 Examples include:
@@ -37,6 +39,7 @@ A Dapp request must not:
 
 - receive raw private software signer material;
 - bypass transaction review/confirmation policy;
+- substitute remote application-provided descriptions for review derived from the exact transaction being authorized;
 - sign arbitrary bytes through the Stellar transaction-signing path;
 - treat a remote application's claimed account/signer identity as trusted without local validation;
 - bypass the stronger Reveal/Export boundary.

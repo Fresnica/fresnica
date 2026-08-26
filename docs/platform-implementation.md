@@ -43,7 +43,7 @@ No product is required to link the Rust `fresnica-client` crate merely to be Fre
 
 ## 2. What a conforming Capability implementation must preserve
 
-For every `Normative` Capability it implements, a platform should preserve the shared contract's:
+For every `Normative` Capability it implements, a platform **must** preserve the shared contract's:
 
 - capability identity/name;
 - domain identities and canonical forms;
@@ -56,7 +56,7 @@ For every `Normative` Capability it implements, a platform should preserve the s
 - cross-capability relationships;
 - conformance fixtures/examples where available.
 
-Equivalent semantic requests should have equivalent wallet meaning even when the internal SDK calls are different.
+Equivalent semantic requests must have equivalent wallet meaning even when the internal SDK calls are different. For a `Defined` Capability, implementations must preserve its agreed boundary/security invariants while remaining free to challenge or refine its Reference Semantics.
 
 ## 3. What platforms may choose independently
 

@@ -114,6 +114,7 @@ Important implemented semantics include:
 ### Defined / intentionally not over-standardized
 
 - Wallet aggregate;
+- Asset Discovery / Catalog;
 - History / Activity;
 - Contacts / Destination Resolution;
 - Application Security;
@@ -121,7 +122,7 @@ Important implemented semantics include:
 - Hardware / External Signer Interaction;
 - Network / Gateway.
 
-These names/boundaries are shared, but mature implementation behavior should be recorded as Reference Semantics rather than hidden in platform code. `fresnica-mobile` and future Web/Desktop projects may lead contract upgrades through documentation PRs that link to their own implementation/tests; source co-location is not required.
+These names/boundaries are shared, but mature implementation behavior should be recorded as Reference Semantics rather than hidden in platform code. `fresnica-mobile` and future Web/Desktop projects may lead contract upgrades through evidence-backed documentation PRs that link to their own implementation/tests; source co-location is not required. Normative Capabilities may likewise accept explicitly non-normative Reference extensions until independent evidence is strong enough for promotion.
 
 ## 5. Rust engineering clients
 

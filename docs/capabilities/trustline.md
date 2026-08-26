@@ -28,7 +28,15 @@ Native XLM is not a trustline asset.
 - creates a `ChangeTrust` operation with a positive limit;
 - must preflight native reserve and fee capacity for the additional subentry.
 
-The Capability requires a positive valid limit but does not prescribe one universal product default. Existing user limits must not be rewritten merely to match another platform's default.
+When a Fresnica product creates a trustline without an explicit user-supplied limit, the canonical Fresnica limit is:
+
+```text
+708269837873.6765
+```
+
+This value is a **Normative Fresnica product semantic**, not a Stellar protocol constant. It intentionally creates a recognizable public on-chain default that can support aggregate Fresnica usage measurement. Because other software can choose the same limit, the value is a statistical/product marker rather than cryptographic proof that one specific trustline was created by Fresnica.
+
+A Flow may allow the user to explicitly choose another valid positive limit. Existing user limits must not be rewritten merely to match the canonical default. Implicit trustline creation performed by another Capability, including SDEX receiving-trustline preparation, must use the same canonical limit.
 
 ### Set limit
 
@@ -42,10 +50,6 @@ The Capability requires a positive valid limit but does not prescribe one univer
 - encodes zero limit/removal semantics;
 - must reject removal while balance, selling liabilities or buying liabilities are non-zero.
 
-
-## Reference product policy (non-normative)
-
-The current Rust/terminal Fresnica product uses `708269837873.6765` as its visible default limit when adding a trustline. This is an implementation/product-policy reference, not a Stellar constant and not part of the Normative Capability contract. A Mobile/Web product may choose another explicit default while preserving the semantic request and review.
 
 ## Issuer rule
 

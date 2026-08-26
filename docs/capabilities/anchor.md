@@ -166,6 +166,27 @@ Owns transaction/XDR hashing, Ed25519 signing/verification, signer identity veri
 
 Owns forms, KYC screens, browser/webview behavior, confirmation and product-facing status presentation.
 
+## Reference extension: semantic next actions (non-normative)
+
+RefPython provides a useful application-facing projection above raw SEP-6/SEP-24 responses:
+
+- [`reference/python/fresnica/anchor_transfer_service.py`](../../reference/python/fresnica/anchor_transfer_service.py)
+- [`reference/python/tests/test_anchor_transfer_service.py`](../../reference/python/tests/test_anchor_transfer_service.py)
+
+Instead of forcing a Flow to branch directly on protocol JSON, the reference translates protocol state into semantic next-action categories such as:
+
+```text
+NeedFields
+OpenUrl
+KycRequired
+DepositInstructions
+WithdrawalPayment
+```
+
+The Python type/class names are not normative. The candidate cross-platform idea is that protocol mechanics should be normalized into **what the wallet/user must do next**, while still retaining enough protocol identity/raw diagnostics for recovery and debugging.
+
+This is especially useful for Mobile because SEP-24 browser handoff, SEP-6 required fields/KYC and withdrawal-payment construction are different UX actions even when all originate from one Anchor Capability. Independent platform evidence should determine whether a shared next-action/result model is stable enough for promotion.
+
 ## Reference implementation status
 
 The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.

@@ -50,9 +50,11 @@ A normalized submission result must distinguish at least:
 - deterministic rejection;
 - uncertain submission where transport failure leaves chain acceptance unknown.
 
-An uncertain submission must not be treated as a normal retryable failure. A product should protect against accidental duplicate writes until the transaction hash is reconciled or the uncertainty policy expires.
+An uncertain submission must not be treated as a normal retryable failure. A product must protect against accidental duplicate writes until the transaction identity/hash is reconciled or an explicit uncertainty policy permits retry.
 
-The current Rust reference persists only public pending-transaction metadata for this guard.
+Where the implementation can identify the exact submitted transaction, recovery should prefer querying/reconciling that transaction's chain status before constructing or submitting a replacement. Transport timeout alone is not evidence that the chain rejected the transaction.
+
+The duplicate guard/reconciliation state should contain only public transaction metadata needed for recovery; it must not persist secrets, passcodes, unlock keys or other signing material. The current Rust/RefPython references provide implementation evidence for pending-submission recovery without making one storage schema normative.
 
 ## Stable security errors
 

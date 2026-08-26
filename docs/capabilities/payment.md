@@ -12,11 +12,13 @@ UI form structure and confirmation presentation belong to the Send/Anchor Flow, 
 
 A payment request contains the semantic equivalents of:
 
-- source account/wallet selection;
+- source account context;
 - destination;
 - amount;
 - full asset identity (`XLM` or `CODE:GISSUER`);
 - optional memo.
+
+Wallet/account selection UI and repository lookup belong to the Flow/application layer. The Capability receives the resolved source account context.
 
 Implementations may additionally accept a contact/destination alias through the Contacts capability.
 

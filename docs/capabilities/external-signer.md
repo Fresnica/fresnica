@@ -53,13 +53,11 @@ m/44'/148'/account_index'
 
 Fresnica should reuse maintained upstream Stellar/Ledger protocol libraries when version-compatible rather than implementing Stellar APDUs without need.
 
-As reviewed on 2026-08-25, the available Rust `stellar-ledger` path still used `stellar-xdr 27` while Fresnica's transaction layer used `stellar-xdr 28`.
+A provider becomes implementation-ready only when it can consume/sign the exact current Fresnica transaction representation through a deliberately reviewed boundary.
 
-Do not solve that mismatch by downgrading Fresnica or introducing an implicit lossy v28 -> v27 transaction reinterpretation just to claim hardware support.
+Do not solve a provider/XDR-version mismatch by downgrading Fresnica or introducing an implicit lossy transaction reinterpretation merely to claim hardware support. Exact current dependency/version status belongs in the project roadmap rather than this long-lived Capability contract.
 
-A provider becomes implementation-ready when it can consume/sign the exact current Fresnica transaction representation through a deliberately reviewed boundary.
-
-This Ledger section is a **reference design and dependency constraint**, not Reference Semantics backed by a completed Fresnica hardware implementation.
+This Ledger section is a **reference design and compatibility constraint**, not Reference Semantics backed by a completed Fresnica hardware implementation.
 
 ## Implementation evidence status
 

@@ -20,6 +20,20 @@
 - [x] Compact `docs/handoff.md` so stable architecture rules live only in the common contracts
 - [x] Move Python reference product documentation out of the root project README
 - [x] Preserve `fresnica-client` as Rust reference Capability implementation without requiring other platforms to link it
+- [x] Shared application error-semantics vocabulary across Core/Capability/Flow boundaries
+- [x] Defined Asset Discovery / Catalog Capability from RefPython cache/discovery evidence
+- [x] Allow non-normative Reference extensions to mature already-Normative Capabilities
+- [x] Define evidence-backed cross-repository contract PR expectations for Mobile/Web/Desktop implementations
+- [x] Promote confirmed-transaction-success vs post-submit-refresh failure isolation into the Flow contract
+
+### Implementation follow-ups discovered by contract audit
+
+- [ ] Align Rust SDEX decimal-price rationalization with the canonical bounded best-rational behavior, including semi-convergent recovery at signed-int32 boundaries (current Rust rejects cases such as `2147483648` that can be safely approximated)
+- [ ] Make Rust/RefPython SDEX BUY preflight derive price-dependent selling capacity from the same effective `Price { n, d }` that will be encoded, not independently from the requested decimal
+- [ ] Align Rust SDEX create/update `OfferReview` with the exact encoded Stellar `Price { n, d }` when decimal input requires rational approximation; requested price alone is not sufficient review truth
+- [ ] Extend SDEX conformance vectors with exact, approximated and signed-int32-boundary decimal-price rationalization cases when the Rust reference gap is fixed
+- [ ] Expose the effective trustline limit in Rust/RefPython SDEX review whenever offer preparation adds a receiving trustline; the operation already uses the canonical Fresnica marker but current review only carries the asset
+- [ ] Clean legacy RefPython lower-level trustline builder/help/test wording that still says `Stellar maximum`; current `TrustlineService` already supplies the canonical Fresnica `708269837873.6765` marker
 
 ## Runtime
 

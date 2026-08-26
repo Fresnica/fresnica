@@ -61,6 +61,24 @@ Payment, Trustline and SDEX Capabilities consume Balance / Availability semantic
 
 Flows should be able to distinguish insufficient asset balance, insufficient XLM fee/reserve capacity and malformed/unavailable network state without parsing transport-specific strings.
 
+## Reference extension: liquidity-pool portfolio projection (non-normative)
+
+RefPython already treats `liquidity_pool_shares` as a distinct portfolio position rather than pretending pool shares are an ordinary `CODE:GISSUER` balance:
+
+- [`reference/python/fresnica/balance_service.py`](../../reference/python/fresnica/balance_service.py)
+- [`reference/python/tests/test_pool_cache.py`](../../reference/python/tests/test_pool_cache.py)
+
+The current reference preserves the liquidity-pool identity and share balance, loads the pool's total shares/reserves, and derives the user's underlying reserve position proportionally:
+
+```text
+share_ratio = owned_pool_shares / total_pool_shares
+underlying_reserve_amount = pool_reserve_amount * share_ratio
+```
+
+Pool details are cached by network + pool identity. If a live pool-detail lookup fails after a prior successful lookup, the reference can still build a position from cached pool state rather than dropping the position entirely.
+
+These are promising portfolio semantics but are not yet part of the Normative Balance contract. Mobile/Web/Desktop evidence should determine whether liquidity-pool position projection becomes a normative extension of Balance or a separate Capability. Liquidity-pool shares must not silently become normal payment/trustline/SDEX asset identity merely because they appear in an account balance response.
+
 ## Reference evidence
 
 The reserve/availability semantics above are exercised independently by the Python and Rust references:

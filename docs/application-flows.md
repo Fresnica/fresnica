@@ -157,6 +157,8 @@ refresh/invalidate affected state
 
 The Flow owns the product sequence around these boundaries. Capabilities own the stable meaning inside them.
 
+Here `immutable semantic review` describes the confirmation boundary, not a required programming-language data structure. Once the user has reviewed the prepared meaning, a Flow must not silently change any transaction-relevant value before signing. If construction normalizes an input (for example an SDEX decimal price into an exact Stellar rational), the effective encoded meaning belongs in the review before confirmation.
+
 ## 8. Example: Send Flow
 
 The Send Flow may own:
@@ -175,6 +177,7 @@ It consumes, as needed:
 
 ```text
 Contacts / Destination Resolution
+Asset Discovery / Catalog
 Balance / Availability
 Payment
 Transaction
@@ -201,7 +204,31 @@ Instead:
 - move cross-flow product orchestration up into the App/application coordinator;
 - invalidate shared repository/cache state and let interested Flows refresh themselves.
 
-## 10. Testing
+## 10. Post-submit truth and refresh
+
+Once the Transaction Capability reports a confirmed/accepted on-chain submission, follow-up cache invalidation or refresh is a separate product side effect. A refresh failure must not rewrite the confirmed transaction outcome as a failed transaction.
+
+Conceptually:
+
+```text
+confirmed transaction success
+        |
+        +--> invalidate affected local state
+        +--> refresh balances/history/offers/etc.
+                    |
+                    +--> refresh succeeds -> show fresh state
+                    +--> refresh fails    -> keep success truth; mark/show stale refresh state
+```
+
+A Flow may show a warning or retry control when refresh fails, but it must preserve the confirmed transaction identity/result. Submission uncertainty is different and remains governed by the Transaction Capability before any success is claimed.
+
+This rule is exercised by the RefPython post-submit regression tests:
+
+- [`reference/python/tests/test_post_submit.py`](../reference/python/tests/test_post_submit.py)
+
+The exact invalidation mechanism remains platform-specific.
+
+## 11. Testing
 
 A Flow should be testable at its application boundary without requiring full native/runtime integration for ordinary product rules.
 
@@ -216,6 +243,6 @@ Use injected Capability/Repository/Port implementations to test:
 
 Native/device integration tests remain responsible for proving the real platform adapter and authorization mechanisms.
 
-## 11. Compact rule
+## 12. Compact rule
 
 > **Flows define why, when and how the product guides the user. Capabilities define what the wallet operation means.**

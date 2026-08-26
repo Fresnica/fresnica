@@ -6,6 +6,7 @@ This document defines the cross-platform capability vocabulary, maturity model a
 
 Detailed capability contracts live in [`capabilities/`](capabilities/README.md).
 Shared cross-capability value semantics live in [`capabilities/domain-primitives.md`](capabilities/domain-primitives.md).
+Shared error layering lives in [`capabilities/error-semantics.md`](capabilities/error-semantics.md).
 
 A Capability Contract standardizes **wallet meaning**, not one implementation, language, SDK, storage engine or UI architecture.
 
@@ -119,7 +120,7 @@ Examples:
 
 ### Errors
 
-Stable semantic categories suitable for Flow/product mapping. A Flow should not need to parse arbitrary Rust strings, JavaScript exceptions or transport error bodies to understand common outcomes.
+Stable semantic categories suitable for Flow/product mapping. A Flow should not need to parse arbitrary Rust strings, JavaScript exceptions or transport error bodies to understand common outcomes. Cross-capability error layering is defined in [`capabilities/error-semantics.md`](capabilities/error-semantics.md).
 
 ### State/lifecycle
 
@@ -155,7 +156,7 @@ Maturity describes the **shared specification**, not implementation quality.
 
 ### Normative
 
-Stable cross-platform semantics exist and conforming implementations should preserve them.
+Stable cross-platform semantics exist and conforming implementations **must** preserve them.
 
 A Normative capability normally has explicit invariants and enough result/lifecycle/error semantics to detect incompatible behavior.
 
@@ -185,6 +186,12 @@ Other platforms may adopt, reject or refine Reference Semantics. Concrete diverg
 
 A reference implementation is therefore part of the specification process without becoming the specification by fiat.
 
+### Reference extensions on Normative capabilities
+
+`Normative` describes the stable scope already shared; it does not freeze all future behavior. A mature Capability may record adjacent, implementation-proven behavior as a clearly labeled **Reference extension (non-normative)**.
+
+Examples include liquidity-pool portfolio projection under Balance, product-facing Anchor next actions and other behavior that is valuable but has not yet accumulated enough independent evidence for promotion. These extensions may be adopted, challenged or refined by other platforms without weakening the existing Normative core.
+
 ## 6. Capability catalog
 
 The catalog is shared vocabulary, **not a mandatory product feature checklist**.
@@ -195,6 +202,7 @@ The catalog is shared vocabulary, **not a mandatory product feature checklist**.
 | `signer` | Signer | Normative | [Signer](capabilities/signer.md) |
 | `wallet` | Wallet | Defined | [Wallet](capabilities/wallet.md) |
 | `balance` | Balance / Availability | Normative | [Balance / Availability](capabilities/balance.md) |
+| `asset-discovery` | Asset Discovery / Catalog | Defined | [Asset Discovery / Catalog](capabilities/asset-discovery.md) |
 | `payment` | Payment | Normative | [Payment](capabilities/payment.md) |
 | `transaction` | Transaction | Normative | [Transaction](capabilities/transaction.md) |
 | `trustline` | Trustline | Normative | [Trustline](capabilities/trustline.md) |
@@ -217,6 +225,7 @@ A `Defined` label means the capability boundary is useful now but the common con
 Current reasons include:
 
 - **Wallet** — terminal references use compact wallet records while Mobile is expected to model Account/Signer relationships more independently;
+- **Asset Discovery / Catalog** — RefPython has a useful cache-first multi-source catalog, but provider choice, recommendation metadata, entry DTOs and ranking policy still need independent platform evidence;
 - **History** — the Python reference has a mature raw-cache/activity model, while the Rust client still exposes more provider-shaped records and no cross-platform Activity DTO is frozen;
 - **Contacts** — destination precedence semantics are promising, but address types, name normalization, sync and storage vary by product;
 - **Application Security** — Apple/Android Native SDK system-auth behavior provides strong Reference Semantics, but application-level product contracts still need Mobile/Desktop evidence;
@@ -305,6 +314,12 @@ Promotion to `Normative` should be evidence-driven rather than implementation-co
 
 When feasible, a promotion should add or update conformance examples so later implementations can detect semantic drift.
 
+### Normative compatibility and versioning
+
+Reference Semantics and non-normative extensions may evolve normally as implementation evidence accumulates. Clarifications that do not change wallet meaning and corrections that restore the already-intended contract may also update a Normative document in place.
+
+The first change that **intentionally changes previously Normative wallet meaning** must be explicit: introduce or advance the relevant contract/conformance-vector version, document compatibility/migration impact, and avoid silently redefining the old behavior in prose. This keeps a documentation PR from creating an undetectable semantic fork across released Fresnica products.
+
 The governing rule is:
 
 > **Promote stable semantics into the shared specification; keep platform mechanisms local.**
@@ -344,6 +359,7 @@ clients/rust-client::trustline    -> Trustline implementation
 clients/rust-client::dex          -> SDEX implementation
 clients/rust-client::anchor*      -> Anchor implementation
 clients/rust-client::contacts     -> Contacts implementation
+reference/python/fresnica/asset_catalog.py -> Asset Discovery / Catalog reference implementation
 ```
 
 Existing Rust symbols containing `Service` do not require a mechanical rename. Architecture terminology changes first; source names should change only when there is a maintenance/API benefit.

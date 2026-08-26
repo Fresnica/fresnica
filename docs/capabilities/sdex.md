@@ -60,10 +60,23 @@ The BUY/SELL distinction is semantic and must not be erased by casually invertin
 ## Numeric rules
 
 - amounts and user prices use exact decimal semantics, not binary floating point;
-- exact Stellar offer/order-book price ratios should be retained as integer `n/d` when available;
-- user-facing seven-decimal numeric projection follows the Fresnica conformance vectors where such projection is used;
+- the effective Stellar offer price is the encoded positive signed-int32 rational `n/d`;
+- exact ledger/order-book price ratios should be retained as integer `n/d` when available;
 - a positive nonzero amount/price must not be represented to the user as semantic zero merely because the chosen display precision is too coarse.
 
+### Decimal price rationalization
+
+A decimal price request must be rationalized **before** price-dependent preflight, review and XDR construction. The canonical target is the best positive rational approximation representable by Stellar's signed-int32 `Price { n, d }` bounds, using continued-fraction convergence and a bounded semi-convergent when the next full convergent would exceed the limit but a valid closer fraction still exists.
+
+The resulting `n/d` is the transaction truth. A conforming implementation must use that same effective ratio for:
+
+- BUY-side required-selling/preflight calculations;
+- review/effective price and price-dependent totals;
+- the final `ManageBuyOffer` / `ManageSellOffer` XDR.
+
+The original decimal may also be retained as user intent. If rationalization changes the value, review must expose enough information to make the effective encoded price clear; it must not display only the requested decimal while signing a materially different `n/d`.
+
+The current Rust reference matches exact/common cases such as `0.325 -> 13/40` but still has an implementation gap at signed-int32 approximation boundaries where semi-convergent recovery is possible. This gap is tracked in [`../tasks.md`](../tasks.md) and does not weaken the contract.
 
 ## Reference presentation convention (non-normative)
 
@@ -75,7 +88,7 @@ The current terminal UI renders a positive price below seven-decimal display pre
 
 Preparation must preserve BUY/SELL intent, full pair identity, amount/price meaning, reserve/fee capacity and required receiving trustline semantics.
 
-If an implementation offers an explicit "add missing trustline" option, that additional operation must appear in the prepared review and fee/reserve preflight.
+If an implementation offers an explicit "add missing trustline" option, that additional operation must appear in the prepared review and fee/reserve preflight. When that trustline is created implicitly without a user-supplied limit, it must use the canonical Fresnica Trustline limit `708269837873.6765`. Review must expose both the receiving asset and the effective trustline limit because the additional `ChangeTrust` is part of the transaction being authorized.
 
 ### Update
 
@@ -99,13 +112,15 @@ When projecting an offer into a selected pair:
 
 ## Order book
 
-For a `BASE / COUNTER` book:
+For a `BASE / COUNTER` book, the normalized Capability semantics are:
 
 - BID corresponds to BUY BASE;
 - ASK corresponds to SELL BASE;
-- both displayed level amounts are BASE units;
-- Horizon bid amount is counter-side canonical amount and must be normalized to BASE using the exact ratio;
-- ask amount is already BASE amount for the requested pair.
+- level amount is BASE units on both sides;
+- level price is COUNTER per BASE;
+- exact `n/d` should be retained where available.
+
+Provider adapters own any transport-specific conversion needed to produce that normalized meaning. For example, the current Horizon adapter receives bid amount in the counter-side canonical representation and converts it to BASE using the exact ratio; this Horizon field shape is reference transport behavior, not part of the cross-platform contract.
 
 ## Trades and fills
 
@@ -126,7 +141,7 @@ Candle/aggregation transports may vary. Where exposed, the semantic result inclu
 
 ## Review and signing
 
-Offer writes use the common Transaction and Signing Coordination contracts. A prepared review must expose the actual operation family (`ManageBuyOffer`/`ManageSellOffer`), pair, side, amount, price, total, fee, network and any extra trustline effect.
+Offer writes use the common Transaction and Signing Coordination contracts. A prepared review must expose the actual operation family (`ManageBuyOffer`/`ManageSellOffer`), pair, side, amount, **effective encoded price**, price-dependent total, fee, network and any extra trustline effect. When a decimal request was rationalized, the review contract must be able to distinguish requested price from effective `n/d`; when a receiving trustline is added, the review must include its asset and effective limit.
 
 ## Conformance
 

@@ -35,7 +35,7 @@ crypto/security authority chain mechanisms       durable state      OS/runtime m
 
 ### Application Capabilities
 
-See [`capabilities/README.md`](capabilities/README.md) for the capability matrix and detailed contracts.
+See [`capabilities/README.md`](capabilities/README.md) for the capability matrix and detailed contracts. Shared supporting vocabulary is defined by [Domain Primitives](capabilities/domain-primitives.md) and [Error Semantics](capabilities/error-semantics.md).
 
 Normative contracts currently include Account, Signer, Balance / Availability, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination. Defined capabilities deliberately leave more implementation freedom while their cross-platform semantics mature.
 

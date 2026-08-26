@@ -226,7 +226,7 @@ Current standards work:
 - keep the five common architecture/security/platform contracts authoritative and small;
 - maintain per-capability semantic contracts under `docs/capabilities/`;
 - keep mature Account, Signer, Balance, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination semantics Normative;
-- keep Wallet, History, Contacts, Application Security, Dapp, External Signer and Network/Gateway Defined until stronger cross-platform implementation/protocol evidence justifies promotion;
+- keep Wallet, Asset Discovery / Catalog, History, Contacts, Application Security, Dapp, External Signer and Network/Gateway Defined until stronger cross-platform implementation/protocol evidence justifies promotion;
 - extract proven behavior from RefPython/Rust/native implementations as Reference Semantics instead of leaving it implicit in code;
 - let Mobile/Web/Desktop implementations propose specification upgrades through evidence-backed documentation PRs instead of copying Rust internals.
 
@@ -299,7 +299,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 1. **Finish documentation/contract stabilization**: keep `docs/README.md`, the five common contracts and `docs/capabilities/` as the authoritative cross-project vocabulary; remove remaining stale implementation-status claims rather than duplicating contracts in platform/state documents.
 2. **Land and validate the current Rust reference batch**: after the documentation batch is pushed, run real Rust tests/release builds for the Anchor Capability extraction that follows the already-validated SEP-12 batch.
 3. **Let independent Mobile integration proceed from the contracts**: Mobile Features implement Application Flows and may implement Capabilities with Stellar JS SDK + Native SDK + Mobile-owned repositories; do not require `fresnica-client` or mirror Rust module structure.
-4. **Upgrade Defined capabilities only from concrete product evidence**: Dapp/session transport, History normalization, Contacts, Application Security, Wallet aggregate and Network/Gateway contracts should mature from real Mobile/Web/Desktop behavior.
+4. **Upgrade Defined capabilities only from concrete product evidence**: Asset Discovery/Catalog, Dapp/session transport, History normalization, Contacts, Application Security, Wallet aggregate and Network/Gateway contracts should mature from real Mobile/Web/Desktop behavior.
 5. **Keep SEP/hardware extensions demand-driven**: validate Anchor behavior against concrete anchors before nested `/customer/files`; keep SEP-45 separate; keep Ledger transport gated by exact XDR/provider compatibility.
 6. **Preserve provider conformance baselines**: smart-account/passkey remains provider/Testnet reference material until a product needs a cross-platform capability contract.
 

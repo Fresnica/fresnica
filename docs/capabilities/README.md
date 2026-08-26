@@ -15,6 +15,7 @@ Implementation evidence may come from another Fresnica repository. A Mobile/Web/
 ## Shared domain vocabulary
 
 - [Domain primitives](domain-primitives.md) defines network/account/signer/asset/amount/price semantics reused across multiple capabilities.
+- [Error semantics](error-semantics.md) defines shared error layering across Core, Capabilities, infrastructure and Flows.
 
 ## Capability index
 
@@ -24,6 +25,7 @@ Implementation evidence may come from another Fresnica repository. A Mobile/Web/
 | `signer` | Signer | Normative | [signer.md](signer.md) |
 | `wallet` | Wallet | Defined | [wallet.md](wallet.md) |
 | `balance` | Balance / Availability | Normative | [balance.md](balance.md) |
+| `asset-discovery` | Asset Discovery / Catalog | Defined | [asset-discovery.md](asset-discovery.md) |
 | `payment` | Payment | Normative | [payment.md](payment.md) |
 | `transaction` | Transaction | Normative | [transaction.md](transaction.md) |
 | `trustline` | Trustline | Normative | [trustline.md](trustline.md) |
