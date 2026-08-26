@@ -1,12 +1,13 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fresnica_client::{
-    balance_asset_label, operation_summary, BalanceSnapshot, FresnicaClient, HistorySnapshot,
-    OfferRequest, OfferReviewDetails, OfferSide, OpenOffer, OrderBookSnapshot, PaymentRequest,
-    PreparedOffer, PreparedPayment, PreparedTrustline, TrustlineAction, TrustlineRequest,
-    WalletRecord,
+    balance_asset_label, operation_summary, BalanceSnapshot, CandleSnapshot, FresnicaClient,
+    HistorySnapshot, OfferRequest, OfferReviewDetails, OfferSide, OpenOffer, OrderBookSnapshot,
+    PairTradesSnapshot, PaymentRequest, PreparedOffer, PreparedPayment, PreparedTrustline,
+    TrustlineAction, TrustlineRequest, WalletRecord,
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -29,7 +30,7 @@ Keys:
   s           prepare a payment from the selected signing wallet
   t           add, change, or remove an issued-asset trustline
   o           create, update, or cancel an SDEX offer
-  m           open an SDEX market order book
+  m           open an SDEX market view
 
 Write flow:
   form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
@@ -142,7 +143,7 @@ enum Mode {
     Trustline(TrustlineForm),
     Offer(OfferForm),
     Market(MarketForm),
-    OrderBook(OrderBookSnapshot),
+    MarketView(MarketSnapshot),
     PaymentReview(PreparedPayment),
     TrustlineReview(PreparedTrustline),
     OfferReview(PreparedOffer),
@@ -150,6 +151,12 @@ enum Mode {
         prepared: PreparedWrite,
         passcode: String,
     },
+}
+
+struct MarketSnapshot {
+    order_book: OrderBookSnapshot,
+    trades: PairTradesSnapshot,
+    candles: CandleSnapshot,
 }
 
 struct MarketForm {
@@ -553,7 +560,7 @@ impl App {
         let mut payment_request = None;
         let mut trustline_request = None;
         let mut offer_request = None;
-        let mut order_book_request = None;
+        let mut market_request = None;
         let mut submit = false;
 
         match &mut self.mode {
@@ -703,20 +710,23 @@ impl App {
                 KeyCode::Tab | KeyCode::Down => form.active = (form.active + 1) % 2,
                 KeyCode::BackTab | KeyCode::Up => form.active = (form.active + 1) % 2,
                 KeyCode::Enter if form.active == 0 => form.active = 1,
-                KeyCode::Enter => order_book_request = Some(form.pair()),
+                KeyCode::Enter => market_request = Some(form.pair()),
                 KeyCode::Backspace => {
                     form.current_mut().pop();
                 }
                 KeyCode::Char(character) => form.current_mut().push(character),
                 _ => {}
             },
-            Mode::OrderBook(snapshot) => match code {
+            Mode::MarketView(snapshot) => match code {
                 KeyCode::Esc => {
                     self.mode = Mode::Browse;
                     self.status = "Closed SDEX market".to_owned();
                 }
                 KeyCode::Char('r') => {
-                    order_book_request = Some((snapshot.base.clone(), snapshot.counter.clone()));
+                    market_request = Some((
+                        snapshot.order_book.base.clone(),
+                        snapshot.order_book.counter.clone(),
+                    ));
                 }
                 KeyCode::Char('m') => {
                     self.mode = Mode::Market(MarketForm::new());
@@ -815,12 +825,36 @@ impl App {
             }
         }
 
-        if let Some((base, counter)) = order_book_request {
-            match self.client.order_book(&base, &counter) {
+        if let Some((base, counter)) = market_request {
+            let snapshot = (|| {
+                let order_book = self.client.order_book(&base, &counter)?;
+                let trades = self.client.pair_trades(&base, &counter, 8)?;
+                let end_time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|_| "system clock is before Unix epoch".to_owned())?
+                    .as_millis() as u64;
+                let candles = self.client.candles(
+                    &base,
+                    &counter,
+                    3_600_000,
+                    Some(end_time.saturating_sub(24 * 3_600_000)),
+                    Some(end_time),
+                    None,
+                    6,
+                )?;
+                Ok::<_, String>(MarketSnapshot {
+                    order_book,
+                    trades,
+                    candles,
+                })
+            })();
+            match snapshot {
                 Ok(snapshot) => {
-                    self.status =
-                        format!("Updated SDEX market {}/{}", snapshot.base, snapshot.counter);
-                    self.mode = Mode::OrderBook(snapshot);
+                    self.status = format!(
+                        "Updated SDEX market {}/{}",
+                        snapshot.order_book.base, snapshot.order_book.counter
+                    );
+                    self.mode = Mode::MarketView(snapshot);
                 }
                 Err(error) => self.status = error,
             }
@@ -905,7 +939,7 @@ impl App {
             Mode::Trustline(form) => self.render_trustline_form(frame, form),
             Mode::Offer(form) => self.render_offer_form(frame, form),
             Mode::Market(form) => self.render_market_form(frame, form),
-            Mode::OrderBook(snapshot) => self.render_order_book(frame, snapshot),
+            Mode::MarketView(snapshot) => self.render_market_view(frame, snapshot),
             Mode::PaymentReview(prepared) => self.render_payment_review(frame, prepared),
             Mode::TrustlineReview(prepared) => self.render_trustline_review(frame, prepared),
             Mode::OfferReview(prepared) => self.render_offer_review(frame, prepared),
@@ -1032,7 +1066,7 @@ impl App {
                 "action: Left/Right or b/s/u/c   Tab field   Space toggles trustline   Enter next/prepare"
             }
             Mode::Market(_) => "type asset   Tab/Up/Down field   Enter next/open   Esc cancel",
-            Mode::OrderBook(_) => "r refresh market   m change pair   Esc close",
+            Mode::MarketView(_) => "r refresh market   m change pair   Esc close",
             Mode::PaymentReview(_) | Mode::TrustlineReview(_) | Mode::OfferReview(_) => {
                 "y/Enter sign   n/Esc cancel"
             }
@@ -1191,14 +1225,21 @@ impl App {
         );
     }
 
-    fn render_order_book(&self, frame: &mut Frame, snapshot: &OrderBookSnapshot) {
+    fn render_market_view(&self, frame: &mut Frame, snapshot: &MarketSnapshot) {
         let area = popup_area(frame.area());
+        let [book_area, trades_area, candles_area] = Layout::vertical([
+            Constraint::Percentage(54),
+            Constraint::Percentage(23),
+            Constraint::Percentage(23),
+        ])
+        .areas(area);
+        let book = &snapshot.order_book;
         let header = Row::new(["Amount", "Price", "Price", "Amount"])
             .style(Style::new().add_modifier(Modifier::BOLD));
-        let count = snapshot.bids.len().max(snapshot.asks.len());
+        let count = book.bids.len().max(book.asks.len());
         let rows = (0..count).map(|index| {
-            let bid = snapshot.bids.get(index);
-            let ask = snapshot.asks.get(index);
+            let bid = book.bids.get(index);
+            let ask = book.asks.get(index);
             Row::new([
                 bid.map(|level| level.amount.clone()).unwrap_or_default(),
                 bid.map(|level| level.price.clone()).unwrap_or_default(),
@@ -1208,10 +1249,10 @@ impl App {
         });
         let title = format!(
             "BID · BUY   {} / {}   ASK · SELL",
-            compact_asset(&snapshot.base),
-            compact_asset(&snapshot.counter)
+            compact_asset(&book.base),
+            compact_asset(&book.counter)
         );
-        let table = Table::new(
+        let book_table = Table::new(
             rows,
             [
                 Constraint::Percentage(25),
@@ -1223,8 +1264,67 @@ impl App {
         .header(header)
         .column_spacing(1)
         .block(Block::bordered().title(title));
+
+        let trade_rows = snapshot.trades.trades.iter().map(|trade| {
+            Row::new([
+                trade.ledger_close_time.clone().unwrap_or_default(),
+                trade.base_side.label().to_owned(),
+                trade.base_amount.clone(),
+                trade.price.clone(),
+            ])
+        });
+        let trades_table = Table::new(
+            trade_rows,
+            [
+                Constraint::Percentage(40),
+                Constraint::Percentage(12),
+                Constraint::Percentage(24),
+                Constraint::Percentage(24),
+            ],
+        )
+        .header(
+            Row::new(["Time", "Side", "Base amount", "Price"])
+                .style(Style::new().add_modifier(Modifier::BOLD)),
+        )
+        .column_spacing(1)
+        .block(Block::bordered().title("Recent trades"));
+
+        let candle_rows = snapshot.candles.candles.iter().map(|candle| {
+            Row::new([
+                candle.timestamp.to_string(),
+                candle.open.clone(),
+                candle.high.clone(),
+                candle.low.clone(),
+                candle.close.clone(),
+                candle.base_volume.clone(),
+                candle.trade_count.to_string(),
+            ])
+        });
+        let candles_table = Table::new(
+            candle_rows,
+            [
+                Constraint::Percentage(20),
+                Constraint::Percentage(13),
+                Constraint::Percentage(13),
+                Constraint::Percentage(13),
+                Constraint::Percentage(13),
+                Constraint::Percentage(18),
+                Constraint::Percentage(10),
+            ],
+        )
+        .header(
+            Row::new([
+                "Time(ms)", "Open", "High", "Low", "Close", "Volume", "Trades",
+            ])
+            .style(Style::new().add_modifier(Modifier::BOLD)),
+        )
+        .column_spacing(1)
+        .block(Block::bordered().title("1h candles · last 24h"));
+
         frame.render_widget(Clear, area);
-        frame.render_widget(table, area);
+        frame.render_widget(book_table, book_area);
+        frame.render_widget(trades_table, trades_area);
+        frame.render_widget(candles_table, candles_area);
     }
 
     fn render_payment_review(&self, frame: &mut Frame, prepared: &PreparedPayment) {
