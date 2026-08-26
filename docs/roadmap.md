@@ -243,18 +243,19 @@ Future SEP adoption should be driven by wallet/product requirements and reviewed
 
 The Rust CLI is already the primary lightweight native validation client. Keep it working as SDK/Core contracts evolve. Its SDK-boundary guard, Rust unit suite, release build and Python compatibility suite were all revalidated on GitHub Actions on 2026-08-25 after PR #95.
 
-### Rust TUI
+### Rust TUI - STARTED
 
-A Rust TUI is worth considering after the universal SDK boundary is clear.
+The shared Rust application-client boundary is now explicit in `clients/rust-client` (`fresnica-client`). The Rust CLI consumes that layer for wallet storage/lifecycle, contacts, Horizon transport and account/balance/history reads. This keeps application orchestration reusable without moving persistence/network policy into the universal SDK.
 
-Its purpose is primarily:
+The first `clients/rust-tui` slice consumes the same client layer and provides:
 
-- SDK integration proving ground
-- wallet-flow playground
-- debugging/diagnostic client
-- native reference implementation between CLI and product GUI
+- wallet identity/capability header;
+- network-scoped session wallet switching;
+- balances/liabilities;
+- recent activity;
+- manual refresh.
 
-It should reuse SDK/wallet services and must not become a second independent wallet architecture.
+Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. Write flows should be exposed through reusable client services before being added to the TUI; do not create a second wallet/service architecture or call CLI command handlers from the TUI.
 
 ## Phase 7 - Product Wallet Experience
 

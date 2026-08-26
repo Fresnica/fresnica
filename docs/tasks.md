@@ -82,6 +82,8 @@
 - [x] Core-side passcode re-protection
 - [x] External Ed25519 prepare/apply signing boundary
 - [x] Native Rust CLI direct SDK/Core reference client
+- [x] Reusable Rust application client/service crate shared by CLI/TUI (`clients/rust-client`)
+- [x] First native Rust TUI dashboard over shared client services (`clients/rust-tui`)
 - [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
 - [x] Native Rust CLI SEP-1 + SEP-6/SEP-24 anchor capability discovery (`anchor discover CODE:GISSUER`)
 - [x] Native Rust CLI SEP-10/SEP-45 authentication metadata discovery and G/C capability classification

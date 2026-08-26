@@ -1,0 +1,23 @@
+name: Rust TUI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "clients/rust-client/**"
+      - "clients/rust-tui/**"
+      - "clients/rust-cli/scripts/validate-sdk-boundary.sh"
+      - "core/rust/**"
+      - "sdk/rust/**"
+      - ".github/workflows/rust-tui.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+      - run: cargo test --manifest-path clients/rust-client/Cargo.toml
+      - run: cargo test --manifest-path clients/rust-tui/Cargo.toml
+      - run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml --bin fresnica-tui

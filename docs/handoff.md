@@ -259,20 +259,23 @@ Framework-based apps use thin adapters when needed, for example Electron/Node, F
 
 Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Windows Hello and Linux Secret Service/libsecret where appropriate. These implementations must preserve the same signer/security contract instead of reimplementing Core crypto.
 
-## Rust CLI and Possible Rust TUI
+## Rust Engineering Clients
 
-The Rust CLI is substantially implemented and should remain a reference native client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths now consume `fresnica-sdk`; direct Core use is limited to low-level Rust transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
+The Rust CLI is substantially implemented and remains the reference native command client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths consume `fresnica-sdk`; direct Core use is limited to low-level Rust transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
-The Phase 5 reference-client path now includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking and an explicit reviewed withdrawal-payment handoff. SEP-45 contract-account execution and SEP-12 customer-information handoff remain separate follow-up work.
+The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking and an explicit reviewed withdrawal-payment handoff. SEP-45 contract-account execution and SEP-12 customer-information handoff remain separate follow-up work.
 
-A Rust TUI is worth considering after the universal SDK boundary is clear. Its role should be engineering-focused:
+A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The first extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, and account/balance/history services. It does **not** become a new crypto authority: protected signer semantics still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
-- SDK integration proving ground;
-- wallet-flow playground;
-- debugging/diagnostics;
-- native reference UI between CLI and final GUI clients.
+The first native Rust TUI slice lives at `clients/rust-tui`. It consumes `fresnica-client` rather than importing CLI command handlers. The initial scope is intentionally narrow:
 
-Do not create a second wallet/service architecture for the Rust TUI. It should consume the same reusable wallet/SDK layers.
+- selected wallet identity and watch-only/local-signer capability;
+- network-scoped wallet switching for the current TUI session;
+- balances/liabilities;
+- recent account activity;
+- manual refresh.
+
+Transaction prompts, write workflows and richer wallet/SDEX screens remain follow-up work. They should move behind reusable client services before the TUI consumes them; do not copy CLI command parsing or terminal prompts into the TUI.
 
 ## Python Wallet Reference
 
