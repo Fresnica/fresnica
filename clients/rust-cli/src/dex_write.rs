@@ -156,6 +156,7 @@ fn render_offer_review(review: &OfferReview) {
             price,
             total,
             trustline_asset,
+            trustline_limit,
         } => {
             println!("Side:      {}", side.label());
             println!("Pair:      {base} / {counter}");
@@ -163,7 +164,11 @@ fn render_offer_review(review: &OfferReview) {
             println!("Price:     {price} {counter}/{base}");
             println!("Total:     {total} {counter}");
             if let Some(asset) = trustline_asset {
-                println!("Trustline: + {asset} (explicitly approved)");
+                let limit = trustline_limit
+                    .as_deref()
+                    .map(|value| format!("; limit {value}"))
+                    .unwrap_or_default();
+                println!("Trustline: + {asset}{limit} (explicitly approved)");
             }
         }
         OfferReviewDetails::Cancel { selling, buying } => {
