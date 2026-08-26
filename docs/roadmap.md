@@ -208,7 +208,7 @@ The universal SDK work should provide:
 
 The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
-The generalized Native SDK release contract is defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. The first generalized release, `native-sdk-v0.1.0`, is the Mobile/native integration baseline: Native Binding API 1 over SDK API 2 / Core Client API 2. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and the React Native 0.87 Apple consumer gate establish the release/adapter boundary. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
+The generalized Native SDK release contract is defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. `native-sdk-v0.1.0` established the generalized packaging boundary. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native package 0.2.1, Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.0. v0.2 added Core-owned derivation of another explicit mnemonic index without mnemonic re-export and replaced per-signer biometric enrollment with one device System Auth Protection Domain plus no-biometric public-key wrapping for later signers. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and React Native platform gates remain release requirements. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
 
 ## Phase 5 - Wallet Functional Foundation and Standards - CURRENT
 
@@ -269,7 +269,7 @@ The independent Mobile application owns:
 - screens/navigation/state
 - network/product orchestration
 - wallet/account management UX
-- system-auth enrollment/recovery UX
+- one-time device System Auth Domain initialization, signer registration and recovery UX
 - passcode rotation UX
 - Reveal / Export UX
 - hardware/external signer UX
@@ -286,7 +286,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. **Start independent Mobile integration now** from `mobile-sdk-usage.md`: pin `native-sdk-v0.1.0`, pin an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms.
+1. **Start independent Mobile integration now** from `mobile-sdk-usage.md`: pin `native-sdk-v0.2.1` / Native Binding API 2 and an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms. Establish one app passcode and optionally initialize one device System Auth Domain; later signers register with passcode verification but no repeat biometric prompt.
 2. **Move Mobile application ownership out of this repository**: Realm schema/migrations, Account/Signer persistence, watch-only/import/generate/passcode/reveal UX and product state belong in `fresnica-mobile`; preserve the #81-#84 invariants from `mobile-app-migration-pr81-pr84.md`.
 3. **Keep the SDK boundary stable**: new Core/SDK capability work may continue independently, but Mobile should upgrade through pinned Native SDK releases and `NATIVE_BINDING_API_VERSION`, not by compiling Rust/Core in normal app builds.
 4. Continue reusable wallet/SEP work (next anchor gap: SEP-12 customer-information handoff) below product UI.
@@ -296,13 +296,15 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Non-negotiable Architecture Rules
 
-- Account is not Signer; the relationship is not necessarily one-to-one.
+- Account != Signer != Recovery Source; the relationships are not necessarily one-to-one.
 - `C...` account identity is not an Ed25519 public key.
 - Core/SDK owns cryptographic signer semantics; clients own persistence, network state and product orchestration.
 - Framework adapters are mechanical integration glue, not security authorities.
 - Routine application builds must not rebuild Rust/Core or framework adapter source.
 - Plaintext secret/mnemonic exposure remains exceptional and explicit.
 - `WalletUnlockKey` and equivalent native authorization material must not cross into JavaScript/Dart merely for convenience.
+- System auth is lower privilege than the Fresnica app passcode: it may authorize routine signing, but not Reveal/Export, passcode change, or recovery-root replacement.
+- Global passcode rotation stages `reprotect` for every protected software signer, atomically commits the complete envelope set, then replaces wrapped unlock-key records in the existing System Auth Domain.
 - UniFFI's internal C-compatible layer is not a stable Fresnica public C ABI.
 - Full Stellar asset identity and network scoping remain authoritative.
 - Stellar protocol/SEP behavior should reuse official primitives and standards wherever practical.

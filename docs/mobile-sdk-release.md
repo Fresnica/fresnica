@@ -2,7 +2,7 @@
 
 Status: **frozen historical contract for `mobile-sdk-v0.1.0` only**.
 
-This document records the transitional `mobile-sdk-v0.1.0` release that preceded the generalized Native-SDK/framework-adapter split. It is retained for audit/migration reference only. New Mobile integrations use `native-sdk-v0.1.0` and `docs/mobile-sdk-usage.md`.
+This document records the transitional `mobile-sdk-v0.1.0` release that preceded the generalized Native-SDK/framework-adapter split. It is retained for audit/migration reference only. New Mobile integrations use the current generalized Native SDK baseline from `docs/mobile-sdk-usage.md` (`native-sdk-v0.2.1` at the time of this update).
 
 The finalized framework boundary is defined in `docs/mobile-framework-adapter-contract.md`; the generalized binary release policy is `docs/native-sdk-release.md`. Do not add new `mobile-sdk-v*` releases. The old release workflow is kept in Git history/tagged source, not as an active `main` publisher.
 
@@ -123,7 +123,7 @@ Framework adapter source is also not application product logic. It remains Fresn
 
 ## Consumer rule for `fresnica-mobile`
 
-The independent Mobile project must not pin this legacy Mobile SDK. Use the generalized dependency record from `docs/mobile-sdk-usage.md` (`native-sdk-v0.1.0`, Native Binding API 1, SDK API 2, Core Client API 2).
+The independent Mobile project must not pin this legacy Mobile SDK. Use the generalized dependency record from `docs/mobile-sdk-usage.md` (current baseline `native-sdk-v0.2.1`, Native Binding API 2, SDK API 3, Core Client API 3).
 
 For React Native, Mobile must additionally record the generated adapter compatibility manifest defined in `docs/mobile-framework-adapter-contract.md`. A stale framework/Binding-API combination should fail CI with an adapter-rebuild requirement; CI must not silently rebuild the adapter on every application build.
 

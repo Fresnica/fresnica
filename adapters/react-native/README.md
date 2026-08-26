@@ -23,18 +23,26 @@ The canonical adapter exposes the established high-level surface:
 - `protectSecret`
 - `protectMnemonic`
 - `generateMnemonic`
+- `deriveMnemonicSigner`
 - `reprotect`
 - `reveal`
 - `prepareEd25519Signing`
 - `applyEd25519Signature`
-- `canEnrollSystemAuth`
-- `hasSystemAuth`
-- `removeSystemAuth`
-- `enrollSystemAuth`
+- `canUseSystemAuth`
+- `hasSystemAuthDomain`
+- `initializeSystemAuth`
+- `registerSignerSystemAuth`
+- `hasSignerSystemAuth`
+- `removeSignerSystemAuth`
+- `removeSystemAuthDomain`
 - `signWithSystemAuth`
 - `signWithPasscode`
 
 It intentionally does **not** expose `deriveUnlockKey`, `validateUnlockKey`, or raw routine `signTransactionXdr` to JavaScript.
+
+`initializeSystemAuth` is one device/app-level enrollment. Later `registerSignerSystemAuth` calls verify the Fresnica passcode and wrap a new signer's independent `WalletUnlockKey` with the existing domain public key without another biometric prompt. `signWithSystemAuth` is the use-time biometric/system-auth boundary. System auth is not a substitute for the Fresnica passcode and cannot authorize Reveal / Export.
+
+`deriveMnemonicSigner` derives another explicit HD index from an already protected mnemonic-backed source without returning the mnemonic to JavaScript.
 
 ## One-time Android adapter build
 

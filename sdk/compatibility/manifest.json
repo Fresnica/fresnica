@@ -10,7 +10,7 @@
     "requiresCoreClientApiVersion": 3
   },
   "native": {
-    "packageVersion": "0.2.0",
+    "packageVersion": "0.2.1",
     "bindingApiVersion": 2,
     "requiresSdkApiVersion": 3
   },

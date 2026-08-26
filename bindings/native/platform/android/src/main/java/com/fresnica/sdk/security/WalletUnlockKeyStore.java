@@ -83,6 +83,7 @@ public final class WalletUnlockKeyStore {
     public void finishDomainEnrollment(DomainEnrollmentSession session)
             throws GeneralSecurityException, IOException {
         byte[] clear = null;
+        boolean committed = false;
         try {
             clear = session.cipher.doFinal(session.ciphertext);
             if (!MessageDigest.isEqual(clear, session.challenge)) {
@@ -97,13 +98,14 @@ public final class WalletUnlockKeyStore {
                 }
             }
             if (!editor.commit()) {
-                deleteAlias(session.alias);
                 throw new IOException("Unable to persist Fresnica system-auth domain");
             }
+            committed = true;
             if (previousAlias != null && !previousAlias.equals(session.alias)) {
-                deleteAlias(previousAlias);
+                deleteAliasQuietly(previousAlias);
             }
         } finally {
+            if (!committed) deleteAliasQuietly(session.alias);
             if (clear != null) Arrays.fill(clear, (byte) 0);
             session.clear();
         }

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "framework": "react-native",
   "adapterSourceVersion": "0.2.0",
-  "fresnicaNativeSdkVersion": "0.2.0",
+  "fresnicaNativeSdkVersion": "0.2.1",
   "nativeBindingApiVersion": 2,
   "jsModuleName": "FresnicaCore",
   "androidHostDependencies": [

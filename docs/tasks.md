@@ -116,6 +116,14 @@
 - [x] Machine-readable SDK compatibility manifest + source drift validator
 - [x] Native SDK release contract + marker-gated release automation (`native-sdk-v*`)
 - [x] First generalized Native SDK integration release (`native-sdk-v0.1.0`)
+- [x] Mobile security/HD Native SDK v0.2 contract: Core/SDK `derive_mnemonic_signer`, API 3/3/2, RN adapter 0.2.0
+- [x] Publish `native-sdk-v0.2.0` from PR #109 / `0de8be4` after Android raw-AAR consumer + Apple direct-consumer + native-signing gates
+- [x] Native SDK v0.2.1 corrective handoff: make Android/Apple System Auth Domain commit/cleanup failure semantics recoverable and synchronize the Mobile v0.2 documentation/release pin
+- [x] Device-level System Auth Protection Domain: one authenticated domain initialization, later passcode-verified signer registration without repeat biometric prompts
+- [x] Android RSA-OAEP auth-bound domain + public-key per-signer WalletUnlockKey wrapping
+- [x] Apple P-256/ECIES auth-bound domain + public-key per-signer WalletUnlockKey wrapping
+- [x] Preserve `Passcode > System Auth`; Reveal/Export and passcode rotation remain passcode-authorized
+- [x] Atomic all-signer passcode rotation contract followed by no-biometric wrapped-key replacement in the existing domain
 - [x] Retire legacy `mobile-sdk-v*` publisher from active `main` workflows
 - [x] Mobile Native SDK / React Native adapter onboarding guide (`docs/mobile-sdk-usage.md`)
 - [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
@@ -143,9 +151,9 @@
 - [x] Build Apple device and arm64/x86_64 simulator static libraries
 - [x] Package generated Swift API + Rust FFI static libraries for XCFramework/Xcode use
 - [x] Native platform packaging CI/artifacts
-- [x] Android auth-per-use AES-GCM WalletUnlockKey storage primitive
-- [x] Apple `ThisDeviceOnly + biometryCurrentSet` WalletUnlockKey storage primitive
-- [x] Wire Keychain/Keystore enrollment to Core `derive_unlock_key`
+- [x] Legacy Android per-signer auth-per-use AES-GCM WalletUnlockKey primitive (superseded by Native SDK v0.2 device System Auth Domain)
+- [x] Legacy Apple per-signer `ThisDeviceOnly + biometryCurrentSet` WalletUnlockKey primitive (superseded by Native SDK v0.2 device System Auth Domain)
+- [x] Wire Native SDK v0.2 domain signer registration to Core verified unlock-key derivation; public-key wrapping requires no repeat biometric prompt
 - [x] Add React Native native-module adapter
 - [x] Native-only biometric `sign_transaction_xdr` orchestration
 - [x] Mobile AccountRecord / SignerRecord lifecycle coordinator

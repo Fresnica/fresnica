@@ -46,14 +46,14 @@ The independent Mobile application owns:
 
 ## Version contract
 
-The first generalized Native SDK line uses independent compatibility numbers:
+The current Mobile integration baseline uses independent compatibility numbers:
 
 ```text
-Native package version:       0.1.0
-NATIVE_BINDING_API_VERSION:   1
-SDK_API_VERSION:              2
-CLIENT_API_VERSION:           2
-RN adapter source version:    0.1.0
+Native package version:       0.2.1
+NATIVE_BINDING_API_VERSION:   2
+SDK_API_VERSION:              3
+CLIENT_API_VERSION:           3
+RN adapter source version:    0.2.0
 ```
 
 Mobile must pin an exact pre-1.0 Native SDK release and record the adapter manifest. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.
@@ -73,6 +73,7 @@ The native API exposes wallet/signer lifecycle and signing primitives backed by 
 - `protectSecret`
 - `protectMnemonic`
 - `generateMnemonic`
+- `deriveMnemonicSigner`
 - `reprotect`
 - `deriveUnlockKey`
 - `validateUnlockKey`
@@ -91,18 +92,27 @@ The canonical JavaScript module remains `FresnicaCore`. It exposes the reviewed 
 - `protectSecret`
 - `protectMnemonic`
 - `generateMnemonic`
+- `deriveMnemonicSigner`
 - `reprotect`
 - `reveal`
 - `prepareEd25519Signing`
 - `applyEd25519Signature`
-- `canEnrollSystemAuth`
-- `hasSystemAuth`
-- `removeSystemAuth`
-- `enrollSystemAuth`
+- `canUseSystemAuth`
+- `hasSystemAuthDomain`
+- `initializeSystemAuth`
+- `registerSignerSystemAuth`
+- `hasSignerSystemAuth`
+- `removeSignerSystemAuth`
+- `removeSystemAuthDomain`
 - `signWithSystemAuth`
 - `signWithPasscode`
 
 The adapter performs only argument/result conversion, React Native registration/lifecycle work and the platform UI steps needed to drive SDK-owned native authorization.
+
+The v0.2 security boundary adds two important high-level semantics:
+
+- `deriveMnemonicSigner` derives another explicit HD index from an existing mnemonic-backed protected source without returning the mnemonic to JavaScript; the normal first index is `0`.
+- system auth is one device/app-level protection domain. `initializeSystemAuth` performs the one-time system-auth prompt; later `registerSignerSystemAuth` calls verify the Fresnica passcode and wrap each new signer unlock key with the existing domain public key without another biometric prompt. Face ID/fingerprint authorizes routine signing only and never substitutes for the Fresnica passcode.
 
 It must not reimplement derivation, protected-envelope parsing, signer identity checks, transaction hashing/signing, signature verification, Keychain/Keystore policy, or `WalletUnlockKey` handling.
 
@@ -115,7 +125,9 @@ React Native requests reviewed signing
         |
 native module selects signer/envelope
         |
-Keychain / Keystore + biometric policy
+device System Auth Protection Domain
+        |
+auth-bound private unwrap after biometric/system authorization
         |
 32-byte WalletUnlockKey released in native memory
         |
@@ -149,9 +161,12 @@ SignerRecord
 
 AccountSignerReference
   account <-> signer relationship
+
+RecoverySourceRecord / grouping metadata (Mobile-owned)
+  shared mnemonic backup/HD grouping when applicable
 ```
 
-A watch-only account has no applicable local signer. Do not persist a second wallet-type truth that can drift.
+**Account != Signer != Recovery Source.** A watch-only account has no applicable local signer. Do not persist a second wallet-type truth that can drift.
 
 A classic account and signer may differ under Stellar signer/threshold rules. `C...` contract accounts are identities, not Ed25519 signer public keys.
 

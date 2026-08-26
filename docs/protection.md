@@ -1,6 +1,6 @@
 # Software Signer Protection Model
 
-Fresnica separates account identity, signing capability, local secret material, Core protection, client persistence, and system authentication.
+Fresnica separates account identity, signing capability, recovery source, local secret material, Core protection, client persistence, and system authentication.
 
 ```text
 Account Identity
@@ -62,7 +62,7 @@ Core exposes a redacted `WalletUnlockKey` type and a verified derivation path. T
 
 No second ciphertext and no independent system wallet key are created.
 
-## Account identity is not signer identity
+## Account, signer, and recovery source are distinct
 
 For a simple Stellar master-key wallet, the account address and signer public key are the same `G...` value. This is not a generic invariant.
 
@@ -70,11 +70,15 @@ Stellar accounts can authorize additional signer keys and multisig combinations,
 
 A watch-only account has no local signer envelope. Adding a matching secret/mnemonic later attaches a protected signer to the existing account record; it does not create a new account.
 
+A mnemonic recovery source may derive several signer identities at different explicit indices. Mobile may group those signers for backup/HD UX, but each signer still owns a fresh independent protected envelope. The Core v0.2 `derive_mnemonic_signer` path authenticates an existing mnemonic-backed envelope and derives another index internally so the mnemonic does not need to cross the Core boundary again. Therefore **Account != Signer != Recovery Source**.
+
 ## System authentication
 
 Face ID, Touch ID, Android biometrics, Windows Hello, device passcode, PAM-backed local policy, or another operating-system mechanism belongs entirely to the client/platform layer.
 
-The client decides how to protect and release the 32-byte `WalletUnlockKey`. Examples include Keychain/Keystore, a native credential vault, or another OS-specific facility. Core does not know which mechanism was used.
+The client decides how to protect and release the 32-byte `WalletUnlockKey`. Core does not know which mechanism was used. Fresnica Mobile v0.2 uses one device/app-level System Auth Protection Domain: one auth-bound private wrapping key plus a public wrapping key. After the Fresnica passcode verifies a new signer, the public key wraps that signer's independent `WalletUnlockKey` without another biometric prompt. Routine signing requires the private-key unwrap and therefore invokes system authentication.
+
+This does **not** create a global wallet master key. The domain only protects independent per-signer unlock keys; Core envelopes and KDF salts remain per signer. System auth is lower privilege than the Fresnica app passcode and cannot authorize Reveal / Export or passcode change.
 
 Normal software-signer signing is therefore:
 
@@ -96,7 +100,7 @@ same canonical signer envelope
 
 If system authentication becomes unavailable, the client can ask the user for the Fresnica app passcode, derive a fresh verified unlock key through Core, and continue using the same canonical envelope.
 
-If the passcode or canonical envelope is re-protected with a new salt, any client-stored unlock key for the old envelope must be invalidated and re-enrolled.
+If the passcode or canonical envelope is re-protected with a new salt, the old wrapped key record becomes stale. After the new envelope set is committed, Mobile derives each new verified unlock key and wraps it with the existing System Auth Domain public key. This registration step does not require another biometric prompt.
 
 ## Passcode rotation / re-protection
 
@@ -114,7 +118,7 @@ new envelope
 
 Clients MUST NOT implement password change as `Reveal -> encrypt`, because that unnecessarily crosses the declassification boundary.
 
-When one Fresnica app passcode protects several local software signers, the client orchestrates a staged/atomic or recoverable batch of per-signer `reprotect` operations and invalidates all old system-auth unlock-key records after commit.
+When one Fresnica app passcode protects several local software signers, the client MUST stage every per-signer `reprotect`, atomically commit the complete new envelope set, immediately treat every previous system-auth registration as stale for that new envelope generation, then replace each wrapped unlock-key record in the existing System Auth Protection Domain. Any pre-commit failure writes nothing; post-commit registration failures are retryable and leave the affected signer on passcode signing until registration succeeds.
 
 ## OS boundary
 

@@ -99,9 +99,11 @@ public final class FresnicaWalletUnlockKeyStore {
             throw StoreError.crypto(cryptoError?.takeRetainedValue().localizedDescription)
         }
         try storeActiveDomain(DomainRecord(tag: tag, publicKey: publicData))
-        try deleteAllSignerRecords()
         committed = true
 
+        // Signer records are domain-tagged and therefore fail closed after the active domain changes.
+        // Cleanup is best effort: failure must not invalidate the newly committed domain.
+        try? deleteAllSignerRecords()
         if let previous, previous.tag != tag {
             try? deletePrivateKey(tag: previous.tag)
         }
