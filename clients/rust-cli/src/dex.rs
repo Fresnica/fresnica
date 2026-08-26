@@ -7,7 +7,9 @@ use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Value;
 
 use crate::transaction_flow::parse_stroops;
-use fresnica_client::{FresnicaClient, WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
+use fresnica_client::{
+    FresnicaClient, WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
+};
 
 const MAX_PAGE_LIMIT: usize = 200;
 const STROOPS_PER_UNIT: i128 = 10_000_000;
@@ -21,9 +23,7 @@ pub fn command_dex(client: &FresnicaClient, arguments: &[String]) -> Result<(), 
     match command {
         "orderbook" => command_orderbook(network, &arguments[1..]),
         "offers" => command_offers(storage, network, &arguments[1..]),
-        "buy" | "sell" | "update" | "cancel" => {
-            write::command_dex_write(client, arguments)
-        }
+        "buy" | "sell" | "update" | "cancel" => write::command_dex_write(client, arguments),
         "trades" | "fills" | "candles" => history::command_dex_history(storage, network, arguments),
         _ => Err(usage().to_owned()),
     }

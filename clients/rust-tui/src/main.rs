@@ -270,7 +270,6 @@ impl TrustlineForm {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OfferFormAction {
     Buy,

@@ -1,6 +1,4 @@
-use fresnica_client::{
-    FresnicaClient, OfferRequest, OfferReview, OfferReviewDetails, OfferSide,
-};
+use fresnica_client::{FresnicaClient, OfferRequest, OfferReview, OfferReviewDetails, OfferSide};
 
 use crate::transaction_flow::confirm_submission;
 
