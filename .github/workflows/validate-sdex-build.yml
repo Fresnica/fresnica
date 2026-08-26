@@ -1,0 +1,27 @@
+name: Validate SDEX build
+
+on:
+  push:
+    branches:
+      - tooling/rustfmt-bootstrap-20260826
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: SDK boundary
+        run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+      - name: Shared client tests
+        run: cargo test --manifest-path clients/rust-client/Cargo.toml
+      - name: Rust CLI tests
+        run: cargo test --manifest-path clients/rust-cli/Cargo.toml
+      - name: Rust TUI tests
+        run: cargo test --manifest-path clients/rust-tui/Cargo.toml
+      - name: Shared client release build
+        run: cargo build --release --manifest-path clients/rust-client/Cargo.toml
+      - name: Rust CLI release build
+        run: cargo build --release --manifest-path clients/rust-cli/Cargo.toml --bin fresnica
+      - name: Rust TUI release build
+        run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml
