@@ -17,7 +17,7 @@ jobs:
         run: |
           cat .validation/candidate.b64.* | base64 -d > /tmp/candidate.patch.gz
           gzip -dc /tmp/candidate.patch.gz > /tmp/candidate.patch
-          echo '3b59f294e68c6ec872f3f57259532991f9328f5d27b11023d21251653208417e  /tmp/candidate.patch' | sha256sum -c -
+          echo '793ef11469a4d90ca0b290f626f5f4f29246cf874d2e68ec31ed999cd65d5973  /tmp/candidate.patch' | sha256sum -c -
           git config user.name 'OpenAI Validation'
           git config user.email 'noreply@openai.com'
           git am /tmp/candidate.patch
