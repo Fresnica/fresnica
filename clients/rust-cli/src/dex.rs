@@ -78,14 +78,9 @@ fn command_offers(client: &FresnicaClient, arguments: &[String]) -> Result<(), S
     let request = OffersRequest::parse(arguments)?;
     let snapshot = client.open_offers(request.wallet.as_deref(), request.limit)?;
     if request.json {
-        let raw = snapshot
-            .offers
-            .iter()
-            .map(|offer| offer.raw())
-            .collect::<Vec<_>>();
         println!(
             "{}",
-            serde_json::to_string_pretty(&raw)
+            serde_json::to_string_pretty(&snapshot.offers)
                 .map_err(|error| format!("unable to encode offers: {error}"))?
         );
         return Ok(());

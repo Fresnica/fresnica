@@ -153,8 +153,6 @@ pub struct OpenOffer {
     pub price_d: i32,
     pub last_modified_ledger: Option<i64>,
     pub last_modified_time: Option<String>,
-    #[serde(skip)]
-    raw: Value,
 }
 
 impl OpenOffer {
@@ -195,12 +193,7 @@ impl OpenOffer {
             price_d: ratio.d,
             last_modified_ledger,
             last_modified_time,
-            raw,
         })
-    }
-
-    pub fn raw(&self) -> &Value {
-        &self.raw
     }
 }
 
@@ -999,5 +992,10 @@ mod tests {
         assert_eq!(offer.buying, format!("USD:{ISSUER}"));
         assert_eq!((offer.price_n, offer.price_d), (13, 40));
         assert_eq!(offer.last_modified_ledger, Some(123));
+        let encoded = serde_json::to_value(&offer).unwrap();
+        assert_eq!(encoded["offer_id"], 42);
+        assert_eq!(encoded["selling"], "XLM");
+        assert_eq!(encoded["buying"], format!("USD:{ISSUER}"));
+        assert!(encoded.get("_links").is_none());
     }
 }
