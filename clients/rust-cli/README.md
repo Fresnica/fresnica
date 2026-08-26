@@ -72,14 +72,17 @@ directly through `friendbot.stellar.org` with a 15-second request timeout and do
 not require signing material, so watch-only testnet wallets are valid targets.
 
 Account state, balances, recent operations, SDEX reads, transaction preparation
-and Horizon submission are client responsibilities. The CLI talks directly to
-the matching public or testnet Horizon server; none of that HTTP or product
-policy is moved into `fresnica-core`.
+and Horizon submission are client responsibilities. Reusable Rust application
+semantics live in `fresnica-client`, which talks to the matching public or testnet
+Horizon server; none of that HTTP or product policy is moved into `fresnica-core`.
 
 Reviewed write commands present operation-specific review and ask for
-confirmation before requesting the Fresnica passcode. The exact prepared XDR is
-then passed to the SDK composite passcode-signing operation, so routine CLI
-signing does not expose a raw `WalletUnlockKey` outside the Rust SDK/Core call.
+confirmation before requesting the Fresnica passcode. Payment preparation, its
+review DTO, submission, and pending-retry protection are shared through
+`fresnica-client`; CLI parsing, rendering, confirmation, and hidden passcode input
+remain terminal-owned. The exact prepared XDR is then passed to the SDK composite
+passcode-signing operation, so routine CLI signing does not expose a raw
+`WalletUnlockKey` outside the Rust SDK/Core call.
 If the HTTP submission result is uncertain,
 the native client persists the locally computed transaction hash and blocks a
 later same-account write until Horizon confirms it or the 210-second recovery

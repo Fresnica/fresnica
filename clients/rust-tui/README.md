@@ -4,13 +4,17 @@
 It consumes `clients/rust-client`; it does not own separate wallet, crypto, or
 Horizon semantics.
 
-Current first slice:
+Current reference slice:
 
 - selected wallet identity and signer capability;
 - network-scoped wallet switching for the current session;
 - Horizon balances/liabilities;
 - recent account activity;
-- manual refresh.
+- manual refresh;
+- reviewed XLM/issued-asset payment preparation through `fresnica-client`;
+- masked passcode entry and SDK-backed submission with shared pending-transaction protection.
+
+The TUI owns interaction state and confirmation. Payment validation, exact review data, transaction construction, signing handoff, submission, and pending retry protection are shared client-service behavior rather than copies of CLI command handlers.
 
 Run after building with Rust:
 

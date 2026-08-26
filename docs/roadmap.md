@@ -245,7 +245,7 @@ The Rust CLI is already the primary lightweight native validation client. Keep i
 
 ### Rust TUI - STARTED
 
-The shared Rust application-client boundary is now explicit in `clients/rust-client` (`fresnica-client`). The Rust CLI consumes that layer for wallet storage/lifecycle, contacts, Horizon transport and account/balance/history reads. This keeps application orchestration reusable without moving persistence/network policy into the universal SDK.
+The shared Rust application-client boundary is now explicit in `clients/rust-client` (`fresnica-client`). The Rust CLI consumes that layer for wallet storage/lifecycle, contacts, Horizon transport, account/balance/history reads, UI-free transaction orchestration and payment prepare/review/submit semantics. This keeps application orchestration reusable without moving persistence/network policy into the universal SDK or making the client layer a crypto authority.
 
 The first `clients/rust-tui` slice consumes the same client layer and provides:
 
@@ -253,9 +253,11 @@ The first `clients/rust-tui` slice consumes the same client layer and provides:
 - network-scoped session wallet switching;
 - balances/liabilities;
 - recent activity;
-- manual refresh.
+- manual refresh;
+- reviewed XLM/issued-asset payment preparation;
+- masked passcode entry and SDK-backed payment submission with shared pending-transaction protection.
 
-Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. Write flows should be exposed through reusable client services before being added to the TUI; do not create a second wallet/service architecture or call CLI command handlers from the TUI.
+Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. Additional trustline/SDEX write semantics should be exposed through reusable client services before being added to the TUI; do not create a second wallet/service architecture or call CLI command handlers from the TUI.
 
 ## Phase 7 - Product Wallet Experience
 

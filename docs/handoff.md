@@ -265,19 +265,21 @@ The Rust CLI is substantially implemented and remains the reference native comma
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
 The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking and an explicit reviewed withdrawal-payment handoff. SEP-45 contract-account execution and SEP-12 customer-information handoff remain separate follow-up work.
 
-A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The first extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, and account/balance/history services. It does **not** become a new crypto authority: protected signer semantics still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
+A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, and payment prepare/review/submit semantics. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
 Mobile should mirror this same application-layer shape rather than inventing a separate product architecture: React Native screens/state -> Mobile application services -> Realm/network/platform adapters + Fresnica Native SDK. Reuse the service responsibilities and wallet semantics where they are common, but do not require Mobile to link the concrete `fresnica-client` Rust implementation; persistence technology, platform lifecycle and product orchestration remain application-owned.
 
-The first native Rust TUI slice lives at `clients/rust-tui`. It consumes `fresnica-client` rather than importing CLI command handlers. The initial scope is intentionally narrow:
+The native Rust TUI lives at `clients/rust-tui`. It consumes `fresnica-client` rather than importing CLI command handlers. Its current reference slice includes:
 
 - selected wallet identity and watch-only/local-signer capability;
 - network-scoped wallet switching for the current TUI session;
 - balances/liabilities;
 - recent account activity;
-- manual refresh.
+- manual refresh;
+- reviewed XLM/issued-asset payment preparation through the shared payment service;
+- masked passcode entry and SDK-backed payment submission, including shared pending-transaction protection.
 
-Transaction prompts, write workflows and richer wallet/SDEX screens remain follow-up work. They should move behind reusable client services before the TUI consumes them; do not copy CLI command parsing or terminal prompts into the TUI.
+Trustline/SDEX write flows and richer wallet screens remain follow-up work. Their reusable business preparation/submission semantics should move behind client services before the TUI consumes them; terminal interaction, confirmation state and passcode entry remain presentation-owned and must not be copied from CLI command handlers.
 
 ## Python Wallet Reference
 
