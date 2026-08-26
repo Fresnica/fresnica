@@ -55,6 +55,22 @@ impl HorizonClient {
         )
     }
 
+    pub fn get_offers(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("offers limit must be from 1 to 200".to_owned());
+        }
+        let response = self.get_json(
+            &format!("/accounts/{address}/offers?order=desc&limit={limit}"),
+            &format!("Stellar account not found: {address}"),
+        )?;
+        response
+            .get("_embedded")
+            .and_then(|value| value.get("records"))
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| "Horizon returned malformed offer data".to_owned())
+    }
+
     pub fn get_transaction(&self, transaction_hash: &str) -> Result<Option<Value>, String> {
         let url = format!("{}/transactions/{transaction_hash}", self.base_url);
         let mut response = match ureq::get(&url).call() {
@@ -431,6 +447,22 @@ mod tests {
             HorizonClient::new(&base).get_offer(43).unwrap_err(),
             "Offer not found: 43"
         );
+    }
+
+    #[test]
+    fn offers_are_requested_newest_first_with_limit() {
+        let body = r#"{"_embedded":{"records":[{"id":"42","seller":"GACCOUNT"}]}}"#;
+        let base = mock_server(
+            "GET",
+            "/accounts/GACCOUNT/offers?order=desc&limit=20",
+            200,
+            body,
+        );
+        let offers = HorizonClient::new(&base)
+            .get_offers("GACCOUNT", 20)
+            .unwrap();
+        assert_eq!(offers.len(), 1);
+        assert_eq!(offers[0]["id"], "42");
     }
 
     #[test]

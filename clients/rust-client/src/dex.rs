@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use serde::Serialize;
 use serde_json::Value;
 use stellar_xdr::{
     AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, ChangeTrustAsset,
@@ -140,7 +141,94 @@ pub struct PreparedOffer {
     envelope: TransactionEnvelope,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OpenOffer {
+    pub offer_id: i64,
+    pub seller: String,
+    pub selling: String,
+    pub buying: String,
+    pub amount: String,
+    pub price: String,
+    pub price_n: i32,
+    pub price_d: i32,
+    pub last_modified_ledger: Option<i64>,
+    pub last_modified_time: Option<String>,
+    #[serde(skip)]
+    raw: Value,
+}
+
+impl OpenOffer {
+    fn from_horizon(raw: Value) -> Result<Self, String> {
+        let offer_id = integer(raw.get("id"))
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "Horizon returned invalid offer id".to_owned())?;
+        let seller = text(&raw, "seller")
+            .ok_or_else(|| "Horizon returned malformed offer seller".to_owned())?
+            .to_owned();
+        let selling = OfferAsset::from_horizon(
+            raw.get("selling")
+                .ok_or_else(|| "Horizon returned malformed offer selling asset".to_owned())?,
+        )?
+        .display();
+        let buying = OfferAsset::from_horizon(
+            raw.get("buying")
+                .ok_or_else(|| "Horizon returned malformed offer buying asset".to_owned())?,
+        )?
+        .display();
+        let amount = text(&raw, "amount")
+            .ok_or_else(|| "Horizon returned malformed offer amount".to_owned())?
+            .to_owned();
+        let price = text(&raw, "price")
+            .ok_or_else(|| "Horizon returned malformed offer price".to_owned())?
+            .to_owned();
+        let ratio = horizon_price(&raw)?;
+        let last_modified_ledger = integer(raw.get("last_modified_ledger"));
+        let last_modified_time = text(&raw, "last_modified_time").map(str::to_owned);
+        Ok(Self {
+            offer_id,
+            seller,
+            selling,
+            buying,
+            amount,
+            price,
+            price_n: ratio.n,
+            price_d: ratio.d,
+            last_modified_ledger,
+            last_modified_time,
+            raw,
+        })
+    }
+
+    pub fn raw(&self) -> &Value {
+        &self.raw
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenOffersSnapshot {
+    pub wallet: WalletRecord,
+    pub offers: Vec<OpenOffer>,
+}
+
 impl FresnicaClient {
+    pub fn open_offers(
+        &self,
+        wallet_name: Option<&str>,
+        limit: usize,
+    ) -> Result<OpenOffersSnapshot, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("offers limit must be from 1 to 200".to_owned());
+        }
+        let wallet = self.resolve_wallet(wallet_name)?;
+        let offers = self
+            .horizon()
+            .get_offers(&wallet.address, limit)?
+            .into_iter()
+            .map(OpenOffer::from_horizon)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(OpenOffersSnapshot { wallet, offers })
+    }
+
     pub fn prepare_offer(&self, request: &OfferRequest) -> Result<PreparedOffer, String> {
         match request {
             OfferRequest::Create {
@@ -886,5 +974,30 @@ mod tests {
             ),
             "1.1375"
         );
+    }
+
+    #[test]
+    fn open_offer_preserves_full_asset_identity_and_exact_price_ratio() {
+        let raw = serde_json::json!({
+            "id": "42",
+            "seller": ISSUER,
+            "selling": {"asset_type": "native"},
+            "buying": {
+                "asset_type": "credit_alphanum4",
+                "asset_code": "USD",
+                "asset_issuer": ISSUER
+            },
+            "amount": "3.5000000",
+            "price": "0.3250000",
+            "price_r": {"n": 13, "d": 40},
+            "last_modified_ledger": 123,
+            "last_modified_time": "2026-08-26T00:00:00Z"
+        });
+        let offer = OpenOffer::from_horizon(raw).unwrap();
+        assert_eq!(offer.offer_id, 42);
+        assert_eq!(offer.selling, "XLM");
+        assert_eq!(offer.buying, format!("USD:{ISSUER}"));
+        assert_eq!((offer.price_n, offer.price_d), (13, 40));
+        assert_eq!(offer.last_modified_ledger, Some(123));
     }
 }

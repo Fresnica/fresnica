@@ -22,7 +22,7 @@ pub fn command_dex(client: &FresnicaClient, arguments: &[String]) -> Result<(), 
     };
     match command {
         "orderbook" => command_orderbook(network, &arguments[1..]),
-        "offers" => command_offers(storage, network, &arguments[1..]),
+        "offers" => command_offers(client, &arguments[1..]),
         "buy" | "sell" | "update" | "cancel" => write::command_dex_write(client, arguments),
         "trades" | "fills" | "candles" => history::command_dex_history(storage, network, arguments),
         _ => Err(usage().to_owned()),
@@ -74,38 +74,35 @@ fn command_orderbook(network: &str, arguments: &[String]) -> Result<(), String> 
     Ok(())
 }
 
-fn command_offers(
-    storage: &WalletStorage,
-    network: &str,
-    arguments: &[String],
-) -> Result<(), String> {
+fn command_offers(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
     let request = OffersRequest::parse(arguments)?;
-    let record = resolve_network_wallet(storage, network, request.wallet.as_deref())?;
-    let offers = fetch_offers(network, &record.address, request.limit)?;
+    let snapshot = client.open_offers(request.wallet.as_deref(), request.limit)?;
     if request.json {
+        let raw = snapshot
+            .offers
+            .iter()
+            .map(|offer| offer.raw())
+            .collect::<Vec<_>>();
         println!(
             "{}",
-            serde_json::to_string_pretty(&offers)
+            serde_json::to_string_pretty(&raw)
                 .map_err(|error| format!("unable to encode offers: {error}"))?
         );
         return Ok(());
     }
 
-    println!("Offers · {} [{}]", record.name, record.network);
+    println!(
+        "Offers · {} [{}]",
+        snapshot.wallet.name, snapshot.wallet.network
+    );
     println!(
         "{:<12} {:<24} {:<24} {:>16} {:>14}",
         "ID", "Selling", "Buying", "Amount", "Price"
     );
-    for offer in offers {
-        let id = text(&offer, "id").unwrap_or("?");
-        let selling = horizon_asset(offer.get("selling"));
-        let buying = horizon_asset(offer.get("buying"));
-        let amount = text(&offer, "amount").unwrap_or("?");
-        let price =
-            offer_price(&offer).unwrap_or_else(|_| text(&offer, "price").unwrap_or("?").to_owned());
+    for offer in snapshot.offers {
         println!(
             "{:<12} {:<24} {:<24} {:>16} {:>14}",
-            id, selling, buying, amount, price
+            offer.offer_id, offer.selling, offer.buying, offer.amount, offer.price
         );
     }
     Ok(())
@@ -266,18 +263,6 @@ fn fetch_orderbook(
     get_json(&url, "Unable to load Stellar order book")
 }
 
-fn fetch_offers(network: &str, address: &str, limit: usize) -> Result<Vec<Value>, String> {
-    let base = horizon_url(network)?;
-    let url = format!("{base}/accounts/{address}/offers?order=desc&limit={limit}");
-    let response = get_json(&url, &format!("Stellar account not found: {address}"))?;
-    response
-        .get("_embedded")
-        .and_then(|value| value.get("records"))
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| "Horizon returned malformed offer data".to_owned())
-}
-
 fn get_json(url: &str, not_found: &str) -> Result<Value, String> {
     let mut response = match ureq::get(url).call() {
         Ok(response) => response,
@@ -345,11 +330,6 @@ fn book_ask_cells(row: &Value) -> Result<(String, String), String> {
     ))
 }
 
-fn offer_price(offer: &Value) -> Result<String, String> {
-    let (n, d) = price_ratio(offer)?;
-    format_price_ratio(n, d)
-}
-
 fn price_ratio(value: &Value) -> Result<(i64, i64), String> {
     let ratio = value
         .get("price_r")
@@ -397,18 +377,6 @@ fn format_scaled_7(value: i128) -> String {
     format!("{whole}.{fraction:07}")
 }
 
-fn horizon_asset(value: Option<&Value>) -> String {
-    let Some(value) = value else {
-        return "?".to_owned();
-    };
-    if text(value, "asset_type") == Some("native") {
-        return "XLM".to_owned();
-    }
-    let code = text(value, "asset_code").unwrap_or("asset");
-    let issuer = text(value, "asset_issuer").unwrap_or("?");
-    format!("{code}:{}", short_address(issuer))
-}
-
 fn integer(value: Option<&Value>) -> Option<i64> {
     match value? {
         Value::Number(value) => value.as_i64(),
@@ -419,14 +387,6 @@ fn integer(value: Option<&Value>) -> Option<i64> {
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
-}
-
-fn short_address(value: &str) -> String {
-    if value.len() <= 16 {
-        value.to_owned()
-    } else {
-        format!("{}...{}", &value[..6], &value[value.len() - 6..])
-    }
 }
 
 fn usage() -> &'static str {
