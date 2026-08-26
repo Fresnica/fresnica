@@ -1,0 +1,61 @@
+name: Apply Mobile SDK v0.2.1 handoff
+
+on:
+  push:
+    branches:
+      - fix/mobile-sdk-v0.2.1-handoff
+    paths:
+      - ".ci/mobile-sdk-v021.part-*"
+      - ".github/workflows/apply-mobile-sdk-v021.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify and apply handoff patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/mobile-sdk-v021.part-* > /tmp/mobile-sdk-v021.patch.gz
+          test "$(wc -c < /tmp/mobile-sdk-v021.patch.gz)" = "27716"
+          echo "6d95f2ce97c40bc047bb681380ff80babfa01c7cc78bb790c955337698c10e9c  /tmp/mobile-sdk-v021.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/mobile-sdk-v021.patch.gz > /tmp/mobile-sdk-v021.patch
+          test "$(wc -c < /tmp/mobile-sdk-v021.patch)" = "98825"
+          echo "f4e5727cff6d96707c9698e203674e65c4b5ce7dc865c9e287d4310439d5f2f5  /tmp/mobile-sdk-v021.patch" | sha256sum -c -
+          git apply --check /tmp/mobile-sdk-v021.patch
+          git apply /tmp/mobile-sdk-v021.patch
+          rm -f .ci/mobile-sdk-v021.part-*
+          rmdir .ci 2>/dev/null || true
+          rm -f .github/workflows/apply-mobile-sdk-v021.yml
+          git diff --check
+          node sdk/compatibility/validate.mjs
+          node --test adapters/react-native/tooling/test/*.test.mjs
+
+          native_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' bindings/native/Cargo.toml | head -n1)"
+          native_api="$(sed -n 's/^pub const NATIVE_BINDING_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' bindings/native/src/lib.rs)"
+          sdk_api="$(sed -n 's/^pub const SDK_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' sdk/rust/src/lib.rs)"
+          core_api="$(sed -n 's/^pub const CLIENT_API_VERSION: u64 = \([0-9][0-9]*\);/\1/p' core/rust/src/client_api.rs)"
+          test "$native_version" = "0.2.1"
+          test "$(jq -r .version releases/native-sdk-v0.2.1.json)" = "$native_version"
+          test "$(jq -r .native_binding_api_version releases/native-sdk-v0.2.1.json)" = "$native_api"
+          test "$(jq -r .sdk_api_version releases/native-sdk-v0.2.1.json)" = "$sdk_api"
+          test "$(jq -r .core_client_api_version releases/native-sdk-v0.2.1.json)" = "$core_api"
+          test ! -d .ci
+          test ! -e .github/workflows/apply-mobile-sdk-v021.yml
+
+      - name: Commit finalized handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finalize Mobile SDK v0.2.1 handoff"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
