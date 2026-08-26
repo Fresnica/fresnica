@@ -265,7 +265,7 @@ The Rust CLI is substantially implemented and remains the reference native comma
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
 The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking, an explicit reviewed withdrawal-payment handoff, and a shared SEP-12 customer status/common-update handoff. SEP-45 contract-account execution remains separate; uncommon SEP-12 nested-structure + `/customer/files` workflows remain follow-up work when required by a concrete anchor.
 
-A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, payment/trustline prepare-review-submit semantics, SDEX offer create/update/cancel preparation/submission, and typed open-offer reads. Shared service DTOs should remain transport-neutral; the SDEX `OpenOffer` surface intentionally exposes normalized wallet semantics rather than Horizon raw JSON. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
+A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, payment/trustline prepare-review-submit semantics, SDEX offer/market services, SEP-12 customer handoff, and the shared SEP-1/SEP-10/SEP-6/SEP-24 anchor protocol boundary. Shared service DTOs should remain transport-neutral; presentation clients do not own Horizon/anchor HTTP parsing or SEP challenge validation. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
 Mobile should mirror this same application-layer shape rather than inventing a separate product architecture: React Native screens/state -> Mobile application services -> Realm/network/platform adapters + Fresnica Native SDK. Reuse the service responsibilities and wallet semantics where they are common, but do not require Mobile to link the concrete `fresnica-client` Rust implementation; persistence technology, platform lifecycle and product orchestration remain application-owned.
 
@@ -334,9 +334,10 @@ Current reference behavior:
 
 - usable SEP-24 deposit/withdraw is supported in the Python reference;
 - SEP-6 deposit/withdraw is supported in the Python reference;
-- Rust CLI now covers SEP-1 + SEP-6/SEP-24 capability discovery while preserving full `CODE:GISSUER` identity;
+- `fresnica-client` owns SEP-1 discovery, SEP-6/SEP-24 capability/transport semantics, transaction-status lookup and Classic SEP-10 challenge validation/exchange while preserving full `CODE:GISSUER` identity;
+- the Rust CLI is now a thin anchor presentation/orchestration consumer and keeps only argument parsing, prompts, rendering and reviewed payment confirmation;
 - usable SEP-24 is preferred, SEP-6 is fallback;
-- SEP-10 uses official Stellar signing/verification semantics;
+- SEP-10 uses official Stellar signing/verification semantics; the shared two-phase challenge object keeps the verified XDR private/read-only and binds token exchange to the original transaction body plus valid server/client signatures;
 - memo text/id/hash/return-hash is handled through the reviewed transfer path;
 - KYC-required responses are surfaced;
 - shared SEP-12 customer status and common scalar/binary update handoff are implemented without placing customer values in CLI arguments;

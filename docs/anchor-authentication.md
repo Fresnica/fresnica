@@ -6,7 +6,7 @@ This document records the current Rust reference-client authentication boundary 
 
 ## Current state
 
-The Rust CLI `anchor discover CODE:GISSUER` now discovers and validates:
+The shared Rust client service behind `anchor discover CODE:GISSUER` now discovers and validates:
 
 - SEP-1 `stellar.toml` from the issuer `home_domain`;
 - SEP-6 `TRANSFER_SERVER` and `/info` capability metadata;
@@ -15,7 +15,7 @@ The Rust CLI `anchor discover CODE:GISSUER` now discovers and validates:
 - SEP-45 `WEB_AUTH_FOR_CONTRACTS_ENDPOINT`, Contract `C...` `WEB_AUTH_CONTRACT_ID`, and `SIGNING_KEY`;
 - whether authenticated SEP-6/SEP-24 use has at least one complete SEP-10 or SEP-45 metadata path.
 
-The Rust CLI also implements the Classic-account SEP-10 session path:
+The shared Rust client now owns the Classic-account SEP-10/SEP-6/SEP-24 protocol path, while the CLI supplies presentation and signing authorization:
 
 - `anchor auth CODE:GISSUER [--wallet NAME]` requests and verifies a challenge before signing it through the Fresnica SDK/Core boundary, exchanges it for a JWT, and immediately discards that JWT after the diagnostic command completes;
 - `anchor deposit|withdraw CODE:GISSUER ...` prefers a usable SEP-24 flow and falls back to SEP-6;
@@ -25,8 +25,9 @@ The Rust CLI also implements the Classic-account SEP-10 session path:
 - `anchor status ... --pay` is an explicit write transition only when the transaction is a withdrawal in `pending_user_transfer_start`; it consumes `withdraw_anchor_account`, `amount_in`, and `withdraw_memo[_type]`, then hands the payment to the existing reviewed transaction path;
 - withdrawal memos support the protocol-defined `text`, `id`, and base64 `hash` forms without flattening them to text;
 - JWT values are held only in zeroizing in-memory strings and are never printed, persisted, logged, or passed through CLI arguments.
+- SEP-10 is a two-phase shared API: challenge preparation verifies the server transaction before any signer prompt, exposes the verified XDR read-only for SDK/Core signing, and token exchange rejects transaction substitution, missing server signatures, or missing client signatures before HTTP exchange.
 
-Transfer execution in the Rust CLI is currently Classic `G...` / SEP-10 only. SEP-45 metadata is discovered but contract-account authentication execution is intentionally still separate.
+Transfer execution currently supports Classic `G...` / SEP-10 only. SEP-45 metadata is discovered but contract-account authentication execution is intentionally still separate.
 
 ## Authentication model
 
@@ -43,12 +44,15 @@ The implementation preserves these boundaries:
 
 ### Anchor service / protocol layer
 
-Owns protocol validation and transport semantics, including:
+Implemented in `fresnica-client`; owns protocol validation and transport semantics, including:
 
 - requesting an authentication challenge;
 - validating challenge structure, target account, domain and time constraints;
-- choosing SEP-10 versus SEP-45 from account identity and discovered capabilities;
+- classifying complete SEP-10 versus SEP-45 capability paths while keeping Classic and contract execution separate;
+- exposing only the already-verified challenge XDR to the signing layer;
+- binding token exchange to that original transaction body and valid server/client signatures;
 - exchanging a verified signed challenge for an authorization token;
+- SEP-6/SEP-24 initiation, protocol selection and transaction-status transport;
 - keeping the token/session scoped to the anchor and network.
 
 ### Rust Core

@@ -98,6 +98,7 @@
 - [x] Native Rust CLI SEP-24-preferred / SEP-6-fallback deposit and withdraw initiation
 - [x] Native Rust CLI reviewed withdrawal payment handoff and anchor transaction-status tracking
 - [x] Native Rust CLI SEP-12 customer status/common field update handoff for anchor KYC/update states
+- [x] Shared Rust AnchorService boundary for SEP-1 discovery, Classic SEP-10 challenge/session, SEP-6/SEP-24 transfer transport and transaction status
 - [ ] SEP-12 nested structured values and optional `/customer/files` file-id workflow when a concrete anchor requires them
 
 ## Universal / Native SDK
