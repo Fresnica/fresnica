@@ -4,8 +4,9 @@ use std::process;
 
 use fresnica_client::{
     balance_asset_label, operation_summary, BalanceSnapshot, FresnicaClient, HistorySnapshot,
-    OfferRequest, OfferReviewDetails, OfferSide, OpenOffer, PaymentRequest, PreparedOffer,
-    PreparedPayment, PreparedTrustline, TrustlineAction, TrustlineRequest, WalletRecord,
+    OfferRequest, OfferReviewDetails, OfferSide, OpenOffer, OrderBookSnapshot, PaymentRequest,
+    PreparedOffer, PreparedPayment, PreparedTrustline, TrustlineAction, TrustlineRequest,
+    WalletRecord,
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -28,6 +29,7 @@ Keys:
   s           prepare a payment from the selected signing wallet
   t           add, change, or remove an issued-asset trustline
   o           create, update, or cancel an SDEX offer
+  m           open an SDEX market order book
 
 Write flow:
   form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
@@ -139,6 +141,8 @@ enum Mode {
     Send(SendForm),
     Trustline(TrustlineForm),
     Offer(OfferForm),
+    Market(MarketForm),
+    OrderBook(OrderBookSnapshot),
     PaymentReview(PreparedPayment),
     TrustlineReview(PreparedTrustline),
     OfferReview(PreparedOffer),
@@ -146,6 +150,34 @@ enum Mode {
         prepared: PreparedWrite,
         passcode: String,
     },
+}
+
+struct MarketForm {
+    base: String,
+    counter: String,
+    active: usize,
+}
+
+impl MarketForm {
+    fn new() -> Self {
+        Self {
+            base: String::new(),
+            counter: "XLM".to_owned(),
+            active: 0,
+        }
+    }
+
+    fn current_mut(&mut self) -> &mut String {
+        if self.active == 0 {
+            &mut self.base
+        } else {
+            &mut self.counter
+        }
+    }
+
+    fn pair(&self) -> (String, String) {
+        (self.base.clone(), self.counter.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -521,6 +553,7 @@ impl App {
         let mut payment_request = None;
         let mut trustline_request = None;
         let mut offer_request = None;
+        let mut order_book_request = None;
         let mut submit = false;
 
         match &mut self.mode {
@@ -558,6 +591,10 @@ impl App {
                         self.mode = Mode::Offer(OfferForm::new());
                         self.status = "Preparing SDEX offer".to_owned();
                     }
+                }
+                KeyCode::Char('m') => {
+                    self.mode = Mode::Market(MarketForm::new());
+                    self.status = "Choose an SDEX market pair".to_owned();
                 }
                 _ => {}
             },
@@ -658,6 +695,35 @@ impl App {
                 }
                 _ => {}
             },
+            Mode::Market(form) => match code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Market selection cancelled".to_owned();
+                }
+                KeyCode::Tab | KeyCode::Down => form.active = (form.active + 1) % 2,
+                KeyCode::BackTab | KeyCode::Up => form.active = (form.active + 1) % 2,
+                KeyCode::Enter if form.active == 0 => form.active = 1,
+                KeyCode::Enter => order_book_request = Some(form.pair()),
+                KeyCode::Backspace => {
+                    form.current_mut().pop();
+                }
+                KeyCode::Char(character) => form.current_mut().push(character),
+                _ => {}
+            },
+            Mode::OrderBook(snapshot) => match code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Closed SDEX market".to_owned();
+                }
+                KeyCode::Char('r') => {
+                    order_book_request = Some((snapshot.base.clone(), snapshot.counter.clone()));
+                }
+                KeyCode::Char('m') => {
+                    self.mode = Mode::Market(MarketForm::new());
+                    self.status = "Choose another SDEX market pair".to_owned();
+                }
+                _ => {}
+            },
             Mode::PaymentReview(prepared) => match code {
                 KeyCode::Char('y') | KeyCode::Enter => {
                     self.mode = Mode::Passcode {
@@ -749,6 +815,17 @@ impl App {
             }
         }
 
+        if let Some((base, counter)) = order_book_request {
+            match self.client.order_book(&base, &counter) {
+                Ok(snapshot) => {
+                    self.status =
+                        format!("Updated SDEX market {}/{}", snapshot.base, snapshot.counter);
+                    self.mode = Mode::OrderBook(snapshot);
+                }
+                Err(error) => self.status = error,
+            }
+        }
+
         if submit {
             let result = match &mut self.mode {
                 Mode::Passcode { prepared, passcode } => {
@@ -827,6 +904,8 @@ impl App {
             Mode::Send(form) => self.render_send_form(frame, form),
             Mode::Trustline(form) => self.render_trustline_form(frame, form),
             Mode::Offer(form) => self.render_offer_form(frame, form),
+            Mode::Market(form) => self.render_market_form(frame, form),
+            Mode::OrderBook(snapshot) => self.render_order_book(frame, snapshot),
             Mode::PaymentReview(prepared) => self.render_payment_review(frame, prepared),
             Mode::TrustlineReview(prepared) => self.render_trustline_review(frame, prepared),
             Mode::OfferReview(prepared) => self.render_offer_review(frame, prepared),
@@ -943,7 +1022,7 @@ impl App {
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let help = match &self.mode {
             Mode::Browse => {
-                "q quit   r refresh   [ / ] switch wallet   s send   t trustline   o manage offer"
+                "q quit   r refresh   [ / ] switch wallet   s send   t trustline   o offer   m market"
             }
             Mode::Send(_) => "type value   Tab/Up/Down field   Enter next/prepare   Esc cancel",
             Mode::Trustline(_) => {
@@ -952,6 +1031,8 @@ impl App {
             Mode::Offer(_) => {
                 "action: Left/Right or b/s/u/c   Tab field   Space toggles trustline   Enter next/prepare"
             }
+            Mode::Market(_) => "type asset   Tab/Up/Down field   Enter next/open   Esc cancel",
+            Mode::OrderBook(_) => "r refresh market   m change pair   Esc close",
             Mode::PaymentReview(_) | Mode::TrustlineReview(_) | Mode::OfferReview(_) => {
                 "y/Enter sign   n/Esc cancel"
             }
@@ -1079,6 +1160,71 @@ impl App {
             Paragraph::new(lines).block(Block::bordered().title("Prepare SDEX offer")),
             area,
         );
+    }
+
+    fn render_market_form(&self, frame: &mut Frame, form: &MarketForm) {
+        let area = popup_area(frame.area());
+        let fields = [
+            ("Base", form.base.clone()),
+            ("Counter", form.counter.clone()),
+        ];
+        let lines = fields
+            .iter()
+            .enumerate()
+            .map(|(index, (label, value))| {
+                let line = Line::from(format!("{label:<12} {value}"));
+                if index == form.active {
+                    line.style(Style::new().add_modifier(Modifier::BOLD))
+                } else {
+                    line
+                }
+            })
+            .chain(std::iter::once(Line::from("")))
+            .chain(std::iter::once(Line::from(
+                "Assets are XLM or full CODE:GISSUER identities. Price is counter per base.",
+            )))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Open SDEX market")),
+            area,
+        );
+    }
+
+    fn render_order_book(&self, frame: &mut Frame, snapshot: &OrderBookSnapshot) {
+        let area = popup_area(frame.area());
+        let header = Row::new(["Amount", "Price", "Price", "Amount"])
+            .style(Style::new().add_modifier(Modifier::BOLD));
+        let count = snapshot.bids.len().max(snapshot.asks.len());
+        let rows = (0..count).map(|index| {
+            let bid = snapshot.bids.get(index);
+            let ask = snapshot.asks.get(index);
+            Row::new([
+                bid.map(|level| level.amount.clone()).unwrap_or_default(),
+                bid.map(|level| level.price.clone()).unwrap_or_default(),
+                ask.map(|level| level.price.clone()).unwrap_or_default(),
+                ask.map(|level| level.amount.clone()).unwrap_or_default(),
+            ])
+        });
+        let title = format!(
+            "BID · BUY   {} / {}   ASK · SELL",
+            compact_asset(&snapshot.base),
+            compact_asset(&snapshot.counter)
+        );
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+            ],
+        )
+        .header(header)
+        .column_spacing(1)
+        .block(Block::bordered().title(title));
+        frame.render_widget(Clear, area);
+        frame.render_widget(table, area);
     }
 
     fn render_payment_review(&self, frame: &mut Frame, prepared: &PreparedPayment) {
@@ -1365,6 +1511,18 @@ mod tests {
                 ..
             } if wallet == "primary" && amount == "3.5" && price == "1.75"
         ));
+    }
+
+    #[test]
+    fn market_form_keeps_full_asset_pair_identity() {
+        let mut form = MarketForm::new();
+        form.base = "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".to_owned();
+        let (base, counter) = form.pair();
+        assert_eq!(
+            base,
+            "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+        );
+        assert_eq!(counter, "XLM");
     }
 
     #[test]
