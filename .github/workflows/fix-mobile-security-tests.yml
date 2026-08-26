@@ -1,0 +1,44 @@
+name: Fix Mobile security Core tests
+
+on:
+  push:
+    branches:
+      - refactor/mobile-security-ux-contract
+    paths:
+      - ".github/workflows/fix-mobile-security-tests.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply focused test fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("core/rust/src/client_api.rs")
+          text = path.read_text()
+          old1 = '''            )\n            .unwrap_err();\n        assert_eq!(error.code(), ClientApiErrorCode::IdentityMismatch);'''
+          new1 = '''            )\n            .err()\n            .expect("identity mismatch must fail");\n        assert_eq!(error.code(), ClientApiErrorCode::IdentityMismatch);'''
+          old2 = '''            .derive_mnemonic_signer(&secret.envelope, "passcode", PUBLIC, 1)\n            .unwrap_err();\n        assert_eq!(error.code(), ClientApiErrorCode::InvalidInput);'''
+          new2 = '''            .derive_mnemonic_signer(&secret.envelope, "passcode", PUBLIC, 1)\n            .err()\n            .expect("secret-backed source must fail");\n        assert_eq!(error.code(), ClientApiErrorCode::InvalidInput);'''
+          if text.count(old1) != 1 or text.count(old2) != 1:
+              raise SystemExit("expected Core test patterns not found exactly once")
+          path.write_text(text.replace(old1, new1).replace(old2, new2))
+          PY
+          git diff --check
+      - name: Commit and self-clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-mobile-security-tests.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix mnemonic derivation error tests"
+          git push origin HEAD
