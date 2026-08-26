@@ -74,3 +74,37 @@ jobs:
 
       - name: Rust TUI release build
         run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml
+
+      - name: Export clean candidate bundle
+        shell: bash
+        run: |
+          git fetch origin 63d904bf1bc07672d691e5c38e00b6eadb16969c --depth=1
+          git worktree add --detach /tmp/fresnica-candidate FETCH_HEAD
+          cd /tmp/fresnica-candidate
+          git config user.name 'OpenAI'
+          git config user.email 'noreply@openai.com'
+          git am /tmp/base.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('clients/rust-cli/src/dex_write.rs')
+          s = p.read_text()
+          old = '''use fresnica_client::{\n    WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,\n};\n'''
+          new = 'use fresnica_client::{WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};\n'
+          if old not in s:
+              raise SystemExit('expected base rustfmt delta not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git add clients/rust-cli/src/dex_write.rs
+          git commit -m 'Apply validated base formatting'
+          git am /tmp/trustline.patch
+          test "$(git write-tree)" = 'af53bf46d7147b2775670173f79ab12edf063aee'
+          git branch -f main HEAD
+          git bundle create /tmp/fresnica-dev.bundle HEAD refs/heads/main
+          git bundle verify /tmp/fresnica-dev.bundle
+
+      - name: Upload clean candidate bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresnica-dev-bundle
+          path: /tmp/fresnica-dev.bundle
+          if-no-files-found: error
