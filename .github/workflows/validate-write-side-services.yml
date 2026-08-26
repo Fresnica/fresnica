@@ -1,6 +1,9 @@
 name: Validate write-side services candidate
 
 on:
+  push:
+    branches:
+      - validation/write-side-services-20260826
   workflow_dispatch:
 
 jobs:
