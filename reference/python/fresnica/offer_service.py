@@ -14,6 +14,7 @@ from .models import Asset, MarketPair, OfferIntent, OfferView, OpenOffer, PriceR
 
 STROOP_SCALE = 10_000_000
 STELLAR_QUANTUM = Decimal("0.0000001")
+INT32_MAX = 2_147_483_647
 
 
 def open_offer_from_horizon(raw: dict) -> OpenOffer:
@@ -80,6 +81,7 @@ class OfferService:
     ):
         self._validate_wallet(wallet)
         intent = _validated_intent(intent)
+        price_r = _stellar_price_ratio(intent.price)
         adapter = self.transaction_builder.adapter
         fee = adapter.fetch_base_fee()
         account = adapter.get_account(wallet.address())
@@ -89,6 +91,7 @@ class OfferService:
         _preflight_new_offer(
             account,
             intent,
+            price_r,
             base_reserve_stroops=adapter.get_base_reserve_stroops(),
             fee_stroops=fee * operation_count,
             extra_subentries=1 + (1 if adds_trustline else 0),
@@ -99,6 +102,7 @@ class OfferService:
             wallet_name=wallet_name,
             wallet=wallet,
             intent=intent,
+            price_r=price_r,
             base_fee_stroops=fee,
             action="create",
             trustline_asset=buying if adds_trustline else None,
@@ -113,6 +117,7 @@ class OfferService:
     ):
         self._validate_wallet(wallet)
         intent = _validated_intent(intent)
+        price_r = _stellar_price_ratio(intent.price)
         current_view = offer_view_for_pair(offer, intent.pair)
         if current_view is None or current_view.side != intent.side:
             raise TransactionError(
@@ -123,6 +128,7 @@ class OfferService:
             wallet_name=wallet_name,
             wallet=wallet,
             intent=intent,
+            price_r=price_r,
             base_fee_stroops=fee,
             offer_id=int(offer.offer_id),
             action="update",
@@ -163,12 +169,13 @@ class OfferService:
 def _preflight_new_offer(
     account: dict,
     intent: OfferIntent,
+    price_r: PriceRatio,
     base_reserve_stroops: int,
     fee_stroops: int,
     extra_subentries: int,
 ) -> None:
     selling = _selling_asset(intent)
-    required_selling = _required_selling_stroops(intent)
+    required_selling = _required_selling_stroops(intent, price_r)
     account_id = str(account.get("account_id", ""))
 
     # Issuers can sell newly issued units of their own asset without a trustline.
@@ -214,12 +221,51 @@ def _preflight_new_offer(
             )
 
 
-def _required_selling_stroops(intent: OfferIntent) -> int:
+def _required_selling_stroops(intent: OfferIntent, price_r: PriceRatio) -> int:
     amount = _to_stroops(intent.amount)
     if intent.side == "sell":
         return amount
-    price = _to_stroops(intent.price)
-    return (amount * price + STROOP_SCALE - 1) // STROOP_SCALE
+    return (amount * price_r.n + price_r.d - 1) // price_r.d
+
+
+def _stellar_price_ratio(price: Decimal) -> PriceRatio:
+    numerator = _to_stroops(price)
+    denominator = STROOP_SCALE
+    previous_n, previous_d = 0, 1
+    current_n, current_d = 1, 0
+    best_n, best_d = current_n, current_d
+
+    while True:
+        if numerator > denominator * INT32_MAX:
+            break
+        coefficient = numerator // denominator
+        next_n = coefficient * current_n + previous_n
+        next_d = coefficient * current_d + previous_d
+        if next_n > INT32_MAX or next_d > INT32_MAX:
+            break
+        best_n, best_d = next_n, next_d
+        previous_n, previous_d = current_n, current_d
+        current_n, current_d = next_n, next_d
+        remainder = numerator % denominator
+        if remainder == 0:
+            break
+        numerator, denominator = denominator, remainder
+
+    if best_n <= 0 or best_d <= 0:
+        coefficient = INT32_MAX
+        if current_n > 0:
+            coefficient = min(coefficient, (INT32_MAX - previous_n) // current_n)
+        if current_d > 0:
+            coefficient = min(coefficient, (INT32_MAX - previous_d) // current_d)
+        if coefficient >= 1:
+            recovered_n = coefficient * current_n + previous_n
+            recovered_d = coefficient * current_d + previous_d
+            if 0 < recovered_n <= INT32_MAX and 0 < recovered_d <= INT32_MAX:
+                best_n, best_d = recovered_n, recovered_d
+
+    if best_n <= 0 or best_d <= 0:
+        raise InvalidAmountError("Offer price has no Stellar int32 rational approximation")
+    return PriceRatio(best_n, best_d)
 
 
 def _account_can_hold(account: dict, asset: Asset) -> bool:

@@ -154,6 +154,9 @@ fn render_offer_review(review: &OfferReview) {
             counter,
             amount,
             price,
+            requested_price,
+            price_n,
+            price_d,
             total,
             trustline_asset,
             trustline_limit,
@@ -162,6 +165,10 @@ fn render_offer_review(review: &OfferReview) {
             println!("Pair:      {base} / {counter}");
             println!("Amount:    {amount} {base}");
             println!("Price:     {price} {counter}/{base}");
+            println!("Encoded:   {price_n}/{price_d}");
+            if let Some(requested) = requested_price {
+                println!("Requested: {requested} {counter}/{base}");
+            }
             println!("Total:     {total} {counter}");
             if let Some(asset) = trustline_asset {
                 let limit = trustline_limit

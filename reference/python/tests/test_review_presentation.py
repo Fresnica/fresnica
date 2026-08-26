@@ -101,6 +101,32 @@ def test_sell_review_labels_total_as_min_receive():
     assert "Max spend" not in fields
 
 
+def test_approximated_offer_review_exposes_requested_and_encoded_price():
+    review = OfferReview(
+        wallet_name="main",
+        source="GSOURCE",
+        action="create",
+        side="buy",
+        base_asset="XRP:GXRP",
+        counter_asset="USDC:GUSDC",
+        amount="1",
+        price="1000",
+        requested_price="1000.0000001",
+        price_n=1000,
+        price_d=1,
+        total="1000",
+        fee="0.00001",
+        network="mainnet",
+    )
+
+    fields = _fields(project_review(review))
+
+    assert fields["Limit price"] == "1000 USDC:GUSDC/XRP:GXRP"
+    assert fields["Encoded price"] == "1000/1"
+    assert fields["Requested price"] == "1000.0000001 USDC:GUSDC/XRP:GXRP"
+    assert fields["Max spend"] == "1000 USDC:GUSDC"
+
+
 def test_cancel_without_pair_context_is_explicitly_canonical():
     review = OfferReview(
         wallet_name="main",

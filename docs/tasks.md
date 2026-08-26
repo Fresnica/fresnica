@@ -35,9 +35,9 @@
 ### Implementation follow-ups discovered by contract audit
 
 - [x] Align Rust SDEX decimal-price rationalization with the canonical bounded best-rational behavior, including semi-convergent recovery at signed-int32 boundaries (for example `2147483648` -> `2147483647/1`)
-- [ ] Make Rust/RefPython SDEX BUY preflight derive price-dependent selling capacity from the same effective `Price { n, d }` that will be encoded, not independently from the requested decimal
-- [ ] Align Rust SDEX create/update `OfferReview` with the exact encoded Stellar `Price { n, d }` when decimal input requires rational approximation; requested price alone is not sufficient review truth
-- [ ] Extend SDEX conformance vectors with exact, approximated and signed-int32-boundary decimal-price rationalization cases when the Rust reference gap is fixed
+- [x] Make Rust/RefPython SDEX BUY preflight derive price-dependent selling capacity from the same effective `Price { n, d }` that will be encoded, not independently from the requested decimal
+- [x] Align Rust/RefPython SDEX create/update review with the exact encoded Stellar `Price { n, d }` when decimal input requires rational approximation; requested price alone is not sufficient review truth
+- [x] Extend SDEX conformance vectors with exact, approximated and signed-int32-boundary decimal-price rationalization cases
 - [x] Expose the effective trustline limit in Rust/RefPython SDEX review whenever offer preparation adds a receiving trustline; the operation already uses the canonical Fresnica marker but current review only carries the asset
 - [x] Clean legacy RefPython lower-level trustline builder/help/test wording that still says `Stellar maximum`; current `TrustlineService` already supplies the canonical Fresnica `708269837873.6765` marker
 - [ ] Rework Rust/RefPython SDEX preflight around final ledger effect: exact integer-stroop liabilities/rounding, receiving capacity, issuer special cases, replacement liabilities on update, and fee/authorization handling on cancel

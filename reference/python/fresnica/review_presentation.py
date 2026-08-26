@@ -146,11 +146,22 @@ def _project_offer(review: OfferReview) -> ReviewPresentation:
             "Limit price",
             f"{review.price} {review.counter_asset}/{review.base_asset}",
         ),
+    ]
+    if review.price_n is not None and review.price_d is not None:
+        fields.append(ReviewField("Encoded price", f"{review.price_n}/{review.price_d}"))
+    if review.requested_price is not None:
+        fields.append(
+            ReviewField(
+                "Requested price",
+                f"{review.requested_price} {review.counter_asset}/{review.base_asset}",
+            )
+        )
+    fields.append(
         ReviewField(
             "Max spend" if review.side == "buy" else "Min receive",
             f"{review.total} {review.counter_asset}",
-        ),
-    ]
+        )
+    )
     if review.offer_id:
         fields.append(ReviewField("Offer", f"#{review.offer_id}"))
     fields.extend(

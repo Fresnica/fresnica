@@ -1410,6 +1410,9 @@ impl App {
                 counter,
                 amount,
                 price,
+                requested_price,
+                price_n,
+                price_d,
                 total,
                 trustline_asset,
                 trustline_limit,
@@ -1418,6 +1421,12 @@ impl App {
                 lines.push(Line::from(format!("Pair:      {base} / {counter}")));
                 lines.push(Line::from(format!("Amount:    {amount} {base}")));
                 lines.push(Line::from(format!("Price:     {price} {counter}/{base}")));
+                lines.push(Line::from(format!("Encoded:   {price_n}/{price_d}")));
+                if let Some(requested) = requested_price {
+                    lines.push(Line::from(format!(
+                        "Requested: {requested} {counter}/{base}"
+                    )));
+                }
                 lines.push(Line::from(format!("Total:     {total} {counter}")));
                 if let Some(asset) = trustline_asset {
                     let limit = trustline_limit

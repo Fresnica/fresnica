@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from .availability import STROOPS_PER_XLM
-from .models import Asset, OfferIntent, OfferView, OpenOffer
+from .models import Asset, OfferIntent, OfferView, OpenOffer, PriceRatio
 from .review import OfferReview, TransactionReview, TrustlineReview
 from .trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 
@@ -99,13 +99,16 @@ class TransactionBuilderService:
         wallet_name: str,
         wallet,
         intent: OfferIntent,
+        price_r: PriceRatio,
         base_fee_stroops: int,
         offer_id: int = 0,
         action: str = "create",
         trustline_asset: Asset | None = None,
     ) -> PreparedTransaction:
         amount = _amount_text(intent.amount)
-        price = _amount_text(intent.price)
+        requested_price = _amount_text(intent.price)
+        effective_price = Decimal(price_r.n) / Decimal(price_r.d)
+        price = _amount_text(effective_price)
         if intent.side == "buy":
             selling = intent.pair.counter
             buying = intent.pair.base
@@ -114,7 +117,7 @@ class TransactionBuilderService:
                 selling=selling,
                 buying=buying,
                 buy_amount=amount,
-                price=price,
+                price=price_r,
                 base_fee=base_fee_stroops,
                 offer_id=offer_id,
                 trustline_asset=trustline_asset,
@@ -127,7 +130,7 @@ class TransactionBuilderService:
                 selling=selling,
                 buying=buying,
                 amount=amount,
-                price=price,
+                price=price_r,
                 base_fee=base_fee_stroops,
                 offer_id=offer_id,
                 trustline_asset=trustline_asset,
@@ -143,10 +146,13 @@ class TransactionBuilderService:
             counter_asset=_review_asset(intent.pair.counter),
             amount=amount,
             price=price,
-            total=_amount_text(intent.amount * intent.price),
+            total=_amount_text(intent.amount * effective_price),
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
             offer_id=str(offer_id) if offer_id else None,
+            requested_price=(requested_price if effective_price != intent.price else None),
+            price_n=price_r.n,
+            price_d=price_r.d,
             trustline_asset=_review_asset(trustline_asset) if trustline_asset else None,
             trustline_limit=(
                 FRESNICA_TRUSTLINE_LIMIT_TEXT if trustline_asset is not None else None

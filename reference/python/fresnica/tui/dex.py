@@ -471,6 +471,17 @@ class OfferReviewDialog(ModalScreen[bool]):
                 f"Pair: {self.review.base_asset} / {self.review.counter_asset}\n"
                 f"Amount: {self.review.amount} {self.review.base_asset}\n"
                 f"Price: {self.review.price} {self.review.counter_asset}/{self.review.base_asset}\n"
+                + (
+                    f"Encoded price: {self.review.price_n}/{self.review.price_d}\n"
+                    if self.review.price_n is not None and self.review.price_d is not None
+                    else ""
+                )
+                + (
+                    f"Requested price: {self.review.requested_price} {self.review.counter_asset}/{self.review.base_asset}\n"
+                    if self.review.requested_price is not None
+                    else ""
+                )
+                +
                 f"Total: {self.review.total} {self.review.counter_asset}"
                 f"{trustline}\n"
                 f"Fee: {self.review.fee} XLM\n"

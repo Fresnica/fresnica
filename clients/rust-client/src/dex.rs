@@ -113,6 +113,9 @@ pub enum OfferReviewDetails {
         counter: String,
         amount: String,
         price: String,
+        requested_price: Option<String>,
+        price_n: i32,
+        price_d: i32,
         total: String,
         trustline_asset: Option<String>,
         trustline_limit: Option<String>,
@@ -526,7 +529,7 @@ impl FresnicaClient {
             side,
             selling,
             amount,
-            price_stroops,
+            &price,
             ledger.base_reserve_in_stroops,
             total_fee,
             extra_subentries,
@@ -563,8 +566,11 @@ impl FresnicaClient {
                     base: base.display(),
                     counter: counter.display(),
                     amount: format_stroops(amount),
-                    price: format_stroops(price_stroops),
-                    total: format_scaled_product(amount, price_stroops),
+                    price: format_price_ratio(price.n, price.d)?,
+                    requested_price: requested_price_if_approximated(price_stroops, &price),
+                    price_n: price.n,
+                    price_d: price.d,
+                    total: format_price_product(amount, &price)?,
                     trustline_asset: adds_trustline.then(|| buying.display()),
                     trustline_limit: adds_trustline.then(|| DEFAULT_TRUSTLINE_LIMIT.to_owned()),
                 },
@@ -633,8 +639,11 @@ impl FresnicaClient {
                     base: base.display(),
                     counter: counter.display(),
                     amount: format_stroops(amount),
-                    price: format_stroops(price_stroops),
-                    total: format_scaled_product(amount, price_stroops),
+                    price: format_price_ratio(price.n, price.d)?,
+                    requested_price: requested_price_if_approximated(price_stroops, &price),
+                    price_n: price.n,
+                    price_d: price.d,
+                    total: format_price_product(amount, &price)?,
                     trustline_asset: None,
                     trustline_limit: None,
                 },
@@ -897,14 +906,14 @@ fn preflight_create(
     side: OfferSide,
     selling: &OfferAsset,
     amount: i64,
-    price_stroops: i64,
+    price: &Price,
     base_reserve: i64,
     fee: i64,
     extra_subentries: i64,
 ) -> Result<(), String> {
     let required_selling = match side {
         OfferSide::Sell => amount,
-        OfferSide::Buy => ceil_scaled_product(amount, price_stroops)?,
+        OfferSide::Buy => ceil_price_product(amount, price)?,
     };
     let available_selling = available_balance(account, selling)?;
     let issuer_can_sell = selling.issuer() == Some(account_id);
@@ -982,16 +991,33 @@ fn account_can_hold(account: &Value, asset: &OfferAsset, account_id: &str) -> bo
         })
 }
 
-fn ceil_scaled_product(left: i64, right: i64) -> Result<i64, String> {
-    let product = i128::from(left)
-        .checked_mul(i128::from(right))
+fn ceil_price_product(amount: i64, price: &Price) -> Result<i64, String> {
+    let numerator = i128::from(amount)
+        .checked_mul(i128::from(price.n))
         .ok_or_else(|| "offer total overflow".to_owned())?;
-    let scale = i128::from(STROOPS_PER_XLM);
-    let value = product
-        .checked_add(scale - 1)
+    let denominator = i128::from(price.d);
+    let value = numerator
+        .checked_add(denominator - 1)
         .ok_or_else(|| "offer total overflow".to_owned())?
-        / scale;
+        / denominator;
     i64::try_from(value).map_err(|_| "offer total overflow".to_owned())
+}
+
+fn requested_price_if_approximated(price_stroops: i64, price: &Price) -> Option<String> {
+    let requested_n = i128::from(price_stroops);
+    let requested_d = i128::from(STROOPS_PER_XLM);
+    let encoded_n = i128::from(price.n);
+    let encoded_d = i128::from(price.d);
+    (requested_n * encoded_d != encoded_n * requested_d).then(|| format_stroops(price_stroops))
+}
+
+fn format_price_product(amount: i64, price: &Price) -> Result<String, String> {
+    let numerator = i128::from(amount)
+        .checked_mul(i128::from(price.n))
+        .ok_or_else(|| "offer total overflow".to_owned())?;
+    let stroops = round_ratio(numerator, i128::from(price.d))?;
+    let stroops = i64::try_from(stroops).map_err(|_| "offer total overflow".to_owned())?;
+    Ok(format_stroops(stroops))
 }
 
 fn parse_offer_value(value: &str, label: &str) -> Result<i64, String> {
@@ -1478,18 +1504,6 @@ fn validate_asset_code(code: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn format_scaled_product(left: i64, right: i64) -> String {
-    let product = i128::from(left) * i128::from(right);
-    let scale = i128::from(STROOPS_PER_XLM) * i128::from(STROOPS_PER_XLM);
-    let whole = product / scale;
-    let fraction = product % scale;
-    if fraction == 0 {
-        return whole.to_string();
-    }
-    let fraction = format!("{fraction:014}");
-    format!("{whole}.{}", fraction.trim_end_matches('0'))
-}
-
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
@@ -1524,6 +1538,10 @@ mod tests {
         assert_eq!(
             stellar_price(parse_offer_value("2147483648", "price").unwrap()).unwrap(),
             Price { n: i32::MAX, d: 1 }
+        );
+        assert_eq!(
+            stellar_price(parse_offer_value("1000.0000001", "price").unwrap()).unwrap(),
+            Price { n: 1000, d: 1 }
         );
     }
 
@@ -1565,13 +1583,27 @@ mod tests {
     }
 
     #[test]
-    fn review_total_keeps_full_decimal_precision() {
+    fn review_uses_effective_encoded_price_for_totals_and_preflight() {
+        let exact = Price { n: 13, d: 40 };
         assert_eq!(
-            format_scaled_product(
-                parse_offer_value("3.5", "amount").unwrap(),
-                parse_offer_value("0.325", "price").unwrap()
-            ),
+            format_price_product(parse_offer_value("3.5", "amount").unwrap(), &exact).unwrap(),
             "1.1375"
+        );
+
+        let requested = parse_offer_value("1000.0000001", "price").unwrap();
+        let effective = stellar_price(requested).unwrap();
+        assert_eq!(effective, Price { n: 1000, d: 1 });
+        assert_eq!(
+            requested_price_if_approximated(requested, &effective).as_deref(),
+            Some("1000.0000001")
+        );
+        assert_eq!(
+            ceil_price_product(parse_offer_value("1", "amount").unwrap(), &effective).unwrap(),
+            parse_offer_value("1000", "amount").unwrap()
+        );
+        assert_eq!(
+            format_price_product(parse_offer_value("1", "amount").unwrap(), &effective).unwrap(),
+            "1000"
         );
     }
 

@@ -11,7 +11,12 @@ from fresnica.errors import (
 )
 from fresnica.models import Asset, MarketPair, OfferIntent, OpenOffer, PriceRatio
 from fresnica.network import MAINNET
-from fresnica.offer_service import OfferService, offer_view_for_pair, open_offer_from_horizon
+from fresnica.offer_service import (
+    OfferService,
+    _stellar_price_ratio,
+    offer_view_for_pair,
+    open_offer_from_horizon,
+)
 from fresnica.submit_service import SubmitService
 from fresnica.transaction_builder_service import TransactionBuilderService
 from fresnica.transaction_service import TransactionService
@@ -127,7 +132,7 @@ def test_sell_and_buy_intent_keep_one_human_price_direction():
     assert kwargs["selling"] == pair.base
     assert kwargs["buying"] == pair.counter
     assert kwargs["amount"] == "100"
-    assert kwargs["price"] == "0.325"
+    assert kwargs["price"] == PriceRatio(13, 40)
     assert kwargs["offer_id"] == 0
     assert kwargs["trustline_asset"] is None
     assert prepared.review.side == "sell"
@@ -142,8 +147,11 @@ def test_sell_and_buy_intent_keep_one_human_price_direction():
     assert kwargs["selling"] == pair.counter
     assert kwargs["buying"] == pair.base
     assert kwargs["buy_amount"] == "100"
-    assert kwargs["price"] == "0.325"
+    assert kwargs["price"] == PriceRatio(13, 40)
     assert prepared.review.side == "buy"
+    assert prepared.review.price == "0.325"
+    assert prepared.review.requested_price is None
+    assert (prepared.review.price_n, prepared.review.price_d) == (13, 40)
 
 
 def test_missing_receiving_trustline_requires_explicit_approval():
@@ -243,6 +251,40 @@ def test_buy_preflight_rounds_required_selling_amount_up_to_stroop():
         )
 
 
+def test_buy_preflight_review_and_xdr_share_effective_rationalized_price():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "100"),
+                _balance(pair.base, "100"),
+                _balance(pair.counter, "1000"),
+            ],
+        )
+    )
+    service = _service(adapter)
+
+    prepared = service.prepare_create(
+        "main",
+        wallet,
+        OfferIntent(pair, "buy", Decimal("1"), Decimal("1000.0000001")),
+    )
+
+    kind, kwargs = adapter.calls[-1]
+    assert kind == "buy"
+    assert kwargs["price"] == PriceRatio(1000, 1)
+    assert prepared.review.price == "1000"
+    assert prepared.review.requested_price == "1000.0000001"
+    assert (prepared.review.price_n, prepared.review.price_d) == (1000, 1)
+    assert prepared.review.total == "1000"
+
+
+def test_price_rationalization_recovers_signed_int32_boundary():
+    assert _stellar_price_ratio(Decimal("2147483648")) == PriceRatio(2_147_483_647, 1)
+
+
 def test_credit_offer_preflight_still_requires_xlm_for_new_subentry_and_fee():
     pair = _pair()
     wallet = Wallet.from_secret(Keypair.random().secret)
@@ -298,7 +340,7 @@ def test_reverse_canonical_offer_projects_to_buy_and_updates_with_manage_buy():
     assert kwargs["buying"] == pair.base
     assert kwargs["offer_id"] == 42
     assert kwargs["buy_amount"] == "90"
-    assert kwargs["price"] == "0.33"
+    assert kwargs["price"] == PriceRatio(33, 100)
 
 
 def test_cancel_uses_canonical_manage_sell_and_exact_price_fraction():

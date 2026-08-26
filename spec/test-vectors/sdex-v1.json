@@ -15,7 +15,8 @@
         "selling": {"code": "XRP", "issuer": "issuer-xrp"},
         "buying": {"code": "USDC", "issuer": "issuer-usdc"},
         "operation_amount": "100",
-        "operation_price": "0.325"
+        "operation_price": "0.325",
+        "price_r": {"n": 13, "d": 40}
       }
     },
     {
@@ -32,8 +33,31 @@
         "selling": {"code": "USDC", "issuer": "issuer-usdc"},
         "buying": {"code": "XRP", "issuer": "issuer-xrp"},
         "operation_amount": "100",
-        "operation_price": "0.325"
+        "operation_price": "0.325",
+        "price_r": {"n": 13, "d": 40}
       }
+    }
+  ],
+  "price_rationalization": [
+    {
+      "name": "exact-common-decimal",
+      "requested": "0.325",
+      "expected": {"n": 13, "d": 40}
+    },
+    {
+      "name": "exact-seven-decimal-quantum",
+      "requested": "0.0000001",
+      "expected": {"n": 1, "d": 10000000}
+    },
+    {
+      "name": "full-convergent-exceeds-int32",
+      "requested": "1000.0000001",
+      "expected": {"n": 1000, "d": 1}
+    },
+    {
+      "name": "semi-convergent-recovers-degenerate-boundary",
+      "requested": "2147483648",
+      "expected": {"n": 2147483647, "d": 1}
     }
   ],
   "offer_projection": [

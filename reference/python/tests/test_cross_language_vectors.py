@@ -12,7 +12,11 @@ from fresnica.models import (
     OpenOffer,
     PriceRatio,
 )
-from fresnica.offer_service import canonical_operation, offer_view_for_pair
+from fresnica.offer_service import (
+    _stellar_price_ratio,
+    canonical_operation,
+    offer_view_for_pair,
+)
 from fresnica.trade_segments import account_trade_segment_for_pair, compress_account_trades
 from fresnica.transaction_builder_service import TransactionBuilderService
 
@@ -60,10 +64,11 @@ def test_offer_intent_vectors_match_stellar_operation_encoding():
         adapter = RecordingAdapter()
         builder = TransactionBuilderService(adapter)
 
-        builder.build_offer(
+        prepared = builder.build_offer(
             wallet_name="wallet",
             wallet=DummyWallet(),
             intent=intent,
+            price_r=_stellar_price_ratio(intent.price),
             base_fee_stroops=100,
         )
 
@@ -75,8 +80,20 @@ def test_offer_intent_vectors_match_stellar_operation_encoding():
         assert Decimal(adapter.kwargs[amount_key]) == Decimal(
             expected["operation_amount"]
         ), case["name"]
-        assert Decimal(adapter.kwargs["price"]) == Decimal(
+        assert adapter.kwargs["price"] == _ratio(expected["price_r"]), case["name"]
+        assert Decimal(prepared.review.price) == Decimal(
             expected["operation_price"]
+        ), case["name"]
+        assert (prepared.review.price_n, prepared.review.price_d) == (
+            expected["price_r"]["n"],
+            expected["price_r"]["d"],
+        ), case["name"]
+
+
+def test_price_rationalization_vectors_match_canonical_ratio():
+    for case in VECTORS["price_rationalization"]:
+        assert _stellar_price_ratio(Decimal(case["requested"])) == _ratio(
+            case["expected"]
         ), case["name"]
 
 
