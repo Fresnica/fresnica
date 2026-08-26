@@ -1,0 +1,48 @@
+name: Rust client and TUI validation
+
+on:
+  push:
+    branches:
+      - validation/rust-client-tui-20260826
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply candidate commits
+        shell: bash
+        run: |
+          cat .github/assistant/rust-client-tui.patch.gz.b64.part-* > /tmp/candidate.b64
+          base64 -d /tmp/candidate.b64 | gzip -d > /tmp/candidate.patch
+          git config user.name "Fresnica validation"
+          git config user.email "validation@fresnica.invalid"
+          git am /tmp/candidate.patch
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Formatting
+        run: |
+          cargo fmt --manifest-path clients/rust-client/Cargo.toml -- --check
+          cargo fmt --manifest-path clients/rust-cli/Cargo.toml -- --check
+          cargo fmt --manifest-path clients/rust-tui/Cargo.toml -- --check
+      - name: SDK boundary
+        run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+      - name: Shared client tests
+        run: cargo test --manifest-path clients/rust-client/Cargo.toml
+      - name: Rust CLI tests
+        run: cargo test --manifest-path clients/rust-cli/Cargo.toml
+      - name: Rust TUI tests
+        run: cargo test --manifest-path clients/rust-tui/Cargo.toml
+      - name: Shared client release build
+        run: cargo build --release --manifest-path clients/rust-client/Cargo.toml
+      - name: Rust CLI release build
+        run: cargo build --release --manifest-path clients/rust-cli/Cargo.toml --bin fresnica
+      - name: Rust TUI release build
+        run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml --bin fresnica-tui
