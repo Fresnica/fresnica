@@ -1,0 +1,42 @@
+name: Fix Rust Core Python version expectations
+
+on:
+  push:
+    branches:
+      - refactor/mobile-security-ux-contract
+    paths:
+      - ".github/workflows/fix-rust-core-python-version.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update intentional API/package version expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("reference/python/tests/test_rust_core_client.py")
+          text = path.read_text()
+          old = '''    assert version["client_api_version"] == 2\n    assert version["core_version"] == "0.1.0"'''
+          new = '''    assert version["client_api_version"] == 3\n    assert version["core_version"] == "0.2.0"'''
+          if text.count(old) != 1:
+              raise SystemExit("expected version assertions not found exactly once")
+          path.write_text(text.replace(old, new))
+          PY
+          git diff --check
+      - name: Commit and self-clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-rust-core-python-version.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update Rust Core bridge version expectations"
+          git push origin HEAD
