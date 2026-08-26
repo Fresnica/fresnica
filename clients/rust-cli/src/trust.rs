@@ -6,12 +6,12 @@ use stellar_xdr::{
     OperationBody,
 };
 
-use fresnica_client::WalletStorage;
 use crate::transaction_flow::{
     account_sequence, balance_stroops, build_single_operation_envelope, confirm_submission,
-    format_stroops, minimum_balance_stroops, network_client, parse_stroops,
-    resolve_signing_wallet, sign_and_submit,
+    format_stroops, minimum_balance_stroops, network_client, parse_stroops, resolve_signing_wallet,
+    sign_and_submit,
 };
+use fresnica_client::WalletStorage;
 
 const FRESNICA_TRUSTLINE_LIMIT: &str = "708269837873.6765";
 
@@ -46,7 +46,10 @@ pub fn command_trust(
                 ledger.base_fee_in_stroops,
                 ledger.base_reserve_in_stroops,
             )?;
-            ("add", parse_limit(limit.as_deref().unwrap_or(FRESNICA_TRUSTLINE_LIMIT))?)
+            (
+                "add",
+                parse_limit(limit.as_deref().unwrap_or(FRESNICA_TRUSTLINE_LIMIT))?,
+            )
         }
         TrustRequest::Limit { limit, .. } => {
             let raw = existing.ok_or_else(|| {
@@ -74,9 +77,8 @@ pub fn command_trust(
             ("limit", limit)
         }
         TrustRequest::Remove { .. } => {
-            let raw = existing.ok_or_else(|| {
-                format!("Trustline does not exist for {}", asset.display())
-            })?;
+            let raw = existing
+                .ok_or_else(|| format!("Trustline does not exist for {}", asset.display()))?;
             let balance = balance_stroops(raw, "balance")?;
             let selling = balance_stroops(raw, "selling_liabilities")?;
             let buying = balance_stroops(raw, "buying_liabilities")?;
@@ -201,9 +203,9 @@ impl TrustRequest {
 
     fn wallet(&self) -> Option<&str> {
         match self {
-            Self::Add { wallet, .. }
-            | Self::Limit { wallet, .. }
-            | Self::Remove { wallet, .. } => wallet.as_deref(),
+            Self::Add { wallet, .. } | Self::Limit { wallet, .. } | Self::Remove { wallet, .. } => {
+                wallet.as_deref()
+            }
         }
     }
 
@@ -226,12 +228,22 @@ fn parse_options(
         match arguments[index].as_str() {
             "--wallet" => {
                 index += 1;
-                wallet = Some(arguments.get(index).ok_or_else(|| usage().to_owned())?.clone());
+                wallet = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| usage().to_owned())?
+                        .clone(),
+                );
                 index += 1;
             }
             "--limit" if allow_limit => {
                 index += 1;
-                limit = Some(arguments.get(index).ok_or_else(|| usage().to_owned())?.clone());
+                limit = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| usage().to_owned())?
+                        .clone(),
+                );
                 index += 1;
             }
             "-y" | "--yes" => {
@@ -296,16 +308,12 @@ impl IssuedAsset {
 }
 
 fn find_trustline<'a>(account: &'a Value, asset: &IssuedAsset) -> Option<&'a Value> {
-    account
-        .get("balances")?
-        .as_array()?
-        .iter()
-        .find(|raw| {
-            text(raw, "asset_type") != Some("native")
-                && text(raw, "asset_type") != Some("liquidity_pool_shares")
-                && text(raw, "asset_code") == Some(asset.code.as_str())
-                && text(raw, "asset_issuer") == Some(asset.issuer.as_str())
-        })
+    account.get("balances")?.as_array()?.iter().find(|raw| {
+        text(raw, "asset_type") != Some("native")
+            && text(raw, "asset_type") != Some("liquidity_pool_shares")
+            && text(raw, "asset_code") == Some(asset.code.as_str())
+            && text(raw, "asset_issuer") == Some(asset.issuer.as_str())
+    })
 }
 
 fn ensure_native_capacity(
@@ -344,8 +352,9 @@ fn ensure_native_capacity(
 }
 
 fn parse_limit(value: &str) -> Result<i64, String> {
-    parse_stroops(value, true)
-        .map_err(|_| "Trustline limit must be greater than zero with at most 7 decimal places".to_owned())
+    parse_stroops(value, true).map_err(|_| {
+        "Trustline limit must be greater than zero with at most 7 decimal places".to_owned()
+    })
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {

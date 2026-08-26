@@ -3,16 +3,16 @@ use std::str::FromStr;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 use stellar_xdr::{
-    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, CreateAccountOp, Hash,
-    Memo, MuxedAccount, OperationBody, PaymentOp, PublicKey, StringM,
+    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, CreateAccountOp, Hash, Memo,
+    MuxedAccount, OperationBody, PaymentOp, PublicKey, StringM,
 };
 
-use fresnica_client::{resolve_destination, LedgerParameters, WalletRecord, WalletStorage};
 use crate::transaction_flow::{
     account_sequence, balance_stroops, build_single_operation_envelope_with_memo,
     confirm_submission, format_stroops, minimum_balance_stroops, network_client,
     parse_positive_stroops, resolve_signing_wallet, sign_and_submit,
 };
+use fresnica_client::{resolve_destination, LedgerParameters, WalletRecord, WalletStorage};
 
 pub fn command_send(
     storage: &WalletStorage,
@@ -33,7 +33,6 @@ pub fn command_send(
         request.yes,
     )
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PaymentMemo {
@@ -61,10 +60,9 @@ impl PaymentMemo {
                 Err("anchor withdrawal memo_type and memo must be supplied together".to_owned())
             }
             (Some("text"), Some(value)) => Ok(Self::Text(value.to_owned())),
-            (Some("id"), Some(value)) => value
-                .parse::<u64>()
-                .map(Self::Id)
-                .map_err(|_| "anchor withdrawal id memo must be an unsigned 64-bit integer".to_owned()),
+            (Some("id"), Some(value)) => value.parse::<u64>().map(Self::Id).map_err(|_| {
+                "anchor withdrawal id memo must be an unsigned 64-bit integer".to_owned()
+            }),
             (Some("hash"), Some(value)) => {
                 let decoded = STANDARD
                     .decode(value)
@@ -194,12 +192,22 @@ impl SendRequest {
             match arguments[index].as_str() {
                 "--wallet" => {
                     index += 1;
-                    wallet = Some(arguments.get(index).ok_or_else(|| USAGE.to_owned())?.clone());
+                    wallet = Some(
+                        arguments
+                            .get(index)
+                            .ok_or_else(|| USAGE.to_owned())?
+                            .clone(),
+                    );
                     index += 1;
                 }
                 "--memo" => {
                     index += 1;
-                    memo = Some(arguments.get(index).ok_or_else(|| USAGE.to_owned())?.clone());
+                    memo = Some(
+                        arguments
+                            .get(index)
+                            .ok_or_else(|| USAGE.to_owned())?
+                            .clone(),
+                    );
                     index += 1;
                 }
                 "-y" | "--yes" => {
@@ -339,7 +347,9 @@ fn validate_transfer(
             let native = balances
                 .iter()
                 .find(|balance| text(balance, "asset_type") == Some("native"))
-                .ok_or_else(|| "No XLM balance is available to pay the transaction fee".to_owned())?;
+                .ok_or_else(|| {
+                    "No XLM balance is available to pay the transaction fee".to_owned()
+                })?;
             let native_balance = balance_stroops(native, "balance")?;
             let native_selling = balance_stroops(native, "selling_liabilities")?;
             let minimum = minimum_balance_stroops(account, ledger.base_reserve_in_stroops)?;
@@ -471,7 +481,13 @@ mod tests {
     fn payment_body_switches_to_create_account_for_missing_destination() {
         let destination = AccountId::from_str(DESTINATION).unwrap();
         assert!(matches!(
-            payment_body(destination.clone(), &PaymentAsset::Native, 10_000_000, false).unwrap(),
+            payment_body(
+                destination.clone(),
+                &PaymentAsset::Native,
+                10_000_000,
+                false
+            )
+            .unwrap(),
             OperationBody::Payment(_)
         ));
         assert!(matches!(
@@ -479,7 +495,6 @@ mod tests {
             OperationBody::CreateAccount(_)
         ));
     }
-
 
     #[test]
     fn anchor_payment_memo_supports_text_id_and_hash() {
@@ -503,18 +518,25 @@ mod tests {
         assert!(PaymentMemo::from_anchor_fields(None, Some("42")).is_err());
         assert!(PaymentMemo::from_anchor_fields(Some("id"), Some("-1")).is_err());
         assert!(PaymentMemo::from_anchor_fields(Some("hash"), Some("not-base64")).is_err());
-        assert!(PaymentMemo::from_anchor_fields(
-            Some("hash"),
-            Some(&STANDARD.encode([1_u8; 31]))
-        )
-        .is_err());
+        assert!(
+            PaymentMemo::from_anchor_fields(Some("hash"), Some(&STANDARD.encode([1_u8; 31])))
+                .is_err()
+        );
         assert!(PaymentMemo::Text("x".repeat(29)).to_xdr().is_err());
     }
 
     #[test]
     fn send_parser_matches_python_cli_shape() {
         let args = [
-            "1.5", "XLM", "to", DESTINATION, "--memo", "hello", "--wallet", "alpha", "-y",
+            "1.5",
+            "XLM",
+            "to",
+            DESTINATION,
+            "--memo",
+            "hello",
+            "--wallet",
+            "alpha",
+            "-y",
         ]
         .map(str::to_owned);
         let request = SendRequest::parse(&args).unwrap();

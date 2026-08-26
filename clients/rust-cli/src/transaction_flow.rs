@@ -126,7 +126,13 @@ pub fn build_operation_envelope(
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
     let memo = text_memo(memo)?;
-    build_operation_envelope_with_memo(source, bodies, current_sequence, base_fee_per_operation, memo)
+    build_operation_envelope_with_memo(
+        source,
+        bodies,
+        current_sequence,
+        base_fee_per_operation,
+        memo,
+    )
 }
 
 fn text_memo(memo: Option<&str>) -> Result<Memo, String> {
@@ -151,8 +157,8 @@ fn build_operation_envelope_with_memo(
     }
     let source = AccountId::from_str(source)
         .map_err(|_| "wallet source must be a Classic G address".to_owned())?;
-    let operation_count = u32::try_from(bodies.len())
-        .map_err(|_| "too many transaction operations".to_owned())?;
+    let operation_count =
+        u32::try_from(bodies.len()).map_err(|_| "too many transaction operations".to_owned())?;
     let operations: VecM<Operation, 100> = bodies
         .into_iter()
         .map(|body| Operation {
@@ -201,7 +207,10 @@ pub fn confirm_submission() -> Result<bool, String> {
     io::stdin()
         .read_line(&mut answer)
         .map_err(|error| format!("unable to read confirmation: {error}"))?;
-    Ok(matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 pub fn sign_and_submit(
@@ -214,8 +223,9 @@ pub fn sign_and_submit(
     let unsigned_xdr = transaction_envelope_xdr(envelope)
         .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
     let signed_xdr = sign_transaction_xdr_with_wallet(record, network, unsigned_xdr)?;
-    *envelope = parse_transaction_envelope_xdr(&signed_xdr)
-        .map_err(|error| format!("Unable to decode transaction returned by Fresnica SDK: {error}"))?;
+    *envelope = parse_transaction_envelope_xdr(&signed_xdr).map_err(|error| {
+        format!("Unable to decode transaction returned by Fresnica SDK: {error}")
+    })?;
 
     let tx_hash = transaction_hash(envelope, network_passphrase)
         .map_err(|error| format!("Unable to hash signed transaction: {error}"))?;
@@ -340,12 +350,7 @@ impl PendingTransactionStore {
         })
     }
 
-    fn reconcile_with<F>(
-        &self,
-        network: &str,
-        account: &str,
-        mut lookup: F,
-    ) -> Result<(), String>
+    fn reconcile_with<F>(&self, network: &str, account: &str, mut lookup: F) -> Result<(), String>
     where
         F: FnMut(&str) -> Result<Option<Value>, String>,
     {
@@ -555,14 +560,12 @@ pub fn minimum_balance_stroops(account: &Value, base_reserve: i64) -> Result<i64
 
 pub fn balance_stroops(balance: &Value, field: &str) -> Result<i64, String> {
     let value = text(balance, field).unwrap_or("0");
-    parse_stroops(value, false)
-        .map_err(|_| format!("Horizon returned invalid {field}: {value}"))
+    parse_stroops(value, false).map_err(|_| format!("Horizon returned invalid {field}: {value}"))
 }
 
 pub fn parse_positive_stroops(value: &str) -> Result<i64, String> {
-    parse_stroops(value, true).map_err(|_| {
-        "Amount must be greater than zero with at most 7 decimal places".to_owned()
-    })
+    parse_stroops(value, true)
+        .map_err(|_| "Amount must be greater than zero with at most 7 decimal places".to_owned())
 }
 
 pub fn parse_stroops(value: &str, require_positive: bool) -> Result<i64, ()> {
@@ -676,14 +679,8 @@ mod tests {
         let body = OperationBody::BumpSequence(stellar_xdr::BumpSequenceOp {
             bump_to: SequenceNumber(9),
         });
-        let envelope = build_operation_envelope(
-            SOURCE,
-            vec![body.clone(), body],
-            7,
-            100,
-            None,
-        )
-        .unwrap();
+        let envelope =
+            build_operation_envelope(SOURCE, vec![body.clone(), body], 7, 100, None).unwrap();
         let TransactionEnvelope::Tx(envelope) = envelope else {
             panic!("expected v1 transaction envelope");
         };

@@ -12,7 +12,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use fresnica_client::{wallet as wallet_ops, FresnicaClient, RevealedSigningMaterial, WalletRecord, WalletStorage};
+use fresnica_client::{
+    wallet as wallet_ops, FresnicaClient, RevealedSigningMaterial, WalletRecord, WalletStorage,
+};
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Map;
 use zeroize::Zeroizing;
@@ -95,10 +97,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if global.command == ["--version"] || global.command == ["-V"] {
-        println!(
-            "fresnica {} · Rust Core linked",
-            env!("CARGO_PKG_VERSION")
-        );
+        println!("fresnica {} · Rust Core linked", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
@@ -219,9 +218,7 @@ fn command_wallet(
         "import-watch" if arguments.len() == 3 => {
             wallet_import_watch(storage, network, &arguments[1], &arguments[2])
         }
-        "attach-secret" if arguments.len() == 2 => {
-            wallet_attach_secret(storage, &arguments[1])
-        }
+        "attach-secret" if arguments.len() == 2 => wallet_attach_secret(storage, &arguments[1]),
         "attach-mnemonic" => wallet_attach_mnemonic(storage, &arguments[1..]),
         "detach-signer" if arguments.len() == 2 => wallet_detach_signer(storage, &arguments[1]),
         "testnet-fund" | "fund" => friendbot::command_fund(storage, network, &arguments[1..]),
@@ -231,7 +228,9 @@ fn command_wallet(
         "backup" => wallet_backup(storage, &arguments[1..]),
         "restore" => wallet_restore(storage, &arguments[1..]),
         "delete" if arguments.len() == 2 => wallet_delete(storage, &arguments[1]),
-        _ => Err(format!("unknown or invalid wallet command: {command}\n\n{HELP}")),
+        _ => Err(format!(
+            "unknown or invalid wallet command: {command}\n\n{HELP}"
+        )),
     }
 }
 
@@ -256,7 +255,11 @@ fn wallet_list(storage: &WalletStorage) -> Result<(), String> {
     Ok(())
 }
 
-fn wallet_create(storage: &WalletStorage, network: &str, arguments: &[String]) -> Result<(), String> {
+fn wallet_create(
+    storage: &WalletStorage,
+    network: &str,
+    arguments: &[String],
+) -> Result<(), String> {
     let (name, options) = parse_mnemonic_options(arguments, true)?;
     let mnemonic_passphrase = prompt_hidden("BIP39 passphrase (optional; leave empty if none): ")?;
     let passcode = prompt_app_passcode(storage)?;
@@ -349,7 +352,10 @@ fn wallet_attach_secret(storage: &WalletStorage, name: &str) -> Result<(), Strin
     let passcode = prompt_app_passcode(storage)?;
     let updated = wallet_ops::attach_secret_record(&record, &secret, &passcode)?;
     storage.save(&updated, true)?;
-    println!("Attached matching secret signer to watch-only wallet \"{}\"", updated.name);
+    println!(
+        "Attached matching secret signer to watch-only wallet \"{}\"",
+        updated.name
+    );
     println!("Address: {}", updated.address);
     Ok(())
 }
@@ -372,7 +378,10 @@ fn wallet_attach_mnemonic(storage: &WalletStorage, arguments: &[String]) -> Resu
         &passcode,
     )?;
     storage.save(&updated, true)?;
-    println!("Attached matching mnemonic signer to watch-only wallet \"{}\"", updated.name);
+    println!(
+        "Attached matching mnemonic signer to watch-only wallet \"{}\"",
+        updated.name
+    );
     println!("Address: {}", updated.address);
     Ok(())
 }
@@ -382,9 +391,7 @@ fn wallet_detach_signer(storage: &WalletStorage, name: &str) -> Result<(), Strin
     if record.watch_only() {
         return Err("wallet is already watch-only".to_owned());
     }
-    print!(
-        "Remove local signing material from wallet \"{name}\" and keep it watch-only? [y/N] "
-    );
+    print!("Remove local signing material from wallet \"{name}\" and keep it watch-only? [y/N] ");
     io::stdout()
         .flush()
         .map_err(|error| format!("unable to write prompt: {error}"))?;

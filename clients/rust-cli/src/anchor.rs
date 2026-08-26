@@ -16,11 +16,11 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::send::{review_and_submit_payment, PaymentMemo};
-use fresnica_client::{WalletRecord, WalletStorage};
 use crate::transaction_flow::{
     has_valid_transaction_signature, network_client, network_passphrase, parse_transaction_xdr,
     resolve_local_signing_wallet, resolve_signing_wallet, sign_transaction_xdr_with_wallet,
 };
+use fresnica_client::{WalletRecord, WalletStorage};
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
 
@@ -238,10 +238,16 @@ fn command_auth(
 
     let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
     let web_auth_endpoint = capabilities.web_auth_url.as_deref().ok_or_else(|| {
-        format!("{} does not advertise a SEP-10 WEB_AUTH_ENDPOINT", capabilities.domain)
+        format!(
+            "{} does not advertise a SEP-10 WEB_AUTH_ENDPOINT",
+            capabilities.domain
+        )
     })?;
     let signing_key = capabilities.signing_key.as_deref().ok_or_else(|| {
-        format!("{} does not advertise a SEP-10 SIGNING_KEY", capabilities.domain)
+        format!(
+            "{} does not advertise a SEP-10 SIGNING_KEY",
+            capabilities.domain
+        )
     })?;
     let record = resolve_local_signing_wallet(storage, network, wallet)?;
     let token = authenticate_sep10(
@@ -353,7 +359,6 @@ fn command_transfer(
     }
 }
 
-
 fn command_status(
     storage: &WalletStorage,
     network: &str,
@@ -388,11 +393,10 @@ fn command_status(
             }
             "--protocol" => {
                 index += 1;
-                protocol = Some(parse_anchor_protocol(
-                    arguments
-                        .get(index)
-                        .ok_or_else(|| "--protocol requires sep24 or sep6".to_owned())?,
-                )?);
+                protocol =
+                    Some(parse_anchor_protocol(arguments.get(index).ok_or_else(
+                        || "--protocol requires sep24 or sep6".to_owned(),
+                    )?)?);
                 index += 1;
             }
             "--pay" => {
@@ -414,7 +418,10 @@ fn command_status(
         return Err("--yes is only valid together with --pay".to_owned());
     }
     if json && pay {
-        return Err("--json cannot be combined with --pay because payment requires transaction review".to_owned());
+        return Err(
+            "--json cannot be combined with --pay because payment requires transaction review"
+                .to_owned(),
+        );
     }
 
     let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
@@ -555,7 +562,10 @@ fn validate_status_protocol(
             if capabilities.sep45_auth {
                 Err("SEP-24 status is available only through SEP-45; contract-account authentication is not implemented in the Rust CLI yet".to_owned())
             } else {
-                Err("SEP-24 status requires a complete Classic SEP-10 authentication path".to_owned())
+                Err(
+                    "SEP-24 status requires a complete Classic SEP-10 authentication path"
+                        .to_owned(),
+                )
             }
         }
         AnchorProtocol::Sep6 if capabilities.sep6_url.is_none() => {
@@ -626,13 +636,14 @@ fn fetch_anchor_transaction(
     if let Some(authorization) = authorization.as_ref() {
         request = request.header("Authorization", authorization.as_str());
     }
-    let request = request
-        .config()
-        .http_status_as_error(false)
-        .build();
-    let mut response = request
-        .call()
-        .map_err(|error| format!("Unable to call {} endpoint {}: {error}", protocol.label(), url.as_str()))?;
+    let request = request.config().http_status_as_error(false).build();
+    let mut response = request.call().map_err(|error| {
+        format!(
+            "Unable to call {} endpoint {}: {error}",
+            protocol.label(),
+            url.as_str()
+        )
+    })?;
     let status = response.status().as_u16();
     let value = response
         .body_mut()
@@ -653,7 +664,12 @@ fn fetch_anchor_transaction(
         ));
     }
     if !(200..300).contains(&status) {
-        return Err(anchor_http_error(protocol.label(), url.as_str(), status, &value));
+        return Err(anchor_http_error(
+            protocol.label(),
+            url.as_str(),
+            status,
+            &value,
+        ));
     }
     parse_anchor_transaction_response(&value, transaction_id)
 }
@@ -706,8 +722,9 @@ fn withdrawal_payment_from_transaction(
         ));
     }
 
-    let source = transaction_text(transaction, "from")
-        .ok_or_else(|| "anchor withdrawal has no source account; refusing automatic payment".to_owned())?;
+    let source = transaction_text(transaction, "from").ok_or_else(|| {
+        "anchor withdrawal has no source account; refusing automatic payment".to_owned()
+    })?;
     if source != expected_source {
         return Err(format!(
             "anchor withdrawal source account mismatch: expected {expected_source}, received {source}"
@@ -926,13 +943,7 @@ fn authenticate_anchor_sep10(
             capabilities.domain
         )
     })?;
-    authenticate_sep10(
-        record,
-        network,
-        home_domain,
-        web_auth_endpoint,
-        signing_key,
-    )
+    authenticate_sep10(record, network, home_domain, web_auth_endpoint, signing_key)
 }
 
 fn start_sep24_transfer(
@@ -944,9 +955,10 @@ fn start_sep24_transfer(
     kind: AnchorTransferKind,
     fields: &BTreeMap<String, String>,
 ) -> Result<Sep24InteractiveResult, String> {
-    let base = capabilities.sep24_url.as_deref().ok_or_else(|| {
-        format!("SEP-24 {} is not available", kind.endpoint())
-    })?;
+    let base = capabilities
+        .sep24_url
+        .as_deref()
+        .ok_or_else(|| format!("SEP-24 {} is not available", kind.endpoint()))?;
     let token = authenticate_anchor_sep10(record, network, home_domain, capabilities)?;
     let authorization = Zeroizing::new(format!("Bearer {}", token.as_str()));
     let endpoint = format!(
@@ -1056,10 +1068,7 @@ fn start_sep6_transfer(
     if let Some(authorization) = authorization.as_ref() {
         request = request.header("Authorization", authorization.as_str());
     }
-    let request = request
-        .config()
-        .http_status_as_error(false)
-        .build();
+    let request = request.config().http_status_as_error(false).build();
     let mut response = request
         .call()
         .map_err(|error| format!("Unable to call SEP-6 endpoint {}: {error}", url.as_str()))?;
@@ -1356,12 +1365,12 @@ where
         &sep6_withdraw_info,
         &sep6_transaction_info,
     ]
-        .into_iter()
-        .any(|info| {
-            info.get("authentication_required")
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(false)
-        });
+    .into_iter()
+    .any(|info| {
+        info.get("authentication_required")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false)
+    });
 
     if sep6_requires_auth && !sep10_ready && !sep45_ready {
         warnings.push(
@@ -1463,14 +1472,12 @@ fn request_sep10_challenge(
 ) -> Result<Sep10ChallengeResponse, String> {
     let url = sep10_challenge_url(web_auth_endpoint, account)?;
     let value = fetch_json(url.as_str())?;
-    serde_json::from_value(value)
-        .map_err(|error| format!("Invalid SEP-10 challenge response from {web_auth_endpoint}: {error}"))
+    serde_json::from_value(value).map_err(|error| {
+        format!("Invalid SEP-10 challenge response from {web_auth_endpoint}: {error}")
+    })
 }
 
-fn sep10_challenge_url(
-    web_auth_endpoint: &str,
-    account: &str,
-) -> Result<Url, String> {
+fn sep10_challenge_url(web_auth_endpoint: &str, account: &str) -> Result<Url, String> {
     let mut url = Url::parse(web_auth_endpoint)
         .map_err(|_| "WEB_AUTH_ENDPOINT must be a valid URL".to_owned())?;
     url.query_pairs_mut().append_pair("account", account);
@@ -1483,13 +1490,17 @@ fn exchange_sep10_challenge(
 ) -> Result<Zeroizing<String>, String> {
     let mut response = ureq::post(web_auth_endpoint)
         .send_json(serde_json::json!({"transaction": signed_transaction}))
-        .map_err(|error| format!("Unable to exchange SEP-10 challenge at {web_auth_endpoint}: {error}"))?;
+        .map_err(|error| {
+            format!("Unable to exchange SEP-10 challenge at {web_auth_endpoint}: {error}")
+        })?;
     let value = response
         .body_mut()
         .with_config()
         .limit(MAX_ANCHOR_DOCUMENT_BYTES)
         .read_json::<Sep10TokenResponse>()
-        .map_err(|error| format!("Invalid SEP-10 token response from {web_auth_endpoint}: {error}"))?;
+        .map_err(|error| {
+            format!("Invalid SEP-10 token response from {web_auth_endpoint}: {error}")
+        })?;
     if value.token.trim().is_empty() {
         return Err("SEP-10 token response did not include a token".to_owned());
     }
@@ -1565,14 +1576,18 @@ fn verify_sep10_challenge(
         };
         let key = xdr_string64(&data.data_name)?;
         if key == "client_domain" {
-            return Err("SEP-10 challenge contains an unexpected client_domain operation".to_owned());
+            return Err(
+                "SEP-10 challenge contains an unexpected client_domain operation".to_owned(),
+            );
         }
         if operation.source_account.as_ref() != Some(&server_account) {
             return Err("SEP-10 additional operation source must be SIGNING_KEY".to_owned());
         }
         if key == "web_auth_domain" {
             if web_auth_domain_seen {
-                return Err("SEP-10 challenge contains duplicate web_auth_domain operations".to_owned());
+                return Err(
+                    "SEP-10 challenge contains duplicate web_auth_domain operations".to_owned(),
+                );
             }
             let value = data
                 .data_value
@@ -1609,7 +1624,8 @@ fn transaction_time_bounds(preconditions: &Preconditions) -> Result<&TimeBounds,
 }
 
 fn classic_muxed_account(address: &str, label: &str) -> Result<MuxedAccount, String> {
-    let account = AccountId::from_str(address).map_err(|_| format!("{label} must be a Classic G address"))?;
+    let account =
+        AccountId::from_str(address).map_err(|_| format!("{label} must be a Classic G address"))?;
     match account.0 {
         PublicKey::PublicKeyTypeEd25519(key) => Ok(MuxedAccount::Ed25519(key)),
     }
@@ -1622,7 +1638,8 @@ fn xdr_string64(value: &stellar_xdr::String64) -> Result<String, String> {
 }
 
 fn web_auth_domain(endpoint: &str) -> Result<String, String> {
-    let url = Url::parse(endpoint).map_err(|_| "WEB_AUTH_ENDPOINT must be a valid URL".to_owned())?;
+    let url =
+        Url::parse(endpoint).map_err(|_| "WEB_AUTH_ENDPOINT must be a valid URL".to_owned())?;
     let host = url
         .host_str()
         .ok_or_else(|| "WEB_AUTH_ENDPOINT must include a host".to_owned())?;
@@ -1757,7 +1774,11 @@ fn info_url(base: &str) -> String {
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 fn usage() -> &'static str {
@@ -1830,7 +1851,9 @@ mod tests {
 
         assert_eq!(url.scheme(), "https");
         assert_eq!(url.host_str(), Some("auth.example.com"));
-        assert!(pairs.iter().any(|(key, value)| key == "account" && value == ISSUER));
+        assert!(pairs
+            .iter()
+            .any(|(key, value)| key == "account" && value == ISSUER));
         assert_eq!(pairs.len(), 1);
     }
 
@@ -2045,14 +2068,8 @@ mod tests {
             "SEP-10 first operation home-domain key is invalid"
         );
 
-        let wrong_auth_domain = challenge_envelope(
-            ISSUER,
-            HOME_DOMAIN,
-            "evil.example",
-            NOW - 30,
-            NOW + 300,
-            64,
-        );
+        let wrong_auth_domain =
+            challenge_envelope(ISSUER, HOME_DOMAIN, "evil.example", NOW - 30, NOW + 300, 64);
         assert_eq!(
             verify_sep10_challenge(
                 &encode_envelope(&wrong_auth_domain),
@@ -2115,8 +2132,8 @@ code = "USD"
 issuer = "{ISSUER}"
 "#
         );
-        let capabilities = capabilities_from_document(&asset(), "anchor.example", &document, |url| {
-            match url {
+        let capabilities =
+            capabilities_from_document(&asset(), "anchor.example", &document, |url| match url {
                 "https://anchor.example/sep6/info" => Ok(serde_json::json!({
                     "deposit": {"USD": {"enabled": true}},
                     "withdraw": {"USD": {"enabled": false}},
@@ -2127,9 +2144,8 @@ issuer = "{ISSUER}"
                     "withdraw": {"USD": {"enabled": true}}
                 })),
                 _ => Err(format!("unexpected URL: {url}")),
-            }
-        })
-        .unwrap();
+            })
+            .unwrap();
 
         assert!(capabilities.sep6_deposit);
         assert!(!capabilities.sep6_withdraw);
@@ -2180,8 +2196,14 @@ code = "USD"
             Err("offline".to_owned())
         })
         .unwrap();
-        assert_eq!(capabilities.sep6_url.as_deref(), Some("https://anchor.example/sep6"));
-        assert_eq!(capabilities.warnings, vec!["SEP-6 /info unavailable: offline"]);
+        assert_eq!(
+            capabilities.sep6_url.as_deref(),
+            Some("https://anchor.example/sep6")
+        );
+        assert_eq!(
+            capabilities.warnings,
+            vec!["SEP-6 /info unavailable: offline"]
+        );
     }
 
     #[test]
@@ -2205,12 +2227,9 @@ WEB_AUTH_CONTRACT_ID = "{CONTRACT}""#
         );
 
         assert!(account_identifier(&valid, "SIGNING_KEY", SdkAccountKind::Contract).is_err());
-        assert!(account_identifier(
-            &valid,
-            "WEB_AUTH_CONTRACT_ID",
-            SdkAccountKind::Classic
-        )
-        .is_err());
+        assert!(
+            account_identifier(&valid, "WEB_AUTH_CONTRACT_ID", SdkAccountKind::Classic).is_err()
+        );
     }
 
     #[test]
@@ -2225,14 +2244,15 @@ code = "USD"
 issuer = "{ISSUER}"
 "#
         );
-        let capabilities = capabilities_from_document(&asset(), "anchor.example", &document, |url| {
-            assert_eq!(url, "https://anchor.example/sep24/info");
-            Ok(serde_json::json!({
-                "deposit": {"USD": {"enabled": true}},
-                "withdraw": {"USD": {"enabled": true}}
-            }))
-        })
-        .unwrap();
+        let capabilities =
+            capabilities_from_document(&asset(), "anchor.example", &document, |url| {
+                assert_eq!(url, "https://anchor.example/sep24/info");
+                Ok(serde_json::json!({
+                    "deposit": {"USD": {"enabled": true}},
+                    "withdraw": {"USD": {"enabled": true}}
+                }))
+            })
+            .unwrap();
 
         assert!(capabilities.sep24_deposit);
         assert!(capabilities.sep24_withdraw);
@@ -2241,7 +2261,6 @@ issuer = "{ISSUER}"
         assert!(capabilities.sep45_auth);
         assert!(capabilities.warnings.is_empty());
     }
-
 
     #[test]
     fn transfer_protocol_prefers_sep24_and_falls_back_to_sep6() {
@@ -2296,13 +2315,13 @@ issuer = "{ISSUER}"
     #[test]
     fn sep6_autofills_single_funding_method_and_requires_choice_for_many() {
         let capabilities = transfer_capabilities();
-        let fields = sep6_request_fields(
-            &capabilities,
-            AnchorTransferKind::Deposit,
-            &BTreeMap::new(),
-        )
-        .unwrap();
-        assert_eq!(fields.get("funding_method").map(String::as_str), Some("WIRE"));
+        let fields =
+            sep6_request_fields(&capabilities, AnchorTransferKind::Deposit, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(
+            fields.get("funding_method").map(String::as_str),
+            Some("WIRE")
+        );
 
         let mut many = capabilities.clone();
         many.sep6_deposit_info = serde_json::json!({
@@ -2330,8 +2349,14 @@ issuer = "{ISSUER}"
         .unwrap();
         let pairs = url.query_pairs().collect::<BTreeMap<_, _>>();
         assert_eq!(url.path(), "/sep6/withdraw");
-        assert_eq!(pairs.get("asset_code").map(|value| value.as_ref()), Some("USD"));
-        assert_eq!(pairs.get("account").map(|value| value.as_ref()), Some(ISSUER));
+        assert_eq!(
+            pairs.get("asset_code").map(|value| value.as_ref()),
+            Some("USD")
+        );
+        assert_eq!(
+            pairs.get("account").map(|value| value.as_ref()),
+            Some(ISSUER)
+        );
         assert_eq!(
             pairs.get("funding_method").map(|value| value.as_ref()),
             Some("WIRE")
@@ -2367,7 +2392,6 @@ issuer = "{ISSUER}"
         }))
         .is_err());
     }
-
 
     #[test]
     fn status_protocol_prefers_sep24_and_allows_explicit_sep6() {
@@ -2508,16 +2532,12 @@ issuer = "{ISSUER}"
 
     #[test]
     fn anchor_endpoints_require_https_without_credentials() {
-        let insecure: TomlValue = toml::from_str(
-            r#"TRANSFER_SERVER = "http://anchor.example/sep6""#,
-        )
-        .unwrap();
+        let insecure: TomlValue =
+            toml::from_str(r#"TRANSFER_SERVER = "http://anchor.example/sep6""#).unwrap();
         assert!(endpoint(&insecure, "TRANSFER_SERVER").is_err());
 
-        let credentialed: TomlValue = toml::from_str(
-            r#"TRANSFER_SERVER = "https://user:pass@anchor.example/sep6""#,
-        )
-        .unwrap();
+        let credentialed: TomlValue =
+            toml::from_str(r#"TRANSFER_SERVER = "https://user:pass@anchor.example/sep6""#).unwrap();
         assert!(endpoint(&credentialed, "TRANSFER_SERVER").is_err());
     }
 

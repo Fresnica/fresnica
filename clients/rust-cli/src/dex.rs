@@ -6,8 +6,8 @@ mod write;
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Value;
 
-use fresnica_client::{WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::transaction_flow::parse_stroops;
+use fresnica_client::{WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 
 const MAX_PAGE_LIMIT: usize = 200;
 const STROOPS_PER_UNIT: i128 = 10_000_000;
@@ -26,9 +26,7 @@ pub fn command_dex(
         "buy" | "sell" | "update" | "cancel" => {
             write::command_dex_write(storage, network, arguments)
         }
-        "trades" | "fills" | "candles" => {
-            history::command_dex_history(storage, network, arguments)
-        }
+        "trades" | "fills" | "candles" => history::command_dex_history(storage, network, arguments),
         _ => Err(usage().to_owned()),
     }
 }
@@ -60,7 +58,10 @@ fn command_orderbook(network: &str, arguments: &[String]) -> Result<(), String> 
         network
     );
     println!("BID · BUY                              ASK · SELL");
-    println!("{:>16} {:>14}    {:<14} {:<16}", "Amount", "Price", "Price", "Amount");
+    println!(
+        "{:>16} {:>14}    {:<14} {:<16}",
+        "Amount", "Price", "Price", "Amount"
+    );
     let count = bids.len().max(asks.len());
     for index in 0..count {
         let bid = bids.get(index).map(book_bid_cells).transpose()?;
@@ -102,8 +103,8 @@ fn command_offers(
         let selling = horizon_asset(offer.get("selling"));
         let buying = horizon_asset(offer.get("buying"));
         let amount = text(&offer, "amount").unwrap_or("?");
-        let price = offer_price(&offer)
-            .unwrap_or_else(|_| text(&offer, "price").unwrap_or("?").to_owned());
+        let price =
+            offer_price(&offer).unwrap_or_else(|_| text(&offer, "price").unwrap_or("?").to_owned());
         println!(
             "{:<12} {:<24} {:<24} {:>16} {:>14}",
             id, selling, buying, amount, price
@@ -130,11 +131,7 @@ impl OrderbookRequest {
         for argument in &arguments[2..] {
             match argument.as_str() {
                 "--json" => json = true,
-                _ => {
-                    return Err(
-                        "usage: fresnica dex orderbook SELLING BUYING [--json]".to_owned(),
-                    )
-                }
+                _ => return Err("usage: fresnica dex orderbook SELLING BUYING [--json]".to_owned()),
             }
         }
         Ok(Self {
@@ -337,10 +334,7 @@ fn book_bid_cells(row: &Value) -> Result<(String, String), String> {
         .checked_mul(i128::from(d))
         .ok_or_else(|| "order book bid amount overflow".to_owned())?;
     let base_stroops = round_ratio(numerator, i128::from(n))?;
-    Ok((
-        format_scaled_7(base_stroops),
-        format_price_ratio(n, d)?,
-    ))
+    Ok((format_scaled_7(base_stroops), format_price_ratio(n, d)?))
 }
 
 fn book_ask_cells(row: &Value) -> Result<(String, String), String> {

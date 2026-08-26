@@ -6,13 +6,13 @@ use stellar_xdr::{
     ChangeTrustOp, ManageBuyOfferOp, ManageSellOfferOp, OperationBody, Price,
 };
 
-use fresnica_client::{
-    HorizonClient, WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
-};
 use crate::transaction_flow::{
     account_sequence, balance_stroops, build_operation_envelope, confirm_submission,
-    format_stroops, minimum_balance_stroops, network_client, parse_stroops,
-    resolve_signing_wallet, sign_and_submit, STROOPS_PER_XLM,
+    format_stroops, minimum_balance_stroops, network_client, parse_stroops, resolve_signing_wallet,
+    sign_and_submit, STROOPS_PER_XLM,
+};
+use fresnica_client::{
+    HorizonClient, WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
 };
 
 const FRESNICA_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -358,7 +358,11 @@ impl WriteRequest {
                 if arguments.len() < 5 {
                     return Err(usage().to_owned());
                 }
-                let side = if command == "buy" { Side::Buy } else { Side::Sell };
+                let side = if command == "buy" {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                };
                 let (wallet, allow_trustline, yes) = parse_options(&arguments[5..], true)?;
                 Ok(Self::Create {
                     side,
@@ -672,7 +676,10 @@ fn available_balance(account: &Value, asset: &OfferAsset) -> Result<i64, String>
         .get("balances")
         .and_then(Value::as_array)
         .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
-    let Some(raw) = balances.iter().find(|balance| asset.matches_balance(balance)) else {
+    let Some(raw) = balances
+        .iter()
+        .find(|balance| asset.matches_balance(balance))
+    else {
         return Ok(0);
     };
     Ok(balance_stroops(raw, "balance")?
@@ -687,7 +694,11 @@ fn account_can_hold(account: &Value, asset: &OfferAsset, account_id: &str) -> bo
     account
         .get("balances")
         .and_then(Value::as_array)
-        .is_some_and(|balances| balances.iter().any(|balance| asset.matches_balance(balance)))
+        .is_some_and(|balances| {
+            balances
+                .iter()
+                .any(|balance| asset.matches_balance(balance))
+        })
 }
 
 fn ceil_scaled_product(left: i64, right: i64) -> Result<i64, String> {
@@ -753,10 +764,8 @@ fn stellar_price(price_stroops: i64) -> Result<Price, String> {
         return Err("Offer price has no Stellar int32 rational approximation".to_owned());
     }
     Ok(Price {
-        n: i32::try_from(best_n)
-            .map_err(|_| "Offer price numerator exceeds int32".to_owned())?,
-        d: i32::try_from(best_d)
-            .map_err(|_| "Offer price denominator exceeds int32".to_owned())?,
+        n: i32::try_from(best_n).map_err(|_| "Offer price numerator exceeds int32".to_owned())?,
+        d: i32::try_from(best_d).map_err(|_| "Offer price denominator exceeds int32".to_owned())?,
     })
 }
 
@@ -903,8 +912,17 @@ mod tests {
 
     #[test]
     fn stellar_price_matches_sdk_best_rational_for_decimal_input() {
-        assert_eq!(stellar_price(parse_offer_value("0.325", "price").unwrap()).unwrap(), Price { n: 13, d: 40 });
-        assert_eq!(stellar_price(parse_offer_value("0.0000001", "price").unwrap()).unwrap(), Price { n: 1, d: 10_000_000 });
+        assert_eq!(
+            stellar_price(parse_offer_value("0.325", "price").unwrap()).unwrap(),
+            Price { n: 13, d: 40 }
+        );
+        assert_eq!(
+            stellar_price(parse_offer_value("0.0000001", "price").unwrap()).unwrap(),
+            Price {
+                n: 1,
+                d: 10_000_000
+            }
+        );
         assert!(stellar_price(parse_offer_value("2147483648", "price").unwrap()).is_err());
     }
 
@@ -935,8 +953,14 @@ mod tests {
     fn update_side_is_inferred_from_current_offer_projection() {
         let base = OfferAsset::parse(&format!("XRP:{ISSUER}")).unwrap();
         let counter = OfferAsset::Native;
-        assert_eq!(infer_side(&counter, &base, &base, &counter).unwrap(), Side::Buy);
-        assert_eq!(infer_side(&base, &counter, &base, &counter).unwrap(), Side::Sell);
+        assert_eq!(
+            infer_side(&counter, &base, &base, &counter).unwrap(),
+            Side::Buy
+        );
+        assert_eq!(
+            infer_side(&base, &counter, &base, &counter).unwrap(),
+            Side::Sell
+        );
     }
 
     #[test]

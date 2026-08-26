@@ -1,11 +1,10 @@
 use serde_json::{json, Value};
 
-use fresnica_client::WalletStorage;
 use crate::transaction_flow::{format_stroops, parse_stroops};
+use fresnica_client::WalletStorage;
 
 use super::{
-    format_price_ratio, get_json, horizon_url, resolve_network_wallet, ClassicAsset,
-    MAX_PAGE_LIMIT,
+    format_price_ratio, get_json, horizon_url, resolve_network_wallet, ClassicAsset, MAX_PAGE_LIMIT,
 };
 
 const HOUR_MS: u64 = 3_600_000;
@@ -170,9 +169,7 @@ struct PairHistoryRequest {
 
 impl PairHistoryRequest {
     fn parse(arguments: &[String], default_limit: usize, command: &str) -> Result<Self, String> {
-        let usage = format!(
-            "usage: fresnica dex {command} BASE COUNTER [--limit N] [--json]"
-        );
+        let usage = format!("usage: fresnica dex {command} BASE COUNTER [--limit N] [--json]");
         if arguments.len() < 2 {
             return Err(usage);
         }
@@ -558,8 +555,7 @@ fn trade_price(raw: &Value) -> String {
         }
     }
     let base = text(raw, "base_amount").and_then(|value| parse_stroops(value, true).ok());
-    let counter = text(raw, "counter_amount")
-        .and_then(|value| parse_stroops(value, false).ok());
+    let counter = text(raw, "counter_amount").and_then(|value| parse_stroops(value, false).ok());
     match (base, counter) {
         (Some(base), Some(counter)) if base > 0 => {
             let numerator = i128::from(counter) * 10_000_000_i128;
@@ -575,8 +571,7 @@ fn trade_price(raw: &Value) -> String {
 
 fn parse_trade_amount(raw: &Value, key: &str) -> Result<i64, String> {
     let value = text(raw, key).ok_or_else(|| format!("Invalid Horizon trade record: {key}"))?;
-    parse_stroops(value, false)
-        .map_err(|_| format!("Invalid Horizon trade record amount: {value}"))
+    parse_stroops(value, false).map_err(|_| format!("Invalid Horizon trade record amount: {value}"))
 }
 
 fn ensure_pair(base: &ClassicAsset, counter: &ClassicAsset) -> Result<(), String> {

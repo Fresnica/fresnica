@@ -50,19 +50,17 @@ fn run() -> Result<(), String> {
     let client = FresnicaClient::new(&options.home, &options.network)?;
     let mut app = App::new(client, options.wallet.as_deref())?;
 
-    ratatui::run(|mut terminal| {
-        loop {
-            terminal.draw(|frame| app.render(frame))?;
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                    KeyCode::Char('r') => app.refresh(),
-                    KeyCode::Char('[') | KeyCode::Left => app.select_previous(),
-                    KeyCode::Char(']') | KeyCode::Right => app.select_next(),
-                    _ => {}
-                },
+    ratatui::run(|mut terminal| loop {
+        terminal.draw(|frame| app.render(frame))?;
+        match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                KeyCode::Char('r') => app.refresh(),
+                KeyCode::Char('[') | KeyCode::Left => app.select_previous(),
+                KeyCode::Char(']') | KeyCode::Right => app.select_next(),
                 _ => {}
-            }
+            },
+            _ => {}
         }
     })
     .map_err(|error| format!("terminal error: {error}"))
@@ -234,19 +232,15 @@ impl App {
 
         self.render_header(frame, header_area);
         if main_area.width >= 100 {
-            let [assets_area, activity_area] = Layout::horizontal([
-                Constraint::Percentage(56),
-                Constraint::Percentage(44),
-            ])
-            .areas(main_area);
+            let [assets_area, activity_area] =
+                Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
+                    .areas(main_area);
             self.render_assets(frame, assets_area);
             self.render_activity(frame, activity_area);
         } else {
-            let [assets_area, activity_area] = Layout::vertical([
-                Constraint::Percentage(55),
-                Constraint::Percentage(45),
-            ])
-            .areas(main_area);
+            let [assets_area, activity_area] =
+                Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+                    .areas(main_area);
             self.render_assets(frame, assets_area);
             self.render_activity(frame, activity_area);
         }
@@ -268,8 +262,14 @@ impl App {
             self.selected + 1,
             self.wallets.len()
         );
-        let body = format!("{}\n{}", wallet.address, "Fresnica Rust TUI · shared client/service layer");
-        frame.render_widget(Paragraph::new(body).block(Block::bordered().title(title)), area);
+        let body = format!(
+            "{}\n{}",
+            wallet.address, "Fresnica Rust TUI · shared client/service layer"
+        );
+        frame.render_widget(
+            Paragraph::new(body).block(Block::bordered().title(title)),
+            area,
+        );
     }
 
     fn render_assets(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
@@ -279,8 +279,12 @@ impl App {
             Row::new([
                 balance_asset_label(balance),
                 text(balance, "balance").unwrap_or("0").to_owned(),
-                text(balance, "selling_liabilities").unwrap_or("0").to_owned(),
-                text(balance, "buying_liabilities").unwrap_or("0").to_owned(),
+                text(balance, "selling_liabilities")
+                    .unwrap_or("0")
+                    .to_owned(),
+                text(balance, "buying_liabilities")
+                    .unwrap_or("0")
+                    .to_owned(),
             ])
         });
         let table = Table::new(

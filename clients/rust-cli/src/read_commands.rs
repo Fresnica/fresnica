@@ -22,7 +22,10 @@ pub fn command_account(client: &FresnicaClient, arguments: &[String]) -> Result<
     println!("Wallet:       {}", snapshot.wallet.name);
     println!("Address:      {}", snapshot.wallet.address);
     println!("Network:      {}", snapshot.wallet.network);
-    println!("Sequence:     {}", display_value(snapshot.account.get("sequence")));
+    println!(
+        "Sequence:     {}",
+        display_value(snapshot.account.get("sequence"))
+    );
     println!(
         "Subentries:   {}",
         display_value(snapshot.account.get("subentry_count"))
@@ -61,7 +64,10 @@ pub fn command_balance(client: &FresnicaClient, arguments: &[String]) -> Result<
         return Ok(());
     }
 
-    println!("Wallet: {} [{}]", snapshot.wallet.name, snapshot.wallet.network);
+    println!(
+        "Wallet: {} [{}]",
+        snapshot.wallet.name, snapshot.wallet.network
+    );
     println!(
         "{:<72} {:>16} {:>16} {:>16}",
         "Asset", "Balance", "Selling", "Buying"
@@ -91,7 +97,10 @@ pub fn command_history(client: &FresnicaClient, arguments: &[String]) -> Result<
         return Ok(());
     }
 
-    println!("Wallet: {} [{}]", snapshot.wallet.name, snapshot.wallet.network);
+    println!(
+        "Wallet: {} [{}]",
+        snapshot.wallet.name, snapshot.wallet.network
+    );
     if snapshot.operations.is_empty() {
         println!("No account operations.");
         return Ok(());

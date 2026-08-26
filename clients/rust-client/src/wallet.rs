@@ -103,7 +103,6 @@ pub fn create_mnemonic_record(
     Ok((record, Zeroizing::new(generated.mnemonic)))
 }
 
-
 pub fn attach_secret_record(
     record: &WalletRecord,
     secret: &str,
@@ -156,10 +155,7 @@ pub fn attach_mnemonic_record(
     Ok(updated)
 }
 
-pub fn detach_signer_record(
-    record: &WalletRecord,
-    passcode: &str,
-) -> Result<WalletRecord, String> {
+pub fn detach_signer_record(record: &WalletRecord, passcode: &str) -> Result<WalletRecord, String> {
     if record.watch_only() {
         return Err("wallet is already watch-only".to_owned());
     }
@@ -224,7 +220,6 @@ pub fn reveal_record(
     }
 }
 
-
 fn ensure_watch_only(record: &WalletRecord) -> Result<(), String> {
     if !record.watch_only() || record.secret.is_some() {
         return Err("wallet already has signing material".to_owned());
@@ -284,7 +279,8 @@ mod tests {
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
     const OTHER_PUBLIC: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
-    const MNEMONIC: &str = "illness spike retreat truth genius clock brain pass fit cave bargain toe";
+    const MNEMONIC: &str =
+        "illness spike retreat truth genius clock brain pass fit cave bargain toe";
     const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
 
     #[test]
@@ -304,7 +300,6 @@ mod tests {
             _ => panic!("secret wallet revealed the wrong material kind"),
         }
     }
-
 
     #[test]
     fn watch_only_secret_attachment_is_identity_bound_and_detachable() {
@@ -353,24 +348,22 @@ mod tests {
             attached.metadata.get("language").and_then(Value::as_str),
             Some("english")
         );
-        assert_eq!(attached.metadata.get("index").and_then(Value::as_u64), Some(0));
+        assert_eq!(
+            attached.metadata.get("index").and_then(Value::as_u64),
+            Some(0)
+        );
     }
 
     #[test]
     fn generated_mnemonic_record_preserves_derivation_metadata() {
-        let (record, mnemonic) = create_mnemonic_record(
-            "alpha",
-            "mainnet",
-            "",
-            3,
-            "english",
-            128,
-            "passcode",
-        )
-        .unwrap();
+        let (record, mnemonic) =
+            create_mnemonic_record("alpha", "mainnet", "", 3, "english", 128, "passcode").unwrap();
         assert_eq!(mnemonic.split_whitespace().count(), 12);
         assert_eq!(record.wallet_type, "mnemonic");
-        assert_eq!(record.metadata.get("index").and_then(Value::as_u64), Some(3));
+        assert_eq!(
+            record.metadata.get("index").and_then(Value::as_u64),
+            Some(3)
+        );
         assert_eq!(
             record.metadata.get("language").and_then(Value::as_str),
             Some("english")

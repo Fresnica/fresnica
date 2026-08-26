@@ -82,8 +82,7 @@ impl WalletStorage {
 
     pub fn load(&self, name: &str) -> Result<WalletRecord, String> {
         let path = self.wallet_path(name);
-        let text = fs::read_to_string(&path)
-            .map_err(|_| format!("wallet not found: {name}"))?;
+        let text = fs::read_to_string(&path).map_err(|_| format!("wallet not found: {name}"))?;
         let record: WalletRecord = serde_json::from_str(&text)
             .map_err(|error| format!("invalid wallet record {name}: {error}"))?;
         if record.name != name {
@@ -170,7 +169,10 @@ impl WalletStorage {
     ) -> Result<(), String> {
         validate_record(record)?;
         if destination.exists() && !overwrite {
-            return Err(format!("backup file already exists: {}", destination.display()));
+            return Err(format!(
+                "backup file already exists: {}",
+                destination.display()
+            ));
         }
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)
@@ -203,7 +205,10 @@ pub fn validate_record(record: &WalletRecord) -> Result<(), String> {
     if record.name.trim().is_empty() {
         return Err("wallet name cannot be empty".to_owned());
     }
-    if !matches!(record.wallet_type.as_str(), "watch-only" | "secret" | "mnemonic") {
+    if !matches!(
+        record.wallet_type.as_str(),
+        "watch-only" | "secret" | "mnemonic"
+    ) {
         return Err(format!("unsupported wallet type: {}", record.wallet_type));
     }
     if !matches!(record.network.as_str(), "mainnet" | "testnet") {
@@ -312,7 +317,8 @@ mod tests {
     fn wallet_filename_matches_python_sha256_rule() {
         let home = temp_home("filename");
         let storage = WalletStorage::new(&home).unwrap();
-        let expected = "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8.wallet.json";
+        let expected =
+            "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8.wallet.json";
         assert_eq!(storage.wallet_path("alpha").file_name().unwrap(), expected);
         let _ = fs::remove_dir_all(home);
     }

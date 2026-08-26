@@ -104,9 +104,7 @@ impl HorizonClient {
             }
         };
         response.body_mut().read_json::<Value>().map_err(|error| {
-            SubmissionError::Uncertain(format!(
-                "Horizon returned invalid submission JSON: {error}"
-            ))
+            SubmissionError::Uncertain(format!("Horizon returned invalid submission JSON: {error}"))
         })
     }
 
@@ -266,7 +264,9 @@ fn operation_asset(operation: &Value, prefix: &str) -> String {
 }
 
 fn amount(value: &Value, key: &str) -> String {
-    text(value, key).map(clean_decimal).unwrap_or_else(|| "?".to_owned())
+    text(value, key)
+        .map(clean_decimal)
+        .unwrap_or_else(|| "?".to_owned())
 }
 
 fn clean_decimal(value: &str) -> String {
@@ -315,7 +315,12 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
-    fn mock_server(expected_method: &'static str, expected_target: &'static str, status: u16, body: &'static str) -> String {
+    fn mock_server(
+        expected_method: &'static str,
+        expected_target: &'static str,
+        status: u16,
+        body: &'static str,
+    ) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
@@ -391,7 +396,9 @@ mod tests {
     fn account_404_is_distinct_from_transport_failure() {
         let base = mock_server("GET", "/accounts/GNOTFOUND", 404, r#"{}"#);
         assert_eq!(
-            HorizonClient::new(&base).get_account("GNOTFOUND").unwrap_err(),
+            HorizonClient::new(&base)
+                .get_account("GNOTFOUND")
+                .unwrap_err(),
             "Stellar account not found: GNOTFOUND"
         );
     }
@@ -419,7 +426,9 @@ mod tests {
     fn submission_uses_horizon_transaction_endpoint() {
         let body = r#"{"hash":"abc","ledger":7,"successful":true}"#;
         let base = mock_server("POST", "/transactions", 200, body);
-        let result = HorizonClient::new(&base).submit_transaction("AAAA").unwrap();
+        let result = HorizonClient::new(&base)
+            .submit_transaction("AAAA")
+            .unwrap();
         assert_eq!(result["hash"], "abc");
     }
 }
