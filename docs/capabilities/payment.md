@@ -31,7 +31,7 @@ Implementations may additionally accept a contact/destination alias through the 
 
 ## Destination and operation selection
 
-The current Normative payment scope uses Classic `G...` destinations. Muxed-account, contract-payment and path-payment semantics should be added deliberately rather than inferred from this contract.
+The current Normative payment scope uses Classic `G...` destinations. Muxed-account, contract-payment and path-payment semantics should be added deliberately rather than inferred from this contract. A platform SDK accepting `M...` or Path Payment does not expand this contract; unsupported forms must fail explicitly and must not be silently demuxed/reinterpreted into the current `G...` path.
 
 For Classic payments:
 
@@ -40,6 +40,13 @@ For Classic payments:
 - a missing destination receiving XLM uses `CreateAccount` semantics;
 - the create amount must satisfy the current minimum starting balance requirement;
 - issued assets require an existing destination account and applicable trustline semantics.
+
+For issued-asset Payment in the current supported protocol semantics:
+
+- an ordinary source trustline must be fully authorized for ordinary sending; `AUTHORIZED_TO_MAINTAIN_LIABILITIES` is not sufficient for a new Payment;
+- an ordinary destination must have the exact receiving trustline, full authorization for ordinary receipt and sufficient receiving capacity;
+- the asset issuer itself is a protocol special case and does not need a self-trustline; sending its own asset is issuance and receiving its own asset is redemption;
+- an issuer account having been removed does not by itself invalidate an already-existing issued asset/trustline for Payment on current protocol versions; do not add an `issuer must still exist` preflight that Stellar Core no longer requires.
 
 A review must expose which operation will actually be submitted.
 
@@ -51,7 +58,13 @@ Preparation must use the Balance / Availability semantics and current ledger par
 - native reserve capacity;
 - transaction fee capacity.
 
-For issued assets, native fee availability remains required.
+For issued assets, native fee availability remains required. Source-issuer issuance must use the issuer special case above rather than ordinary holder balance lookup.
+
+## Memo-required destinations (SEP-29)
+
+For the current non-muxed Classic destination scope, a destination account advertising `config.memo_required=1` must not receive a memo-less payment through an ordinary Fresnica Send/Payment flow. SEP-29 is a client-side safety requirement: the network may accept the transaction, so the wallet must detect the flag and require an appropriate transaction memo before signing/submission.
+
+This check belongs to preparation/security semantics, not only to a UI warning.
 
 ## Memo semantics
 
@@ -61,7 +74,7 @@ Shared payment semantics support no memo and the Stellar memo forms required by 
 - unsigned 64-bit ID;
 - 32-byte hash.
 
-A normal text memo is limited by Stellar XDR, not by UI character assumptions. Protocol adapters such as Anchor must preserve the true memo type rather than flattening every memo to text.
+A normal text memo is limited by Stellar XDR, not by UI character assumptions. Protocol adapters such as Anchor must preserve the true memo type rather than flattening every memo to text. `MEMO_RETURN` is outside the current shared Payment/Anchor scope; it must not be silently treated as ordinary hash memo semantics.
 
 ## Prepared review
 

@@ -56,7 +56,7 @@ semantic / cryptographic network identity
 current provider endpoint
 ```
 
-A product may replace Horizon with RPC or another provider without changing which Stellar network a transaction belongs to.
+A product may replace Horizon with RPC or another provider without changing which Stellar network a transaction belongs to. Conversely, a configured provider URL/name is not proof that the endpoint actually serves the intended network. When the provider exposes enough network identity/passphrase information to detect a mismatch, the application must fail closed before signing/protocol actions continue rather than sign for one network and treat submission to another as an ordinary transport error.
 
 ### 2. Durable and cached state is network-scoped
 

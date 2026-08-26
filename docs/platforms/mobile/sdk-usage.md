@@ -439,7 +439,7 @@ After the smoke test succeeds:
 6. For another address from the same mnemonic, call `deriveMnemonicSigner(sourceEnvelope, appPasscode, expectedSourceSignerPublicKey, index)` instead of revealing/re-entering the mnemonic. Default first-account index is `0`; Mobile may explicitly choose later indices.
 7. Add global app-passcode rotation using all-signer staged `reprotect`, one atomic persistence commit, then re-register all new unlock keys into the existing System Auth Domain.
 8. Add explicit Reveal / Export UX; Face ID / fingerprint alone is never sufficient.
-9. Add network/Horizon ledger signer/threshold resolution so `hasLocalSigner` is not confused with actual on-chain authorization.
+9. Implement the Defined Ledger Authorization Capability over network/Horizon state so `hasLocalSigner` is not confused with actual on-chain authorization for the prepared transaction.
 10. Continue product screens/navigation/portfolio/history/SDEX/SEP flows independently from Core architecture.
 
 Do not copy the donor TypeScript class names blindly. Preserve the behavior and security invariants while integrating with the actual Mobile project structure.

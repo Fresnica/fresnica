@@ -42,14 +42,36 @@ minimum_balance = reserve_units * current_base_reserve
 
 Products must use current network/ledger reserve values rather than hard-coded historical constants. Sponsorship fields are part of the reserve calculation; `subentry_count` alone is not a complete minimum-balance formula.
 
+Transaction preflight must evaluate the prepared operation set's expected reserve footprint rather than only the account's current `subentry_count`. For example, adding a trustline or creating a new offer may require temporary/new reserve capacity, while removing/cancelling an entry may release it. The operation-specific Capability defines the exact ledger effect.
+
 ## Issued-asset availability
 
-For an issued asset, transferable availability must account for at least:
+For an issued asset held through a trustline, transferable availability must account for at least:
 
 - current asset balance;
 - selling liabilities;
 - required XLM fee availability;
 - applicable trustline/account constraints.
+
+The issuer of an issued asset is a protocol special case: it does not hold its own trustline, so its ability to issue/send that asset must not be computed as `missing trustline -> zero balance`.
+
+## Receiving capacity
+
+Preflight that can increase balance/buying liabilities must also reason about receiving capacity. For an ordinary issued-asset trustline:
+
+```text
+receiving_capacity = limit - balance - buying_liabilities
+```
+
+This capacity is meaningful only together with the trustline's current authorization state. A fully authorized trustline can receive/create new liabilities subject to capacity; `AUTHORIZED_TO_MAINTAIN_LIABILITIES` can maintain/reduce existing liabilities but does not authorize ordinary new receipt/offer creation.
+
+Native XLM receiving capacity is also finite because ledger amounts are signed 64-bit stroops:
+
+```text
+native_receiving_capacity = INT64_MAX - balance - buying_liabilities
+```
+
+Do not model native receipt as mathematically unlimited. Issuer-side semantics for its own issued asset are again special and do not require an issuer self-trustline.
 
 ## Relationship to Flows
 

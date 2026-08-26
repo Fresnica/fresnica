@@ -28,6 +28,8 @@ A Classic `G...` account may expose its Ed25519 public signer identity. A contra
 
 Account identity does not imply local signer availability.
 
+A Stellar muxed `M...` address is not a second independent Classic ledger account. It carries the underlying Classic account plus muxed ID. A Capability that supports muxed addresses must preserve that full semantic identity; a Capability that does not support them must reject explicitly. It must never silently strip `M...` to `G...` and continue as if the destination were unchanged.
+
 ## Signer identity
 
 A signer identity is the public identity expected to authorize a signing operation or provider result.
@@ -35,6 +37,18 @@ A signer identity is the public identity expected to authorize a signing operati
 For Ed25519 software/external signers this is a Classic `G...` public key identity. Provider metadata is separate from the public signer identity.
 
 Signer identity does not imply account identity or recovery-source identity.
+
+## Recovery Source
+
+A Recovery Source records provenance/capability used to recover or derive wallet authority, such as a user-held mnemonic source or another product-defined recovery mechanism.
+
+It is distinct from:
+
+- Account identity;
+- current Signer capability;
+- raw recovery secret material.
+
+A Recovery Source record must not be treated as current on-ledger authorization, and its metadata must not require persisting plaintext mnemonic/secret material in ordinary application state.
 
 ## Asset identity
 
@@ -47,7 +61,9 @@ CODE:GISSUER
 
 An issued asset is identified by both code and issuer. Code-only equality is never sufficient across account balances, trustlines, SDEX markets or payments.
 
-Capability implementations may use native Stellar SDK `Asset` objects internally, but cross-platform semantic DTOs/fixtures should preserve the full identity.
+Issued-asset code bytes/case are part of identity. Product display policy may prefer uppercase, but a Capability must not uppercase/lowercase a protocol-valid issued code for comparison or construction. `USD:G...` and `usd:G...` are distinct identities when both are protocol-valid.
+
+Capability implementations may use native Stellar SDK `Asset` objects internally, but cross-platform semantic DTOs/fixtures should preserve the full identity. If a language SDK convenience constructor would normalize a protocol-valid asset code, the adapter must use an exact construction path or reject explicitly rather than silently change identity.
 
 ## Classic asset amount
 
@@ -63,6 +79,17 @@ Rules:
 
 Current test vectors use base-10 strings for human amounts.
 
+## Memo
+
+The current shared Payment/Anchor memo vocabulary is:
+
+- none;
+- text, limited by Stellar's encoded 28-byte memo field;
+- unsigned 64-bit ID;
+- exact 32-byte hash.
+
+`MEMO_RETURN` / return-hash is a distinct Stellar memo type and is outside the current shared Payment/Anchor product scope. A platform SDK being able to construct it does not permit an implementation to silently reinterpret it as ordinary hash memo semantics.
+
 ## SDEX pair and price
 
 A user-facing pair is:
@@ -76,7 +103,9 @@ Shared SDEX semantics use:
 - `amount` = BASE units;
 - `price` = COUNTER units per one BASE unit.
 
-When Stellar exposes an exact price fraction, preserve integer `{n,d}` semantics where correctness/projection depends on it.
+Current Fresnica user-entered offer amount and decimal price inputs are limited to at most seven decimal places. That is a Fresnica product/input semantic, not the precision limit of an exact ledger `Price { n, d }`.
+
+When Stellar exposes an exact price fraction, preserve integer `{n,d}` semantics where correctness/projection depends on it; read-side exact ratios must not be rounded back to the user-input precision before semantic calculations.
 
 A positive price below seven-decimal display precision must not be represented semantically as exact zero.
 

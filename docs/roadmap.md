@@ -226,7 +226,7 @@ Current standards work:
 - keep the five common architecture/security/platform contracts authoritative and small;
 - maintain per-capability semantic contracts under `docs/capabilities/`;
 - keep mature Account, Signer, Balance, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination semantics Normative;
-- keep Wallet, Asset Discovery / Catalog, History, Contacts, Application Security, Dapp, External Signer and Network/Gateway Defined until stronger cross-platform implementation/protocol evidence justifies promotion;
+- keep Wallet, Backup / Restore, Asset Discovery / Catalog, History, Contacts, Application Security, Dapp, Ledger Authorization, External Signer and Network/Gateway Defined until stronger cross-platform implementation/protocol evidence justifies promotion;
 - extract proven behavior from RefPython/Rust/native implementations as Reference Semantics instead of leaving it implicit in code;
 - let Mobile/Web/Desktop implementations propose specification upgrades through evidence-backed documentation PRs instead of copying Rust internals.
 
@@ -236,7 +236,7 @@ The provider-neutral Core prepare/apply boundary is already sufficient for hardw
 
 Fresnica should follow Stellar ecosystem standards and official SDK behavior rather than inventing competing wallet-specific protocol semantics.
 
-Current/reference anchor coverage includes SEP-1, Classic SEP-10, SEP-6, SEP-24 and the common SEP-12 customer status/update handoff. `fresnica-client` now owns the shared Rust anchor protocol boundary: full-identity discovery, verified two-phase SEP-10 challenge/session semantics, SEP-24-preferred / SEP-6-fallback transfer transport and transaction-status lookup. The CLI keeps presentation, passcode prompting and reviewed withdrawal-payment confirmation outside that Capability boundary. SEP-45 contract-account execution remains separate. SEP-12/KYC has an explicit common customer status/update workflow; uncommon nested-value plus `/customer/files` handling remains intentionally deferred rather than faked or silently bypassed.
+Current/reference anchor coverage includes SEP-1, Classic SEP-10, SEP-6, SEP-24 and the common SEP-12 customer status/update handoff. `fresnica-client` now owns the shared Rust anchor protocol boundary: issuer-bound discovery, verified two-phase direct-Classic SEP-10 challenge/session semantics, SEP-24-preferred / SEP-6-fallback transfer transport and transaction-status lookup. Exact-case asset matching, redirect-chain hardening and delegated/multisig SEP-10 remain known reference conformance gaps. The CLI keeps presentation, passcode prompting and reviewed withdrawal-payment confirmation outside that Capability boundary. SEP-45 contract-account execution remains separate. SEP-12/KYC has an explicit common customer status/update workflow; uncommon nested-value plus `/customer/files` handling remains intentionally deferred rather than faked or silently bypassed.
 
 Future SEP adoption should be driven by wallet/product requirements and reviewed as protocol behavior below the UI layer.
 
@@ -299,7 +299,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 1. **Finish documentation/contract stabilization**: keep `docs/README.md`, the five common contracts and `docs/capabilities/` as the authoritative cross-project vocabulary; remove remaining stale implementation-status claims rather than duplicating contracts in platform/state documents.
 2. **Land and validate the current Rust reference batch**: after the documentation batch is pushed, run real Rust tests/release builds for the Anchor Capability extraction that follows the already-validated SEP-12 batch.
 3. **Let independent Mobile integration proceed from the contracts**: Mobile Features implement Application Flows and may implement Capabilities with Stellar JS SDK + Native SDK + Mobile-owned repositories; do not require `fresnica-client` or mirror Rust module structure.
-4. **Upgrade Defined capabilities only from concrete product evidence**: Asset Discovery/Catalog, Dapp/session transport, History normalization, Contacts, Application Security, Wallet aggregate and Network/Gateway contracts should mature from real Mobile/Web/Desktop behavior.
+4. **Upgrade Defined capabilities only from concrete product evidence**: Backup/Restore, Ledger Authorization, Asset Discovery/Catalog, Dapp/session transport, History normalization, Contacts, Application Security, Wallet aggregate and Network/Gateway contracts should mature from real Mobile/Web/Desktop behavior.
 5. **Keep SEP/hardware extensions demand-driven**: validate Anchor behavior against concrete anchors before nested `/customer/files`; keep SEP-45 separate; keep Ledger transport gated by exact XDR/provider compatibility.
 6. **Preserve provider conformance baselines**: smart-account/passkey remains provider/Testnet reference material until a product needs a cross-platform capability contract.
 

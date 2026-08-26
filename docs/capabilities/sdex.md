@@ -59,7 +59,7 @@ The BUY/SELL distinction is semantic and must not be erased by casually invertin
 
 ## Numeric rules
 
-- amounts and user prices use exact decimal semantics, not binary floating point;
+- user-entered amounts and decimal prices use at most seven decimal places and exact decimal semantics, not binary floating point;
 - the effective Stellar offer price is the encoded positive signed-int32 rational `n/d`;
 - exact ledger/order-book price ratios should be retained as integer `n/d` when available;
 - a positive nonzero amount/price must not be represented to the user as semantic zero merely because the chosen display precision is too coarse.
@@ -78,6 +78,12 @@ The original decimal may also be retained as user intent. If rationalization cha
 
 The current Rust reference matches exact/common cases such as `0.325 -> 13/40` but still has an implementation gap at signed-int32 approximation boundaries where semi-convergent recovery is possible. This gap is tracked in [`../tasks.md`](../tasks.md) and does not weaken the contract.
 
+### Liability arithmetic
+
+Authoritative offer preflight must reproduce Stellar ledger liability semantics in integer stroops using the actual encoded `n/d` and actual operation family. `amount * decimal_price` with ordinary Decimal rounding is not a sufficient safety calculation. Stellar's offer exchange/liability calculation can floor/ceil or adjust the executable amount at stroop boundaries.
+
+The same rule applies to selling availability and receiving/buying liability capacity. Cross-platform implementations should share conformance cases rather than each inventing a rounding formula.
+
 ## Reference presentation convention (non-normative)
 
 The current terminal UI renders a positive price below seven-decimal display precision as `<0.0000001` rather than `0.0000000`. Other platforms may use scientific notation, additional precision or another clear representation. The shared requirement is to avoid false-zero meaning, not to copy this string.
@@ -86,7 +92,11 @@ The current terminal UI renders a positive price below seven-decimal display pre
 
 ### Create
 
-Preparation must preserve BUY/SELL intent, full pair identity, amount/price meaning, reserve/fee capacity and required receiving trustline semantics.
+Preparation must preserve BUY/SELL intent, full pair identity, amount/price meaning, reserve/fee capacity, selling liability and receiving/buying liability capacity, and required receiving trustline semantics.
+
+Creating a new offer must have reserve/subentry capacity for the potential new OfferEntry **even if matching may immediately consume the whole offer and leave no residual OfferEntry**. Current Stellar Core accounts for the potential entry before crossing and can return `LOW_RESERVE`; Fresnica preflight must not optimize this requirement away by looking only at the final residual order-book state.
+
+For an ordinary issued asset on either side, create requires the applicable trustline/full authorization/capacity. If the account itself is that asset's issuer, no self-trustline is required. On current protocol semantics, an already-existing orphaned issued asset is not made unusable merely because the issuer account was later removed.
 
 If an implementation offers an explicit "add missing trustline" option, that additional operation must appear in the prepared review and fee/reserve preflight. When that trustline is created implicitly without a user-supplied limit, it must use the canonical Fresnica Trustline limit `708269837873.6765`. Review must expose both the receiving asset and the effective trustline limit because the additional `ChangeTrust` is part of the transaction being authorized.
 
@@ -94,9 +104,15 @@ If an implementation offers an explicit "add missing trustline" option, that add
 
 Updating an existing offer must preserve its actual market pair and BUY/SELL direction. Implementations must derive direction from canonical on-chain selling/buying assets instead of guessing from a displayed reciprocal price.
 
+Update does **not** reserve another OfferEntry merely because it rewrites an offer. Preflight must evaluate the replacement ledger effect: release the existing offer liabilities for evaluation, then ensure the replacement liabilities/authorization/capacity are valid without double-counting the old liabilities.
+
+Creating or modifying an offer requires full authorization for ordinary issued-asset trustlines; `AUTHORIZED_TO_MAINTAIN_LIABILITIES` is not enough to create/modify the offer.
+
 ### Cancel
 
-Cancellation must target the exact owned offer identity and preserve the operation family/direction required by Stellar for that offer.
+Cancellation must target the exact owned offer identity and current canonical selling/buying/price state. It does **not** require reconstructing the historical `ManageBuyOffer` vs `ManageSellOffer` operation that originally created the ledger `OfferEntry`, because that historical operation family is not stored as offer state. A conforming implementation may use the canonical ledger selling/buying/price with zero-amount `ManageSellOffer` cancellation semantics.
+
+Cancel releases the offer's liabilities/subentry but still requires a valid transaction fee/current authorization path. A trustline in `AUTHORIZED_TO_MAINTAIN_LIABILITIES` state may delete an existing offer even though it may not create/modify one.
 
 A product must not cancel an offer owned by another account.
 

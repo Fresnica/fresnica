@@ -219,7 +219,7 @@ The canonical RN adapter source remains Fresnica-owned, but Mobile compiles it *
 6. Absorb #83 create/import/generate provisioning and v0.2 `deriveMnemonicSigner` HD-add-account behavior. Register new signers into an existing System Auth Domain after persistence/passcode verification, without another biometric prompt.
 7. Absorb #82 global passcode rotation into Settings/security UX using all-signer staged `reprotect` + one atomic commit + post-commit wrapped-key replacement.
 8. Absorb #84 explicit Reveal/Export UX; system auth alone never authorizes it.
-9. Add ledger-side signer/threshold resolution so `hasLocalSigner` can be combined with actual on-chain authorization.
+9. Add the Defined Ledger Authorization Capability so `hasLocalSigner` can be combined with actual on-chain authorization for the prepared transaction.
 
 ## Completion criteria before deleting donor TypeScript from `fresnica`
 

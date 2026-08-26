@@ -76,13 +76,9 @@ Other platforms may use a current account, workspace, profile or navigation sele
 
 The Python and Rust references can back up a watch-only record without signing material and can persist protected software-signer state without first revealing the mnemonic or `S...` secret.
 
-This is useful evidence for a future backup/recovery contract:
+This behavior is now captured by the Defined [Backup / Restore Capability](backup-restore.md): watch-only backup must not invent signer material, protected signer backup must not declassify raw signing material merely for portability, and restore must validate the account/signer/recovery graph before activation.
 
-- watch-only backup must not invent signer material;
-- protected signer backup should preserve an opaque protected envelope rather than declassify it merely for backup;
-- restore must re-validate account/signer invariants before accepting durable state.
-
-The exact backup file format is not yet part of the Wallet Capability contract.
+The exact backup file format remains outside the Wallet Capability contract. The terminal v1 format is Reference Semantics for Backup / Restore rather than a required future Mobile/Desktop schema.
 
 ## Candidate semantics for promotion
 
@@ -92,7 +88,7 @@ The following behavior is worth validating in Mobile/Web/Desktop before promotin
 2. Watch-only -> signer-attached -> watch-only transitions preserve account identity and network scope.
 3. Lock/unlock changes local signer usability without changing public account truth.
 4. Default/current selection remains product metadata rather than chain identity.
-5. Backup/restore preserves security boundaries and validates imported account/signer relationships before persistence.
+5. Wallet aggregation composes the separate Backup / Restore contract without redefining its security/activation semantics.
 
 ## Implementation-specific choices today
 

@@ -90,7 +90,7 @@ Examples include:
 - signature verification;
 - other operations explicitly assigned to Core by the security contract.
 
-A platform Stellar SDK may still build transactions, query network state or implement protocol transport where the Capability contract permits it.
+A platform Stellar SDK may still build transactions, query network state or implement protocol transport where the Capability contract permits it. SDK convenience types/functions must not silently rewrite shared domain identity: for example, issued-asset code case must round-trip exactly when protocol-valid. If the SDK normalizes such input, the platform adapter must use a lower-level exact path or reject explicitly.
 
 ## 5. Rust reference implementation
 
@@ -144,19 +144,11 @@ Once real implementations reveal stable common semantics, any platform may propo
 
 A platform is allowed to implement a `Defined` capability before the common contract is mature. Once the implementation produces useful evidence, it should feed that evidence back into the shared documentation rather than silently creating a permanent platform-only semantic fork.
 
-The implementation may live in a separate repository. For example, `fresnica-mobile` can submit a documentation PR here that links to its implementation commit/tests and records the semantics that proved reusable.
+The implementation may live in a separate repository. For example, `fresnica-mobile` can submit an evidence/contract PR here while keeping its product source in its own repository.
 
-A platform evidence/contract PR should identify:
+The single governing contribution/evidence/versioning rules live in [`application-capabilities.md` §9](application-capabilities.md#9-capability-evolution); do not maintain a second checklist here.
 
-1. the concrete implementation/product need;
-2. the stable semantic behavior discovered;
-3. which existing Reference Semantics were adopted or intentionally changed;
-4. why the behavior belongs across platforms rather than in one mechanism;
-5. compatibility impact;
-6. security impact;
-7. examples/tests/fixtures when practical.
-
-The acceptance rule is:
+The acceptance rule remains:
 
 > **Promote stable semantics into the specification; keep platform mechanisms local.**
 

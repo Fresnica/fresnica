@@ -34,7 +34,9 @@ A conforming implementation must preserve:
 3. **Detach preserves identity.** Removing a local signer capability does not delete or change the account identity.
 4. **Attach verifies identity before durable mutation.** For a direct Classic master-key attachment, Core/SDK must derive the supplied secret/mnemonic signer identity and compare it with the expected `G...` identity before persistence changes.
 5. **Contract identity is not Ed25519 identity.** A `C...` address must not be treated as proof that an arbitrary `S...` secret owns the contract.
-6. **Ledger authorization is application/network state.** A signer that differs from the Classic master key may be authorized through Stellar signer/threshold state; that relationship must not be inferred from string equality alone.
+6. **Ledger authorization is separate state.** A signer that differs from the Classic master key may be authorized through Stellar signer/threshold state; that relationship must not be inferred from string equality alone and is evaluated by the Ledger Authorization Capability.
+7. **Valid identity != current ledger existence.** A syntactically/cryptographically valid `G...` account identity may be stored before that account is funded/created on the selected ledger. Network `not found` is account state, not an `invalid address` result.
+8. **Deleting an Account record does not imply destroying shared authority.** Removing/hiding one Account must not implicitly destroy a Signer or Recovery Source still referenced by another Account. Destruction/secure cleanup is a separate lifecycle decision after reference/ownership checks.
 
 ## Inputs and outputs
 
@@ -68,6 +70,7 @@ Account operations must never require UI code to parse protected signer envelope
 See also:
 
 - [Signer Capability](signer.md)
+- [Ledger Authorization](ledger-authorization.md)
 - [Core Security Boundary](../core-security-boundary.md)
 - [Network / Gateway](network.md)
 

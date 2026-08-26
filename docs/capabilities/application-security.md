@@ -64,6 +64,12 @@ Biometric enrollment changes, deleted OS keys, cancellation or unavailable syste
 
 Re-protection changes the protected signer envelope/unlock-key relationship. Old system-auth registrations must not remain presented as usable for the new envelope state. Re-registration may be retried after the atomic durable passcode-rotation commit.
 
+### 6. One product passcode over multiple software signers changes as one security state
+
+If a Fresnica product presents one app passcode as protecting a set of software signers, passcode rotation must not silently leave a mixed state where some signers require the old passcode and others require the new one.
+
+The durable semantic transition must either be atomic for the protected signer set or enter an explicit recoverable migration state that prevents ambiguous routine signing until the migration is completed/recovered. A storage engine need not literally provide one database transaction, but partial success must be visible and safe rather than masquerading as completed rotation.
+
 ## Implementation-specific choices today
 
 The following are platform mechanisms, not common contract requirements:
@@ -82,6 +88,7 @@ The following are platform mechanisms, not common contract requirements:
 3. Authorization artifacts are signer-scoped even when protected by shared device infrastructure.
 4. Invalidation/cancellation fails closed and preserves explicit fallback semantics.
 5. Passcode/re-protection changes invalidate stale authorization registrations safely.
+6. A product-wide passcode rotation over multiple software signers is atomic in wallet meaning or enters an explicit recoverable migration state; silent mixed old/new passcode state is invalid.
 
 ## Relationship to Flows
 

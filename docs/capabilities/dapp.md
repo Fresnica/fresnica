@@ -21,6 +21,8 @@ Every request must reuse existing Account, Transaction, Signer and Signing Coord
 
 Remote application names, icons, descriptions, requested amounts and other display metadata are **untrusted metadata**. When a request asks the wallet to sign a Stellar transaction, the authoritative review must be derived from the exact transaction/envelope semantics that will be signed, not from the remote application's claim about what that transaction does. Remote metadata may supplement that review but cannot replace or contradict it.
 
+If Fresnica cannot fully understand the transaction/authorization semantics required for its normal review policy, the ordinary Dapp approval path must fail closed. "The SDK can parse this XDR" is not sufficient evidence that the wallet can safely explain/authorize it. A future explicitly designed expert/raw-signing Flow may choose another policy, but ordinary Dapp approval must not silently degrade into blind signing.
+
 ## Platform-specific mechanisms
 
 Examples include:
@@ -43,6 +45,8 @@ A Dapp request must not:
 - sign arbitrary bytes through the Stellar transaction-signing path;
 - treat a remote application's claimed account/signer identity as trusted without local validation;
 - bypass the stronger Reveal/Export boundary.
+
+A Dapp session/permission must also be bound to the actual remote peer/origin plus relevant network/account scope, not only a remote self-reported name/icon or a global `connected=true` flag. Switching origin, network or account must not inherit an unrelated signing permission without explicit policy.
 
 ## Implementation evidence status
 

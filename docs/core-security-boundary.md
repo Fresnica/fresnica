@@ -113,7 +113,7 @@ Protocol challenges such as SEP-10 must preserve the same binding: a verified ch
 
 Application Flows decide **that** signing is required.
 
-The Signing Coordination Capability resolves the currently eligible signer/provider and platform authorization path.
+The Ledger Authorization Capability resolves what the exact prepared transaction requires from current ledger authorization state. The Signing Coordination Capability resolves which currently available signer/provider capabilities can satisfy those requirements and coordinates collection.
 
 Fresnica SDK/Core decides the cryptographic operation.
 
@@ -127,7 +127,7 @@ Platform/application code owns mechanisms such as:
 - biometric/system-auth UI and session policy;
 - application lock state;
 - persistence and migrations;
-- current ledger signer weights/threshold interpretation;
+- ledger-state acquisition used by the [Ledger Authorization Capability](capabilities/ledger-authorization.md);
 - network clients and retry/cache policy;
 - product UI/UX.
 

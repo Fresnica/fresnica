@@ -18,6 +18,8 @@ A destination resolver may map a user-facing alias to semantic destination data 
 
 Explicit Flow input must take precedence over stored defaults when the two represent the same field. For example, an explicitly supplied memo should not be silently replaced by a contact's default memo.
 
+If the user's input is already a valid direct chain identity supported by the consuming Capability, that direct identity must take precedence over an alias lookup. A saved contact name must not be allowed to shadow/redirect a string that is itself a valid destination address.
+
 ## Security and identity
 
 Destination resolution must not bypass Account/Payment validation. A contact entry is convenience metadata, not proof that an address is safe, exists, has a trustline or belongs to a particular person.
@@ -67,7 +69,13 @@ That separation is a useful candidate semantic:
 contact/display identity != chain destination identity
 ```
 
-### 4. Stored destination data is validated, but not trusted as chain truth
+### 4. Direct chain identity has priority over aliases
+
+The current Rust and RefPython terminal references resolve aliases before falling back to direct addresses. That creates a security-relevant reference gap: a contact whose name is itself a valid `G...` address could redirect a pasted direct destination.
+
+The shared Defined boundary therefore requires direct-valid-identity precedence even though both terminal references still need implementation changes. This is tracked in [`../tasks.md`](../tasks.md).
+
+### 5. Stored destination data is validated, but not trusted as chain truth
 
 The terminal references currently validate saved Classic `G...` addresses on contact creation/load. The Payment capability still performs the authoritative payment/account checks when the contact is used.
 
@@ -75,7 +83,7 @@ Future platforms may support richer address/identity types only when the consumi
 
 ## Candidate semantics for promotion
 
-1. Resolve aliases and direct destinations into one semantic destination result.
+1. Resolve aliases and direct destinations into one semantic destination result, with valid direct identity taking precedence over alias shadowing.
 2. Preserve both friendly contact identity and exact chain destination where useful for review.
 3. Treat stored contact fields as defaults; explicit current Flow input has precedence.
 4. Re-run consuming Capability validation after resolution rather than trusting address-book data as chain truth.

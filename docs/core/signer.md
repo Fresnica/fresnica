@@ -71,7 +71,7 @@ Account GABC...
   +-- master GABC...  weight K
 ```
 
-Therefore generic Core signing operations validate `expected_signer_public_key`, not an assumed account public key. Clients/network Capability implementations resolve the current signer/threshold authorization for the account from ledger state.
+Therefore generic Core signing operations validate `expected_signer_public_key`, not an assumed account public key. Application implementations obtain ledger state and evaluate the current signer/threshold requirements through the [Ledger Authorization Capability](../capabilities/ledger-authorization.md).
 
 ## Protected software signer
 
@@ -146,7 +146,7 @@ Clients are authoritative for:
 
 - persisted account and signer records;
 - which signer is selected for a user action;
-- current ledger signer/threshold authorization;
+- ledger-state acquisition and orchestration consumed by the Ledger Authorization Capability;
 - hardware/provider invocation;
 - system-auth policy and secure storage.
 

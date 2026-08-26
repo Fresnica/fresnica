@@ -34,13 +34,26 @@ A conforming implementation must preserve:
 3. source sequence and current ledger parameters are obtained close enough to preparation to avoid knowingly stale writes;
 4. fees reflect the actual operation count/current fee policy used for the prepared transaction;
 5. signing goes through Fresnica SDK/Core for Core-owned cryptographic operations;
-6. external signatures are verified against the expected signer and exact transaction context before being accepted.
+6. external signatures are verified against the expected signer and exact transaction context before being accepted;
+7. operation-specific source accounts and execution/authorization-relevant preconditions remain part of semantic review/authorization when the transaction contains them.
 
 ## Amounts and XDR
 
 Transaction-building implementations may use different Stellar SDKs. Cross-platform code does not need to share Rust XDR types.
 
 Where XDR crosses an SDK/provider boundary, it is an exact opaque transaction representation and must not be reinterpreted through lossy conversions merely to satisfy a provider API.
+
+## Current envelope scope
+
+The current shared application Transaction contract covers ordinary Classic `TransactionV1Envelope` writes prepared by Fresnica Flows. Lower-level Core cryptographic primitives being able to hash/sign additional envelope families does not automatically mean the application can safely review or authorize them.
+
+In particular, Fee Bump support must be added deliberately: a future implementation must understand/review the outer fee source and fee semantics together with the inner transaction and authorization requirements. Do not expose Fee Bump merely because a Stellar SDK/Core parser accepts it.
+
+## Prepared transaction freshness
+
+A prepared transaction that has become invalid/stale under its own time bounds must not be signed merely because the review object is still on screen. It must be prepared again, and the newly prepared envelope must be re-bound to review/confirmation. Sequence/timebound/precondition changes cannot inherit confirmation from an older envelope.
+
+Implementations may choose additional freshness checks, but they must at least fail closed when the prepared envelope is already known to be expired.
 
 ## Submission result
 

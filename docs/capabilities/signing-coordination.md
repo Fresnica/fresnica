@@ -36,7 +36,8 @@ A conforming implementation must:
 5. treat system authentication as an authorization mechanism, not a replacement cryptographic secret format;
 6. use SDK/Core for protected-software signing;
 7. verify external signatures through the SDK/Core prepare/apply boundary where applicable;
-8. preserve the stronger fresh-passcode boundary for Reveal/Export rather than treating a previously authorized routine-signing session as sufficient.
+8. preserve the stronger fresh-passcode boundary for Reveal/Export rather than treating a previously authorized routine-signing session as sufficient;
+9. consume Ledger Authorization requirements when a transaction/account needs multiple/typed authorization conditions, and not declare signing complete while required weight/conditions remain unsatisfied.
 
 ## Software signer authorization
 
@@ -64,6 +65,7 @@ Flows should receive stable distinctions for:
 ## Related contracts
 
 - [Signer](signer.md)
+- [Ledger Authorization](ledger-authorization.md)
 - [Transaction](transaction.md)
 - [Application Security](application-security.md)
 - [Core Security Boundary](../core-security-boundary.md)

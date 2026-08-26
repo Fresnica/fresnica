@@ -47,8 +47,8 @@ AccountRecord
   metadata: name, network, UI state, ...
 
 SignerRecord
-  signer_public_key: G...
-  kind: protected-software | hardware | external | future
+  signer_identity: provider/type-specific public identity
+  kind: protected-software | hardware | external | contract/passkey | future
   signer-specific data
 ```
 
@@ -56,7 +56,7 @@ A watch-only account is therefore an account with no locally available signer. I
 
 For a simple software wallet, the account and signer public keys are normally the same `G...` value. This is only the simplest case. Stellar additional signers and multisig allow an account to be authorized by other Ed25519 public keys, so Core APIs MUST name signer identity explicitly and MUST NOT assume that the signer public key equals the transaction source account.
 
-A `C...` contract address is an account/contract identity, not an Ed25519 signer public key. Supplying an `S...` key or mnemonic does not by itself prove ownership of a contract address. Contract/passkey authorization is a separate future capability.
+A `C...` contract address is an account/contract identity, not an Ed25519 signer public key. Supplying an `S...` key or mnemonic does not by itself prove ownership of a contract address. Contract/passkey authorization uses its provider/on-chain model and composes the shared Account, Ledger Authorization, Signing Coordination and Transaction boundaries rather than becoming a protected-software-signer variant.
 
 Core owns Stellar address parsing and canonical identity classification. Clients may pre-check for UI purposes but MUST NOT reproduce authoritative `G...` / `C...` semantics.
 

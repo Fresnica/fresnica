@@ -25,6 +25,12 @@
 - [x] Allow non-normative Reference extensions to mature already-Normative Capabilities
 - [x] Define evidence-backed cross-repository contract PR expectations for Mobile/Web/Desktop implementations
 - [x] Promote confirmed-transaction-success vs post-submit-refresh failure isolation into the Flow contract
+- [x] Defined Backup / Restore Capability from shared Rust/RefPython encrypted v1 evidence without freezing the terminal record schema
+- [x] Defined Ledger Authorization Capability separating local signer availability from actual prepared-transaction ledger authorization
+- [x] Shared Recovery Source, memo, Muxed-address and exact-case asset identity vocabulary
+- [x] Record current Transaction TxV1 scope and fail-closed Fee Bump / unknown-Dapp review boundary
+- [x] Record CAP-18 trustline authorization differences and current-protocol orphaned-issuer semantics
+- [x] Record new-offer reserve capacity as a pre-crossing requirement even when an offer fully matches and leaves no residual OfferEntry
 
 ### Implementation follow-ups discovered by contract audit
 
@@ -34,6 +40,17 @@
 - [ ] Extend SDEX conformance vectors with exact, approximated and signed-int32-boundary decimal-price rationalization cases when the Rust reference gap is fixed
 - [ ] Expose the effective trustline limit in Rust/RefPython SDEX review whenever offer preparation adds a receiving trustline; the operation already uses the canonical Fresnica marker but current review only carries the asset
 - [ ] Clean legacy RefPython lower-level trustline builder/help/test wording that still says `Stellar maximum`; current `TrustlineService` already supplies the canonical Fresnica `708269837873.6765` marker
+- [ ] Rework Rust/RefPython SDEX preflight around final ledger effect: exact integer-stroop liabilities/rounding, receiving capacity, issuer special cases, replacement liabilities on update, and fee/authorization handling on cancel
+- [ ] Add Balance/Payment receiving-capacity semantics in Rust/RefPython, including issued trustline limit/buying-liability headroom, native `INT64_MAX` headroom and issuer-own-asset special handling
+- [ ] Add Payment source/destination trustline full-authorization and destination-capacity preflight plus explicit SEP-29 `memo_required` protection to the Rust shared Payment path; keep issuer-special/orphaned-issuer behavior aligned with current protocol
+- [ ] Add CAP-18 authorization-aware SDEX preflight: create/update require full authorization while cancel remains valid with maintain-liabilities authorization
+- [ ] Add Trustline remove preflight for `liquidityPoolUseCount`, issuer-existence add/nonzero-limit rules, and resulting authorization/clawback state; keep pool-share ChangeTrustAsset outside current product scope
+- [ ] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry
+- [ ] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
+- [ ] Harden Rust Anchor asset matching to exact-case full identity and redirect handling against HTTPS downgrade/unsafe redirects; add delegated/multisig SEP-10 handling through Ledger Authorization/Signing Coordination or explicit unsupported failure
+- [ ] Add cross-language asset-identity vectors for protocol-valid case-sensitive issued codes, including values that high-level SDK convenience constructors may normalize
+- [ ] Add a real Ledger Authorization implementation/evidence set before claiming general Classic multisig/delegated signing support
+- [ ] Define a next-generation portable Backup/Restore format/activation path before Mobile adoption; authenticate or independently revalidate security-significant account/signer/network relationship metadata rather than copying terminal v1 wholesale
 
 ## Runtime
 
@@ -101,7 +118,7 @@
 - [x] Submit flow
 - [x] User-facing transaction result
 - [x] Result/history refresh after submit
-- [x] Memo-required account handling
+- [x] RefPython / Stellar-SDK memo-required account handling
 
 ## Production Core
 

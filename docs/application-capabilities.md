@@ -194,13 +194,14 @@ Examples include liquidity-pool portfolio projection under Balance, product-faci
 
 ## 6. Capability catalog
 
-The catalog is shared vocabulary, **not a mandatory product feature checklist**.
+The catalog is shared vocabulary, **not a mandatory product feature checklist**. It currently contains **19 Capabilities: 9 Normative and 10 Defined**.
 
 | ID | Capability | Maturity | Detailed contract/reference |
 | --- | --- | --- | --- |
 | `account` | Account | Normative | [Account](capabilities/account.md) |
 | `signer` | Signer | Normative | [Signer](capabilities/signer.md) |
 | `wallet` | Wallet | Defined | [Wallet](capabilities/wallet.md) |
+| `backup-restore` | Backup / Restore | Defined | [Backup / Restore](capabilities/backup-restore.md) |
 | `balance` | Balance / Availability | Normative | [Balance / Availability](capabilities/balance.md) |
 | `asset-discovery` | Asset Discovery / Catalog | Defined | [Asset Discovery / Catalog](capabilities/asset-discovery.md) |
 | `payment` | Payment | Normative | [Payment](capabilities/payment.md) |
@@ -210,6 +211,7 @@ The catalog is shared vocabulary, **not a mandatory product feature checklist**.
 | `contacts` | Contacts / Destination Resolution | Defined | [Contacts / Destination Resolution](capabilities/contacts.md) |
 | `sdex` | SDEX | Normative | [SDEX](capabilities/sdex.md) |
 | `anchor` | Anchor | Normative | [Anchor](capabilities/anchor.md) |
+| `ledger-authorization` | Ledger Authorization | Defined | [Ledger Authorization](capabilities/ledger-authorization.md) |
 | `signing` | Signing Coordination | Normative | [Signing Coordination](capabilities/signing-coordination.md) |
 | `security` | Application Security | Defined | [Application Security](capabilities/application-security.md) |
 | `dapp` | Dapp Interaction | Defined | [Dapp Interaction](capabilities/dapp.md) |
@@ -225,11 +227,13 @@ A `Defined` label means the capability boundary is useful now but the common con
 Current reasons include:
 
 - **Wallet** — terminal references use compact wallet records while Mobile is expected to model Account/Signer relationships more independently;
+- **Backup / Restore** — Rust/RefPython share a useful encrypted terminal v1 format, but future portable backup must protect/revalidate a richer Account/Signer/Recovery graph rather than freeze that record shape;
 - **Asset Discovery / Catalog** — RefPython has a useful cache-first multi-source catalog, but provider choice, recommendation metadata, entry DTOs and ranking policy still need independent platform evidence;
 - **History** — the Python reference has a mature raw-cache/activity model, while the Rust client still exposes more provider-shaped records and no cross-platform Activity DTO is frozen;
 - **Contacts** — destination precedence semantics are promising, but address types, name normalization, sync and storage vary by product;
 - **Application Security** — Apple/Android Native SDK system-auth behavior provides strong Reference Semantics, but application-level product contracts still need Mobile/Desktop evidence;
 - **Dapp Interaction** — no stable Fresnica request/session/result model exists yet;
+- **Ledger Authorization** — the local-signer vs on-ledger authorization boundary is fixed, while a reusable multisig/threshold evaluator still needs real implementation evidence;
 - **External Signer** — the provider-neutral security boundary is defined, but no concrete hardware provider implementation is mature enough to contribute additional shared semantics;
 - **Network / Gateway** — network identity rules are stable, while Horizon/RPC/provider result models are still evolving.
 
@@ -352,6 +356,7 @@ Current Rust modules map to the common vocabulary approximately as:
 
 ```text
 clients/rust-client::wallet       -> Account / Signer / current terminal Wallet implementations
+clients/rust-client::storage      -> terminal Backup / Restore v1 reference implementation
 clients/rust-client::service      -> Account / Balance / History reference accessors
 clients/rust-client::payment      -> Payment implementation
 clients/rust-client::transaction  -> Transaction + part of Signing Coordination

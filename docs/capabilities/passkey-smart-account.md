@@ -199,15 +199,19 @@ Before production enablement, record at minimum:
 
 The upstream deterministic-deployer design documents an address-squatting residual if a credential ID is learned before intended deployment. Fresnica must explicitly review and accept/mitigate that risk before production rather than hiding it behind SDK abstraction.
 
-## Implementation sequence
+## Capability mapping and implementation status
+
+Passkey/smart-account is a provider reference that composes the existing Fresnica capability vocabulary; it is **not** a twentieth `Smart Account Capability`. Relevant shared boundaries include Account, Signer/provider identity, Transaction, Ledger Authorization, Signing Coordination and Network/Gateway. Provider-specific Soroban/WebAuthn mechanics remain in the provider adapter.
+
+Current sequence/status:
 
 1. Keep the current classic `G...` software-signer path unchanged.
-2. Add a provider-neutral **contract smart-account capability** at the Application Capability boundary, not in `ProtectedSoftwareSigner`. **Implemented:** `providers/smart-account-kit` provides the first pinned provider boundary with create/connect/discover and safe sign-and-submit orchestration.
-3. Run the provider against real Testnet WebAuthn in a browser and capture create/connect/sign-and-submit results. **Harness ready:** the smoke page records only the confirmed relayer `func/auth` XDR and validates Protocol-27 digest/context binding plus the WebAuthn P-256 signature before fixture export.
-4. Persist passkey credential/provider metadata separately from protected Ed25519 signer records.
-5. Add conformance fixtures from real smart-account transaction/auth XDR, including context-rule identity. **Verifier ready; real fixture still pending:** `npm run fixture:verify -- <fixture.json>` performs the same independent digest/context/WebAuthn verification offline.
-6. Only after the provider boundary is proven, decide which protocol-generic Soroban authorization helpers belong in Rust Core/SDK.
-7. Add platform-native Mobile passkey adapters against the same smart-account contract semantics.
+2. `providers/smart-account-kit` implements the pinned provider boundary with restore/connect/discover/create and safe sign-and-submit orchestration.
+3. A real localhost browser/Testnet run on 2026-08-25 completed WebAuthn smart-account create/connect/sign-and-submit and a confirmed transfer.
+4. Passkey credential/provider metadata remains separate from protected Ed25519 signer records.
+5. The resulting public authorization evidence is checked in as [`../../spec/test-vectors/smart-account-auth-v1.json`](../../spec/test-vectors/smart-account-auth-v1.json); the offline verifier checks Protocol-27 digest/context-rule binding, WebAuthn UP/UV flags and P-256 signature semantics.
+6. Future implementation evidence should mature the existing Account / Ledger Authorization / Signing Coordination / Transaction boundaries rather than invent a parallel smart-account security stack.
+7. Platform-native Mobile passkey adapters remain future product work against the same on-chain/provider semantics.
 
 ## Non-goals
 

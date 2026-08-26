@@ -24,6 +24,7 @@ Implementation evidence may come from another Fresnica repository. A Mobile/Web/
 | `account` | Account | Normative | [account.md](account.md) |
 | `signer` | Signer | Normative | [signer.md](signer.md) |
 | `wallet` | Wallet | Defined | [wallet.md](wallet.md) |
+| `backup-restore` | Backup / Restore | Defined | [backup-restore.md](backup-restore.md) |
 | `balance` | Balance / Availability | Normative | [balance.md](balance.md) |
 | `asset-discovery` | Asset Discovery / Catalog | Defined | [asset-discovery.md](asset-discovery.md) |
 | `payment` | Payment | Normative | [payment.md](payment.md) |
@@ -33,6 +34,7 @@ Implementation evidence may come from another Fresnica repository. A Mobile/Web/
 | `contacts` | Contacts / Destination Resolution | Defined | [contacts.md](contacts.md) |
 | `sdex` | SDEX | Normative | [sdex.md](sdex.md) |
 | `anchor` | Anchor | Normative | [anchor.md](anchor.md) |
+| `ledger-authorization` | Ledger Authorization | Defined | [ledger-authorization.md](ledger-authorization.md) |
 | `signing` | Signing Coordination | Normative | [signing-coordination.md](signing-coordination.md) |
 | `security` | Application Security | Defined | [application-security.md](application-security.md) |
 | `dapp` | Dapp Interaction | Defined | [dapp.md](dapp.md) |

@@ -18,7 +18,7 @@ Anchor operations are scoped by:
 Stellar network + full issued-asset identity (CODE:GISSUER)
 ```
 
-Code-only asset identity is not sufficient.
+Code-only asset identity is not sufficient. Issued-asset code comparison is exact/case-sensitive; SEP-1 metadata lookup must not match `USD` to a distinct protocol-valid `usd` asset merely for convenience.
 
 Discovery/session/customer/transaction state must not leak across network or anchor boundaries.
 
@@ -34,7 +34,7 @@ The shared Classic `G...` account path covers:
 - reviewed withdrawal-payment handoff;
 - common SEP-12 customer status and scalar/binary customer update handoff.
 
-SEP-45 contract-account execution is deliberately outside this Classic normative path until its Soroban authorization semantics are specified separately.
+SEP-45 contract-account execution is deliberately outside this Classic normative path until its Soroban authorization semantics are specified separately. Official SEP/auth libraries supporting additional account families do not automatically widen Fresnica's current scope: unsupported `M...`/contract/delegated paths must fail explicitly and must not be demuxed/reinterpreted into the direct Classic `G...` path.
 
 ## SEP-1 discovery
 
@@ -48,6 +48,8 @@ A conforming implementation should discover and validate applicable anchor metad
 - contract-auth metadata when only reporting capability availability.
 
 Discovery must distinguish "metadata exists" from "a complete executable authentication path exists".
+
+Anchor protocol endpoints used for authenticated/sensitive flows must be HTTPS, have a real host and must not contain embedded username/password credentials. Redirect handling must preserve an equivalent security boundary: an initially valid HTTPS endpoint must not silently downgrade to HTTP or otherwise bypass endpoint-origin policy through automatic redirects.
 
 ## Transfer protocol selection
 
@@ -81,6 +83,8 @@ A conforming implementation must reject before token exchange when:
 - the client signature is missing/invalid.
 
 A product must never ask a protected signer to sign arbitrary server-provided XDR before SEP-10 verification.
+
+Classic `G...` authentication does not imply "the master key alone always signs". Where the account's current ledger signer/threshold configuration requires delegated or multisig authorization, the verified challenge must flow through Ledger Authorization + Signing Coordination. The current Rust direct-account-signature path is a reference scope; unsupported delegated/multisig SEP-10 must fail explicitly rather than pretend one local signature is sufficient.
 
 Authorization tokens are session material, not wallet truth. They must not be logged, printed as normal output, persisted as ordinary wallet state or passed through command-line arguments.
 
@@ -189,7 +193,9 @@ This is especially useful for Mobile because SEP-24 browser handoff, SEP-6 requi
 
 ## Reference implementation status
 
-The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
+The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements most of the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
+
+Known reference conformance gaps from this contract audit include exact-case SEP-1 asset matching, redirect-chain hardening after initial endpoint validation, and delegated/multisig SEP-10 authorization. These are tracked implementation follow-ups rather than reasons to weaken the contract.
 
 Current deferred areas:
 

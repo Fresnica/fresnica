@@ -83,7 +83,7 @@ Detailed references are indexed in [`core/README.md`](core/README.md).
 
 ## 4. Application Capability status
 
-The authoritative catalog/maturity is [`application-capabilities.md`](application-capabilities.md) and [`capabilities/README.md`](capabilities/README.md).
+The authoritative catalog/maturity is [`application-capabilities.md`](application-capabilities.md) and [`capabilities/README.md`](capabilities/README.md). The current catalog contains **19 Capabilities: 9 Normative and 10 Defined**.
 
 ### Normative / current strong semantics
 
@@ -114,11 +114,13 @@ Important implemented semantics include:
 ### Defined / intentionally not over-standardized
 
 - Wallet aggregate;
+- Backup / Restore;
 - Asset Discovery / Catalog;
 - History / Activity;
 - Contacts / Destination Resolution;
 - Application Security;
 - Dapp Interaction;
+- Ledger Authorization;
 - Hardware / External Signer Interaction;
 - Network / Gateway.
 
@@ -151,7 +153,7 @@ See [`platforms/terminal/README.md`](platforms/terminal/README.md).
 
 ## 6. Anchor / SEP status
 
-The common Classic Anchor Capability now includes:
+The common Classic Anchor Capability contract includes:
 
 - SEP-1 discovery;
 - validated two-phase SEP-10 challenge/sign/exchange;
@@ -161,7 +163,7 @@ The common Classic Anchor Capability now includes:
 - reviewed withdrawal payment handoff;
 - common SEP-12 customer status and scalar/binary updates.
 
-The current Rust Anchor extraction moves protocol/transport semantics into `fresnica-client`; CLI remains product/prompt/rendering orchestration.
+The current Rust Anchor extraction moves protocol/transport semantics into `fresnica-client`; CLI remains product/prompt/rendering orchestration. Exact-case asset matching, redirect-chain hardening and delegated/multisig SEP-10 remain known reference conformance gaps; do not describe the Rust reference as fully conformant on those points yet.
 
 Still demand-driven/deferred:
 
