@@ -6,8 +6,9 @@ use stellar_xdr::{
     ChangeTrustOp, ManageBuyOfferOp, ManageSellOfferOp, OperationBody, Price,
 };
 
-use crate::horizon::{HorizonClient, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
-use crate::storage::{WalletRecord, WalletStorage};
+use fresnica_client::{
+    HorizonClient, WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
+};
 use crate::transaction_flow::{
     account_sequence, balance_stroops, build_operation_envelope, confirm_submission,
     format_stroops, minimum_balance_stroops, network_client, parse_stroops,

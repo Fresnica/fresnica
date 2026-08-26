@@ -22,10 +22,10 @@ use stellar_xdr::{
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::horizon::{
-    HorizonClient, SubmissionError, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
+use fresnica_client::{
+    HorizonClient, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
+    TESTNET_HORIZON_URL,
 };
-use crate::storage::{WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
 const TX_TIMEOUT_SECONDS: u64 = 30;

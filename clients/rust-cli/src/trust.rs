@@ -6,7 +6,7 @@ use stellar_xdr::{
     OperationBody,
 };
 
-use crate::storage::WalletStorage;
+use fresnica_client::WalletStorage;
 use crate::transaction_flow::{
     account_sequence, balance_stroops, build_single_operation_envelope, confirm_submission,
     format_stroops, minimum_balance_stroops, network_client, parse_stroops,

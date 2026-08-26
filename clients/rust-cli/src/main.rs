@@ -2,23 +2,19 @@ mod anchor;
 mod contacts;
 mod dex;
 mod friendbot;
-mod horizon;
 mod read_commands;
 mod send;
-mod storage;
 mod transaction_flow;
 mod trust;
-mod wallet_ops;
 
 use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
+use fresnica_client::{wallet as wallet_ops, FresnicaClient, RevealedSigningMaterial, WalletRecord, WalletStorage};
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Map;
-use storage::{WalletRecord, WalletStorage};
-use wallet_ops::RevealedSigningMaterial;
 use zeroize::Zeroizing;
 
 const HELP: &str = r#"Fresnica native Rust CLI
@@ -106,20 +102,19 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
-    let storage = WalletStorage::new(&global.home)?;
+    let client = FresnicaClient::new(&global.home, &global.network)?;
+    let storage = client.storage();
     match global.command[0].as_str() {
-        "info" => command_info(&storage, &global.command[1..]),
-        "account" => read_commands::command_account(&storage, &global.network, &global.command[1..]),
-        "balance" | "assets" => {
-            read_commands::command_balance(&storage, &global.network, &global.command[1..])
-        }
-        "history" => read_commands::command_history(&storage, &global.network, &global.command[1..]),
-        "send" => send::command_send(&storage, &global.network, &global.command[1..]),
-        "contact" => contacts::command_contact(&storage, &global.command[1..]),
-        "trust" => trust::command_trust(&storage, &global.network, &global.command[1..]),
-        "dex" => dex::command_dex(&storage, &global.network, &global.command[1..]),
-        "anchor" => anchor::command_anchor(&storage, &global.network, &global.command[1..]),
-        "wallet" => command_wallet(&storage, &global.network, &global.command[1..]),
+        "info" => command_info(storage, &global.command[1..]),
+        "account" => read_commands::command_account(&client, &global.command[1..]),
+        "balance" | "assets" => read_commands::command_balance(&client, &global.command[1..]),
+        "history" => read_commands::command_history(&client, &global.command[1..]),
+        "send" => send::command_send(storage, &global.network, &global.command[1..]),
+        "contact" => contacts::command_contact(storage, &global.command[1..]),
+        "trust" => trust::command_trust(storage, &global.network, &global.command[1..]),
+        "dex" => dex::command_dex(storage, &global.network, &global.command[1..]),
+        "anchor" => anchor::command_anchor(storage, &global.network, &global.command[1..]),
+        "wallet" => command_wallet(storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),
     }
 }

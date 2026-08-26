@@ -6,8 +6,7 @@ mod write;
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde_json::Value;
 
-use crate::horizon::{MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
-use crate::storage::{WalletRecord, WalletStorage};
+use fresnica_client::{WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::transaction_flow::parse_stroops;
 
 const MAX_PAGE_LIMIT: usize = 200;

@@ -16,7 +16,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::send::{review_and_submit_payment, PaymentMemo};
-use crate::storage::{WalletRecord, WalletStorage};
+use fresnica_client::{WalletRecord, WalletStorage};
 use crate::transaction_flow::{
     has_valid_transaction_signature, network_client, network_passphrase, parse_transaction_xdr,
     resolve_local_signing_wallet, resolve_signing_wallet, sign_transaction_xdr_with_wallet,

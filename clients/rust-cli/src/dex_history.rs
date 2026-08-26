@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::storage::WalletStorage;
+use fresnica_client::WalletStorage;
 use crate::transaction_flow::{format_stroops, parse_stroops};
 
 use super::{

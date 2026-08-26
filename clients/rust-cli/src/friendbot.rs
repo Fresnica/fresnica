@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::storage::WalletStorage;
+use fresnica_client::WalletStorage;
 
 pub const FRIENDBOT_URL: &str = "https://friendbot.stellar.org";
 

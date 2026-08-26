@@ -7,9 +7,7 @@ use stellar_xdr::{
     Memo, MuxedAccount, OperationBody, PaymentOp, PublicKey, StringM,
 };
 
-use crate::contacts::resolve_destination;
-use crate::horizon::LedgerParameters;
-use crate::storage::{WalletRecord, WalletStorage};
+use fresnica_client::{resolve_destination, LedgerParameters, WalletRecord, WalletStorage};
 use crate::transaction_flow::{
     account_sequence, balance_stroops, build_single_operation_envelope_with_memo,
     confirm_submission, format_stroops, minimum_balance_stroops, network_client,

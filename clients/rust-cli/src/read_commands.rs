@@ -1,43 +1,44 @@
+use fresnica_client::{balance_asset_label, operation_summary, FresnicaClient};
 use serde_json::Value;
 
-use crate::horizon::{
-    balance_asset_label, operation_summary, HorizonClient, MAINNET_HORIZON_URL,
-    TESTNET_HORIZON_URL,
-};
-use crate::storage::{WalletRecord, WalletStorage};
-
-pub fn command_account(
-    storage: &WalletStorage,
-    network: &str,
-    arguments: &[String],
-) -> Result<(), String> {
+pub fn command_account(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
     let options = parse_output_options(arguments, "fresnica account [--wallet NAME] [--json]")?;
-    let record = resolve_network_wallet(storage, network, options.wallet.as_deref())?;
-    let account = client(network)?.get_account(&record.address)?;
+    let snapshot = client.account(options.wallet.as_deref())?;
     if options.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&account)
+            serde_json::to_string_pretty(&snapshot.account)
                 .map_err(|error| format!("unable to encode account data: {error}"))?
         );
         return Ok(());
     }
 
-    let balances = account
+    let balances = snapshot
+        .account
         .get("balances")
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0);
-    println!("Wallet:       {}", record.name);
-    println!("Address:      {}", record.address);
-    println!("Network:      {}", record.network);
-    println!("Sequence:     {}", display_value(account.get("sequence")));
-    println!("Subentries:   {}", display_value(account.get("subentry_count")));
-    println!("Sponsoring:   {}", display_value(account.get("num_sponsoring")));
-    println!("Sponsored:    {}", display_value(account.get("num_sponsored")));
+    println!("Wallet:       {}", snapshot.wallet.name);
+    println!("Address:      {}", snapshot.wallet.address);
+    println!("Network:      {}", snapshot.wallet.network);
+    println!("Sequence:     {}", display_value(snapshot.account.get("sequence")));
+    println!(
+        "Subentries:   {}",
+        display_value(snapshot.account.get("subentry_count"))
+    );
+    println!(
+        "Sponsoring:   {}",
+        display_value(snapshot.account.get("num_sponsoring"))
+    );
+    println!(
+        "Sponsored:    {}",
+        display_value(snapshot.account.get("num_sponsored"))
+    );
     println!(
         "Home domain:  {}",
-        account
+        snapshot
+            .account
             .get("home_domain")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
@@ -47,34 +48,25 @@ pub fn command_account(
     Ok(())
 }
 
-pub fn command_balance(
-    storage: &WalletStorage,
-    network: &str,
-    arguments: &[String],
-) -> Result<(), String> {
+pub fn command_balance(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
     let options = parse_output_options(arguments, "fresnica balance [--wallet NAME] [--json]")?;
-    let record = resolve_network_wallet(storage, network, options.wallet.as_deref())?;
-    let account = client(network)?.get_account(&record.address)?;
-    let balances = account
-        .get("balances")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+    let snapshot = client.balances(options.wallet.as_deref())?;
 
     if options.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(balances)
+            serde_json::to_string_pretty(&snapshot.balances)
                 .map_err(|error| format!("unable to encode balance data: {error}"))?
         );
         return Ok(());
     }
 
-    println!("Wallet: {} [{}]", record.name, record.network);
+    println!("Wallet: {} [{}]", snapshot.wallet.name, snapshot.wallet.network);
     println!(
         "{:<72} {:>16} {:>16} {:>16}",
         "Asset", "Balance", "Selling", "Buying"
     );
-    for balance in balances {
+    for balance in &snapshot.balances {
         println!(
             "{:<72} {:>16} {:>16} {:>16}",
             balance_asset_label(balance),
@@ -86,37 +78,32 @@ pub fn command_balance(
     Ok(())
 }
 
-pub fn command_history(
-    storage: &WalletStorage,
-    network: &str,
-    arguments: &[String],
-) -> Result<(), String> {
+pub fn command_history(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
     let options = parse_history_options(arguments)?;
-    let record = resolve_network_wallet(storage, network, options.wallet.as_deref())?;
-    let operations = client(network)?.get_operations(&record.address, options.limit)?;
+    let snapshot = client.history(options.wallet.as_deref(), options.limit)?;
 
     if options.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&operations)
+            serde_json::to_string_pretty(&snapshot.operations)
                 .map_err(|error| format!("unable to encode history data: {error}"))?
         );
         return Ok(());
     }
 
-    println!("Wallet: {} [{}]", record.name, record.network);
-    if operations.is_empty() {
+    println!("Wallet: {} [{}]", snapshot.wallet.name, snapshot.wallet.network);
+    if snapshot.operations.is_empty() {
         println!("No account operations.");
         return Ok(());
     }
-    for operation in operations {
-        let created_at = text(&operation, "created_at").unwrap_or("?");
-        let operation_type = text(&operation, "type").unwrap_or("unknown");
+    for operation in &snapshot.operations {
+        let created_at = text(operation, "created_at").unwrap_or("?");
+        let operation_type = text(operation, "type").unwrap_or("unknown");
         println!(
             "{:<20} {:<28} {}",
             created_at,
             operation_type,
-            operation_summary(&operation, &record.address)
+            operation_summary(operation, &snapshot.wallet.address)
         );
     }
     Ok(())
@@ -202,30 +189,6 @@ fn parse_history_options(arguments: &[String]) -> Result<HistoryOptions, String>
         json,
         limit,
     })
-}
-
-fn resolve_network_wallet(
-    storage: &WalletStorage,
-    network: &str,
-    name: Option<&str>,
-) -> Result<WalletRecord, String> {
-    let record = storage.resolve(name)?;
-    if record.network != network {
-        return Err(format!(
-            "wallet \"{}\" is configured for {}; invoke with --network {}",
-            record.name, record.network, record.network
-        ));
-    }
-    Ok(record)
-}
-
-fn client(network: &str) -> Result<HorizonClient, String> {
-    let url = match network {
-        "mainnet" => MAINNET_HORIZON_URL,
-        "testnet" => TESTNET_HORIZON_URL,
-        other => return Err(format!("unknown network: {other}")),
-    };
-    Ok(HorizonClient::new(url))
 }
 
 fn display_value(value: Option<&Value>) -> String {
