@@ -82,7 +82,8 @@ fn run() -> Result<Value, BridgeError> {
         }
         "protect-mnemonic" => {
             let mnemonic = take_sensitive_string(object, "mnemonic")?;
-            let mnemonic_passphrase = take_optional_sensitive_string(object, "mnemonic_passphrase")?;
+            let mnemonic_passphrase =
+                take_optional_sensitive_string(object, "mnemonic_passphrase")?;
             let index = take_optional_u32(object, "index", 0)?;
             let language = take_optional_string(object, "language")?;
             let passcode = take_sensitive_string(object, "passcode")?;
@@ -98,10 +99,11 @@ fn run() -> Result<Value, BridgeError> {
             protected_json(protected)
         }
         "generate-mnemonic" => {
-            let language = take_optional_string(object, "language")?
-                .unwrap_or_else(|| "english".to_owned());
+            let language =
+                take_optional_string(object, "language")?.unwrap_or_else(|| "english".to_owned());
             let strength = take_optional_u32(object, "strength", 256)?;
-            let mnemonic_passphrase = take_optional_sensitive_string(object, "mnemonic_passphrase")?;
+            let mnemonic_passphrase =
+                take_optional_sensitive_string(object, "mnemonic_passphrase")?;
             let index = take_optional_u32(object, "index", 0)?;
             let passcode = take_sensitive_string(object, "passcode")?;
             let generated = sdk.generate_mnemonic(
@@ -158,25 +160,19 @@ fn run() -> Result<Value, BridgeError> {
         }
         "validate-unlock-key" => {
             let envelope = take_value(object, "envelope")?;
-            let unlock_key = decode_base64(
-                &take_sensitive_string(object, "unlock_key")?,
-                "unlock_key",
-            )?;
+            let unlock_key =
+                decode_base64(&take_sensitive_string(object, "unlock_key")?, "unlock_key")?;
             let expected = take_string(object, "expected_signer_public_key")?;
             sdk.validate_unlock_key(envelope.to_string(), unlock_key, expected)?;
             Ok(json!({}))
         }
         "sign-transaction" => {
             let envelope = take_value(object, "envelope")?;
-            let unlock_key = decode_base64(
-                &take_sensitive_string(object, "unlock_key")?,
-                "unlock_key",
-            )?;
+            let unlock_key =
+                decode_base64(&take_sensitive_string(object, "unlock_key")?, "unlock_key")?;
             let expected = take_string(object, "expected_signer_public_key")?;
-            let transaction_xdr = decode_base64(
-                &take_string(object, "transaction_xdr")?,
-                "transaction_xdr",
-            )?;
+            let transaction_xdr =
+                decode_base64(&take_string(object, "transaction_xdr")?, "transaction_xdr")?;
             let network_passphrase = take_string(object, "network_passphrase")?;
             let signed = sdk.sign_transaction_xdr(
                 envelope.to_string(),
@@ -191,10 +187,8 @@ fn run() -> Result<Value, BridgeError> {
             let envelope = take_value(object, "envelope")?;
             let passcode = take_sensitive_string(object, "passcode")?;
             let expected = take_string(object, "expected_signer_public_key")?;
-            let transaction_xdr = decode_base64(
-                &take_string(object, "transaction_xdr")?,
-                "transaction_xdr",
-            )?;
+            let transaction_xdr =
+                decode_base64(&take_string(object, "transaction_xdr")?, "transaction_xdr")?;
             let network_passphrase = take_string(object, "network_passphrase")?;
             let signed = sdk.sign_transaction_xdr_with_passcode(
                 envelope.to_string(),
@@ -209,11 +203,8 @@ fn run() -> Result<Value, BridgeError> {
             let envelope = take_value(object, "envelope")?;
             let passcode = take_sensitive_string(object, "passcode")?;
             let expected = take_string(object, "expected_signer_public_key")?;
-            let material = sdk.reveal(
-                envelope.to_string(),
-                passcode.as_str().to_owned(),
-                expected,
-            )?;
+            let material =
+                sdk.reveal(envelope.to_string(), passcode.as_str().to_owned(), expected)?;
             Ok(match material.kind {
                 SdkSigningMaterialKind::Secret => json!({
                     "kind": "secret",
@@ -229,10 +220,8 @@ fn run() -> Result<Value, BridgeError> {
             })
         }
         "prepare-ed25519-signing" => {
-            let transaction_xdr = decode_base64(
-                &take_string(object, "transaction_xdr")?,
-                "transaction_xdr",
-            )?;
+            let transaction_xdr =
+                decode_base64(&take_string(object, "transaction_xdr")?, "transaction_xdr")?;
             let network_passphrase = take_string(object, "network_passphrase")?;
             let prepared = sdk.prepare_ed25519_signing(transaction_xdr, network_passphrase)?;
             Ok(json!({
@@ -242,10 +231,8 @@ fn run() -> Result<Value, BridgeError> {
             }))
         }
         "apply-ed25519-signature" => {
-            let transaction_xdr = decode_base64(
-                &take_string(object, "transaction_xdr")?,
-                "transaction_xdr",
-            )?;
+            let transaction_xdr =
+                decode_base64(&take_string(object, "transaction_xdr")?, "transaction_xdr")?;
             let network_passphrase = take_string(object, "network_passphrase")?;
             let signer_public_key = take_string(object, "signer_public_key")?;
             let signature = decode_base64(&take_string(object, "signature")?, "signature")?;
