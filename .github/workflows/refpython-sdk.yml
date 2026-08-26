@@ -1,0 +1,35 @@
+name: RefPython SDK validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "core/rust/**"
+      - "sdk/rust/**"
+      - "reference/python/fresnica/rust_core_client.py"
+      - "reference/python/fresnica/rust_sdk_client.py"
+      - "reference/python/fresnica/runtime.py"
+      - "reference/python/tests/test_rust_sdk_compat.py"
+      - ".github/workflows/refpython-sdk.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path sdk/rust/Cargo.toml
+      - run: cargo build --release --manifest-path sdk/rust/Cargo.toml --bin fresnica-sdk-bridge
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.5"
+          enable-cache: true
+      - run: uv python install 3.11
+        working-directory: reference/python
+      - run: uv sync --locked
+        working-directory: reference/python
+      - run: uv run pytest -q tests/test_rust_sdk_compat.py
+        working-directory: reference/python
+        env:
+          FRESNICA_SDK_BIN: ${{ github.workspace }}/sdk/rust/target/release/fresnica-sdk-bridge
