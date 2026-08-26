@@ -197,6 +197,38 @@ pub struct TransactionSubmission {
     pub ledger: Option<u64>,
 }
 
+fn ensure_transaction_not_expired(envelope: &TransactionEnvelope) -> Result<(), String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "system clock is before Unix epoch".to_owned())?
+        .as_secs();
+    ensure_transaction_not_expired_at(envelope, now)
+}
+
+fn ensure_transaction_not_expired_at(
+    envelope: &TransactionEnvelope,
+    now_unix: u64,
+) -> Result<(), String> {
+    let TransactionEnvelope::Tx(transaction) = envelope else {
+        return Ok(());
+    };
+    let max_time = match &transaction.tx.cond {
+        Preconditions::None => return Ok(()),
+        Preconditions::Time(bounds) => bounds.max_time.0,
+        Preconditions::V2(value) => match value.time_bounds.as_ref() {
+            Some(bounds) => bounds.max_time.0,
+            None => return Ok(()),
+        },
+    };
+    if max_time != 0 && now_unix > max_time {
+        return Err(
+            "Prepared transaction has expired; prepare and review the transaction again before signing"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
 pub fn sign_and_submit(
     storage: &WalletStorage,
     record: &WalletRecord,
@@ -205,6 +237,7 @@ pub fn sign_and_submit(
     horizon: &HorizonClient,
     passcode: String,
 ) -> Result<TransactionSubmission, String> {
+    ensure_transaction_not_expired(envelope)?;
     let network_passphrase = network_passphrase(network)?;
     let unsigned_xdr = transaction_envelope_xdr(envelope)
         .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
@@ -633,6 +666,27 @@ mod tests {
         assert_eq!(envelope.tx.fee, 200);
         assert_eq!(envelope.tx.operations.len(), 2);
         assert_eq!(envelope.tx.seq_num, SequenceNumber(8));
+    }
+
+    #[test]
+    fn expired_prepared_transaction_is_rejected_before_signing() {
+        let body = OperationBody::BumpSequence(stellar_xdr::BumpSequenceOp {
+            bump_to: SequenceNumber(9),
+        });
+        let mut envelope = build_operation_envelope(SOURCE, vec![body], 7, 100, None).unwrap();
+        let TransactionEnvelope::Tx(transaction) = &mut envelope else {
+            panic!("expected v1 transaction envelope");
+        };
+        transaction.tx.cond = Preconditions::Time(TimeBounds {
+            min_time: TimePoint(0),
+            max_time: TimePoint(100),
+        });
+
+        assert!(ensure_transaction_not_expired_at(&envelope, 100).is_ok());
+        assert_eq!(
+            ensure_transaction_not_expired_at(&envelope, 101).unwrap_err(),
+            "Prepared transaction has expired; prepare and review the transaction again before signing"
+        );
     }
 
     #[test]

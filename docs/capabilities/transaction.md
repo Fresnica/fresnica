@@ -53,7 +53,7 @@ In particular, Fee Bump support must be added deliberately: a future implementat
 
 A prepared transaction that has become invalid/stale under its own time bounds must not be signed merely because the review object is still on screen. It must be prepared again, and the newly prepared envelope must be re-bound to review/confirmation. Sequence/timebound/precondition changes cannot inherit confirmation from an older envelope.
 
-Implementations may choose additional freshness checks, but they must at least fail closed when the prepared envelope is already known to be expired.
+Implementations may choose additional freshness checks, but they must at least fail closed when the prepared envelope is already known to be expired. The current Rust shared client and RefPython transaction service enforce this check before invoking the signer, with regression coverage for the time-bound boundary.
 
 ## Submission result
 

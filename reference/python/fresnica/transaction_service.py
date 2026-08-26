@@ -1,6 +1,8 @@
 """Generic transaction signing and submission workflow."""
 
-from .errors import TransactionSubmissionUncertain
+import time
+
+from .errors import TransactionError, TransactionSubmissionUncertain
 from .models import TransactionResult
 from .offer_result import parse_offer_submission_outcome
 from .review import TrustlineReview
@@ -12,6 +14,7 @@ class TransactionService:
         self.pending_service = pending_service
 
     def sign(self, wallet, prepared):
+        _ensure_prepared_transaction_not_expired(prepared)
         wallet.sign(prepared.envelope)
         return prepared
 
@@ -35,6 +38,17 @@ class TransactionService:
             successful=bool(response.get("successful", True)),
             raw=response,
             offer_outcome=parse_offer_submission_outcome(response.get("result_xdr")),
+        )
+
+
+def _ensure_prepared_transaction_not_expired(prepared) -> None:
+    transaction = getattr(prepared.envelope, "transaction", None)
+    preconditions = getattr(transaction, "preconditions", None)
+    time_bounds = getattr(preconditions, "time_bounds", None)
+    max_time = getattr(time_bounds, "max_time", 0) or 0
+    if max_time and int(time.time()) > max_time:
+        raise TransactionError(
+            "Prepared transaction has expired; prepare and review the transaction again before signing"
         )
 
 
