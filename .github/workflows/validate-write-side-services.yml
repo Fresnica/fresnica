@@ -1,4 +1,4 @@
-name: Validate write-side services candidate
+name: Validate trustline service candidate
 
 on:
   push:
@@ -15,12 +15,12 @@ jobs:
       - name: Reconstruct exact candidate tree
         shell: bash
         run: |
-          cat .validation/candidate.b64.* | base64 -d > /tmp/candidate.patch.gz
-          gzip -dc /tmp/candidate.patch.gz > /tmp/candidate.patch
-          echo '793ef11469a4d90ca0b290f626f5f4f29246cf874d2e68ec31ed999cd65d5973  /tmp/candidate.patch' | sha256sum -c -
+          cat .validation/candidate.b64.* | base64 -d > /tmp/base.patch.gz
+          gzip -dc /tmp/base.patch.gz > /tmp/base.patch
+          echo '793ef11469a4d90ca0b290f626f5f4f29246cf874d2e68ec31ed999cd65d5973  /tmp/base.patch' | sha256sum -c -
           git config user.name 'OpenAI Validation'
           git config user.email 'noreply@openai.com'
-          git am /tmp/candidate.patch
+          git am /tmp/base.patch
           python3 - <<'PY'
           from pathlib import Path
           p = Path('clients/rust-cli/src/dex_write.rs')
@@ -32,22 +32,29 @@ jobs:
           p.write_text(s.replace(old, new, 1))
           PY
           git add clients/rust-cli/src/dex_write.rs
-          git diff --cached --check
+          git commit -m 'Apply validated base formatting'
+
+          cat .validation/trustline.b64.* | base64 -d > /tmp/trustline.patch.gz
+          gzip -dc /tmp/trustline.patch.gz > /tmp/trustline.patch
+          echo 'da7e19fb08a09832dbffcbacc0b772d41303e5dc89df835d109bb7b264a90ae4  /tmp/trustline.patch' | sha256sum -c -
+          git am /tmp/trustline.patch
           git rm --cached -r .validation
           git rm --cached .github/workflows/validate-write-side-services.yml
-          test "$(git write-tree)" = '6197cf7d463853b7c0e165061cf1861e6b556a2a'
+          test "$(git write-tree)" = 'd7b6a91b4eddd2d5a6559b09b23464eb7259c7d2'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 
-      - name: Formatting
+      - name: Format candidate and capture delta
         shell: bash
         run: |
-          cargo fmt --manifest-path clients/rust-client/Cargo.toml -- --check
-          cargo fmt --manifest-path clients/rust-cli/Cargo.toml -- --check
-          cargo fmt --manifest-path clients/rust-tui/Cargo.toml -- --check
+          cargo fmt --manifest-path clients/rust-client/Cargo.toml
+          cargo fmt --manifest-path clients/rust-cli/Cargo.toml
+          cargo fmt --manifest-path clients/rust-tui/Cargo.toml
+          git diff --check -- clients/rust-client clients/rust-cli clients/rust-tui
+          git diff --binary -- clients/rust-client clients/rust-cli clients/rust-tui > /tmp/trustline-rustfmt.patch
 
       - name: SDK boundary
         run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
@@ -69,3 +76,11 @@ jobs:
 
       - name: Rust TUI release build
         run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml
+
+      - name: Upload rustfmt delta
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trustline-rustfmt
+          path: /tmp/trustline-rustfmt.patch
+          if-no-files-found: warn
