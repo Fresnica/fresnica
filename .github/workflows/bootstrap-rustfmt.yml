@@ -1,0 +1,38 @@
+name: Bootstrap portable rustfmt
+
+on:
+  push:
+    branches:
+      - tooling/rustfmt-bootstrap-20260826
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Inspect rustfmt
+        shell: bash
+        run: |
+          set -euxo pipefail
+          RUSTFMT="$(rustup which rustfmt)"
+          echo "rustfmt=$RUSTFMT"
+          rustfmt --version
+          file "$RUSTFMT"
+          ls -lh "$RUSTFMT"
+          ldd "$RUSTFMT" || true
+      - name: Package rustfmt
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p portable-rustfmt/bin
+          cp "$(rustup which rustfmt)" portable-rustfmt/bin/rustfmt
+          printf '%s\n' 'Rust stable 1.98.0 / rustfmt from 2026-08-20; Linux x86_64.' > portable-rustfmt/VERSION.txt
+          tar -czf portable-rustfmt-linux-x86_64.tar.gz portable-rustfmt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-rustfmt-linux-x86_64
+          path: portable-rustfmt-linux-x86_64.tar.gz
+          retention-days: 30
