@@ -89,7 +89,8 @@
 - [x] Shared UI-free Rust trustline prepare-review-submit services
 - [x] Native Rust TUI trustline add/limit/remove flow over shared client services
 - [x] Shared UI-free Rust SDEX offer create/update/cancel services
-- [x] Native Rust TUI SDEX offer create/cancel flow over shared client services
+- [x] Native Rust TUI SDEX offer create/update/cancel flow over shared client services
+- [x] Shared typed SDEX open-offer read service with CLI/TUI consumers
 - [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
 - [x] Native Rust CLI SEP-1 + SEP-6/SEP-24 anchor capability discovery (`anchor discover CODE:GISSUER`)
 - [x] Native Rust CLI SEP-10/SEP-45 authentication metadata discovery and G/C capability classification

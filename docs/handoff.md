@@ -261,11 +261,11 @@ Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Wi
 
 ## Rust Engineering Clients
 
-The Rust CLI is substantially implemented and remains the reference native command client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths consume `fresnica-sdk`; direct Core use is limited to low-level Rust transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
+The Rust CLI is substantially implemented and remains the reference native command client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths consume `fresnica-sdk`; CLI/TUI presentation code no longer imports Core directly. The remaining direct Core use is contained inside the shared Rust client layer for low-level transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
 The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking and an explicit reviewed withdrawal-payment handoff. SEP-45 contract-account execution and SEP-12 customer-information handoff remain separate follow-up work.
 
-A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, payment/trustline prepare-review-submit semantics, and SDEX offer create/update/cancel preparation/submission. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
+A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, payment/trustline prepare-review-submit semantics, SDEX offer create/update/cancel preparation/submission, and typed open-offer reads. Shared service DTOs should remain transport-neutral; the SDEX `OpenOffer` surface intentionally exposes normalized wallet semantics rather than Horizon raw JSON. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
 Mobile should mirror this same application-layer shape rather than inventing a separate product architecture: React Native screens/state -> Mobile application services -> Realm/network/platform adapters + Fresnica Native SDK. Reuse the service responsibilities and wallet semantics where they are common, but do not require Mobile to link the concrete `fresnica-client` Rust implementation; persistence technology, platform lifecycle and product orchestration remain application-owned.
 
@@ -279,9 +279,10 @@ The native Rust TUI lives at `clients/rust-tui`. It consumes `fresnica-client` r
 - reviewed XLM/issued-asset payment preparation through the shared payment service;
 - masked passcode entry and SDK-backed payment submission, including shared pending-transaction protection;
 - reviewed trustline add/limit/remove preparation and submission through the same shared client layer;
-- reviewed SDEX BUY/SELL offer creation and offer cancellation through shared offer services.
+- reviewed SDEX BUY/SELL offer creation, offer update and offer cancellation through shared offer services;
+- typed current open-offer display from the shared SDEX read service.
 
-SDEX offer update is already available through the shared Rust service and CLI; richer pair/orderbook screens remain follow-up TUI work. Terminal interaction, confirmation state and passcode entry remain presentation-owned and must not be copied from CLI command handlers.
+Richer pair/orderbook screens remain follow-up TUI work. Terminal interaction, confirmation state and passcode entry remain presentation-owned and must not be copied from CLI command handlers.
 
 ## Python Wallet Reference
 
