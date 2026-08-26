@@ -3,6 +3,7 @@ pub mod horizon;
 pub mod payment;
 pub mod storage;
 pub mod transaction;
+pub mod trustline;
 pub mod wallet;
 
 mod service;
@@ -24,6 +25,10 @@ pub use transaction::{
     minimum_balance_stroops, network_client, network_passphrase, parse_positive_stroops,
     parse_stroops, parse_transaction_xdr, resolve_local_signing_wallet, resolve_signing_wallet,
     sign_and_submit, sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
+};
+pub use trustline::{
+    PreparedTrustline, TrustlineAction, TrustlineOperation, TrustlineRequest, TrustlineReview,
+    DEFAULT_TRUSTLINE_LIMIT,
 };
 pub use wallet::{
     attach_mnemonic_record, attach_secret_record, create_mnemonic_record, detach_signer_record,

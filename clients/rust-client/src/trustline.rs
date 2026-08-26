@@ -1,0 +1,341 @@
+use std::str::FromStr;
+
+use serde_json::Value;
+use stellar_xdr::{
+    AccountId, AlphaNum12, AlphaNum4, AssetCode12, AssetCode4, ChangeTrustAsset, ChangeTrustOp,
+    OperationBody, TransactionEnvelope,
+};
+
+use crate::{
+    account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
+    minimum_balance_stroops, parse_stroops, resolve_signing_wallet, sign_and_submit,
+    FresnicaClient, TransactionSubmission, WalletRecord,
+};
+
+pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrustlineAction {
+    Add { limit: Option<String> },
+    SetLimit { limit: String },
+    Remove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustlineRequest {
+    pub wallet: Option<String>,
+    pub asset: String,
+    pub action: TrustlineAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustlineOperation {
+    Add,
+    SetLimit,
+    Remove,
+}
+
+impl TrustlineOperation {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::SetLimit => "limit",
+            Self::Remove => "remove",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustlineReview {
+    pub operation: TrustlineOperation,
+    pub wallet_name: String,
+    pub source: String,
+    pub asset: String,
+    pub limit: Option<String>,
+    pub fee_xlm: String,
+    pub network: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedTrustline {
+    pub review: TrustlineReview,
+    wallet: WalletRecord,
+    envelope: TransactionEnvelope,
+}
+
+impl FresnicaClient {
+    pub fn prepare_trustline(
+        &self,
+        request: &TrustlineRequest,
+    ) -> Result<PreparedTrustline, String> {
+        let wallet = resolve_signing_wallet(
+            self.storage(),
+            self.horizon(),
+            self.network(),
+            request.wallet.as_deref(),
+        )?;
+        let asset = IssuedAsset::parse(&request.asset)?;
+        if asset.issuer == wallet.address {
+            return Err("An asset issuer cannot create a trustline to its own asset".to_owned());
+        }
+
+        let account = self.horizon().get_account(&wallet.address)?;
+        let ledger = self.horizon().get_ledger_parameters()?;
+        let existing = find_trustline(&account, &asset);
+
+        let (operation, limit) = match &request.action {
+            TrustlineAction::Add { limit } => {
+                if existing.is_some() {
+                    return Err(format!(
+                        "Trustline already exists for {}; use trust limit to change its limit",
+                        asset.display()
+                    ));
+                }
+                ensure_native_capacity(
+                    &account,
+                    ledger.base_reserve_in_stroops,
+                    ledger.base_fee_in_stroops,
+                    ledger.base_reserve_in_stroops,
+                )?;
+                (
+                    TrustlineOperation::Add,
+                    parse_limit(limit.as_deref().unwrap_or(DEFAULT_TRUSTLINE_LIMIT))?,
+                )
+            }
+            TrustlineAction::SetLimit { limit } => {
+                let raw = existing.ok_or_else(|| {
+                    format!(
+                        "Trustline does not exist for {}; use trust add first",
+                        asset.display()
+                    )
+                })?;
+                let limit = parse_limit(limit)?;
+                let committed = balance_stroops(raw, "balance")?
+                    .checked_add(balance_stroops(raw, "buying_liabilities")?)
+                    .ok_or_else(|| "trustline committed balance overflow".to_owned())?;
+                if limit < committed {
+                    return Err(format!(
+                        "Trustline limit cannot be below current balance plus buying liabilities ({})",
+                        format_stroops(committed)
+                    ));
+                }
+                ensure_native_capacity(
+                    &account,
+                    ledger.base_reserve_in_stroops,
+                    ledger.base_fee_in_stroops,
+                    0,
+                )?;
+                (TrustlineOperation::SetLimit, limit)
+            }
+            TrustlineAction::Remove => {
+                let raw = existing
+                    .ok_or_else(|| format!("Trustline does not exist for {}", asset.display()))?;
+                let balance = balance_stroops(raw, "balance")?;
+                let selling = balance_stroops(raw, "selling_liabilities")?;
+                let buying = balance_stroops(raw, "buying_liabilities")?;
+                if balance != 0 || selling != 0 || buying != 0 {
+                    return Err(
+                        "Trustline cannot be removed while balance or liabilities are non-zero"
+                            .to_owned(),
+                    );
+                }
+                ensure_native_capacity(
+                    &account,
+                    ledger.base_reserve_in_stroops,
+                    ledger.base_fee_in_stroops,
+                    0,
+                )?;
+                (TrustlineOperation::Remove, 0)
+            }
+        };
+
+        let body = OperationBody::ChangeTrust(ChangeTrustOp {
+            line: asset.to_xdr()?,
+            limit,
+        });
+        let envelope = build_single_operation_envelope(
+            &wallet.address,
+            body,
+            account_sequence(&account)?,
+            ledger.base_fee_in_stroops,
+            None,
+        )?;
+        let review = TrustlineReview {
+            operation,
+            wallet_name: wallet.name.clone(),
+            source: wallet.address.clone(),
+            asset: asset.display(),
+            limit: (operation != TrustlineOperation::Remove).then(|| format_stroops(limit)),
+            fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
+            network: wallet.network.clone(),
+        };
+        Ok(PreparedTrustline {
+            review,
+            wallet,
+            envelope,
+        })
+    }
+
+    pub fn submit_trustline(
+        &self,
+        prepared: &PreparedTrustline,
+        passcode: String,
+    ) -> Result<TransactionSubmission, String> {
+        let mut envelope = prepared.envelope.clone();
+        sign_and_submit(
+            self.storage(),
+            &prepared.wallet,
+            self.network(),
+            &mut envelope,
+            self.horizon(),
+            passcode,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IssuedAsset {
+    code: String,
+    issuer: String,
+}
+
+impl IssuedAsset {
+    fn parse(value: &str) -> Result<Self, String> {
+        let (code, issuer) = value
+            .split_once(':')
+            .ok_or_else(|| "trustline asset must be CODE:GISSUER".to_owned())?;
+        if code.is_empty()
+            || code.len() > 12
+            || !code.is_ascii()
+            || !code.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        {
+            return Err("issued asset code must be 1-12 ASCII letters or digits".to_owned());
+        }
+        AccountId::from_str(issuer)
+            .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
+        Ok(Self {
+            code: code.to_owned(),
+            issuer: issuer.to_owned(),
+        })
+    }
+
+    fn display(&self) -> String {
+        format!("{}:{}", self.code, self.issuer)
+    }
+
+    fn to_xdr(&self) -> Result<ChangeTrustAsset, String> {
+        let issuer = AccountId::from_str(&self.issuer)
+            .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
+        if self.code.len() <= 4 {
+            let mut raw = [0u8; 4];
+            raw[..self.code.len()].copy_from_slice(self.code.as_bytes());
+            Ok(ChangeTrustAsset::CreditAlphanum4(AlphaNum4 {
+                asset_code: AssetCode4(raw),
+                issuer,
+            }))
+        } else {
+            let mut raw = [0u8; 12];
+            raw[..self.code.len()].copy_from_slice(self.code.as_bytes());
+            Ok(ChangeTrustAsset::CreditAlphanum12(AlphaNum12 {
+                asset_code: AssetCode12(raw),
+                issuer,
+            }))
+        }
+    }
+}
+
+fn find_trustline<'a>(account: &'a Value, asset: &IssuedAsset) -> Option<&'a Value> {
+    account.get("balances")?.as_array()?.iter().find(|raw| {
+        text(raw, "asset_type") != Some("native")
+            && text(raw, "asset_type") != Some("liquidity_pool_shares")
+            && text(raw, "asset_code") == Some(asset.code.as_str())
+            && text(raw, "asset_issuer") == Some(asset.issuer.as_str())
+    })
+}
+
+fn ensure_native_capacity(
+    account: &Value,
+    base_reserve: i64,
+    fee: u32,
+    additional_reserve: i64,
+) -> Result<(), String> {
+    let native = account
+        .get("balances")
+        .and_then(Value::as_array)
+        .and_then(|balances| {
+            balances
+                .iter()
+                .find(|raw| text(raw, "asset_type") == Some("native"))
+        })
+        .ok_or_else(|| "Insufficient XLM for reserve and fee: available 0".to_owned())?;
+    let balance = balance_stroops(native, "balance")?;
+    let selling = balance_stroops(native, "selling_liabilities")?;
+    let minimum = minimum_balance_stroops(account, base_reserve)?;
+    let free = balance
+        .saturating_sub(selling)
+        .saturating_sub(minimum)
+        .max(0);
+    let required = i64::from(fee)
+        .checked_add(additional_reserve)
+        .ok_or_else(|| "required XLM reserve overflow".to_owned())?;
+    if free < required {
+        return Err(format!(
+            "Insufficient XLM for reserve and fee: need {}, available {}",
+            format_stroops(required),
+            format_stroops(free)
+        ));
+    }
+    Ok(())
+}
+
+fn parse_limit(value: &str) -> Result<i64, String> {
+    parse_stroops(value, true).map_err(|_| {
+        "Trustline limit must be greater than zero with at most 7 decimal places".to_owned()
+    })
+}
+
+fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ISSUER: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+    #[test]
+    fn default_limit_matches_reference_policy() {
+        assert_eq!(
+            parse_limit(DEFAULT_TRUSTLINE_LIMIT).unwrap(),
+            7_082_698_378_736_765_000
+        );
+    }
+
+    #[test]
+    fn parses_four_and_twelve_character_assets() {
+        assert_eq!(
+            IssuedAsset::parse(&format!("USD:{ISSUER}"))
+                .unwrap()
+                .display(),
+            format!("USD:{ISSUER}")
+        );
+        assert!(IssuedAsset::parse(&format!("LONGASSET12:{ISSUER}"))
+            .unwrap()
+            .to_xdr()
+            .is_ok());
+    }
+
+    #[test]
+    fn remove_precondition_observes_balance_and_liabilities() {
+        let asset = IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let account = serde_json::json!({
+            "balances": [
+                {"asset_type":"native","balance":"5.0000000","selling_liabilities":"0"},
+                {"asset_type":"credit_alphanum4","asset_code":"USD","asset_issuer":ISSUER,"balance":"1.0000000","selling_liabilities":"0","buying_liabilities":"0"}
+            ]
+        });
+        let raw = find_trustline(&account, &asset).unwrap();
+        assert_ne!(balance_stroops(raw, "balance").unwrap(), 0);
+    }
+}

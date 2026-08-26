@@ -4,7 +4,8 @@ use std::process;
 
 use fresnica_client::{
     balance_asset_label, operation_summary, BalanceSnapshot, FresnicaClient, HistorySnapshot,
-    PaymentRequest, PreparedPayment, WalletRecord,
+    PaymentRequest, PreparedPayment, PreparedTrustline, TrustlineAction, TrustlineRequest,
+    WalletRecord,
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -25,8 +26,9 @@ Keys:
   r           refresh balances and recent activity
   [ / ]       previous / next wallet on the selected network
   s           prepare a payment from the selected signing wallet
+  t           add, change, or remove an issued-asset trustline
 
-Payment flow:
+Write flow:
   form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
 
 The Rust TUI is an engineering/reference UI over fresnica-client. It does not
@@ -134,11 +136,19 @@ impl Options {
 enum Mode {
     Browse,
     Send(SendForm),
-    Review(PreparedPayment),
+    Trustline(TrustlineForm),
+    PaymentReview(PreparedPayment),
+    TrustlineReview(PreparedTrustline),
     Passcode {
-        prepared: PreparedPayment,
+        prepared: PreparedWrite,
         passcode: String,
     },
+}
+
+#[derive(Clone)]
+enum PreparedWrite {
+    Payment(PreparedPayment),
+    Trustline(PreparedTrustline),
 }
 
 struct SendForm {
@@ -176,6 +186,82 @@ impl SendForm {
             asset: self.asset.clone(),
             destination: self.destination.clone(),
             memo: (!self.memo.is_empty()).then(|| self.memo.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrustlineFormAction {
+    Add,
+    SetLimit,
+    Remove,
+}
+
+impl TrustlineFormAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::SetLimit => "limit",
+            Self::Remove => "remove",
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::Add => Self::Remove,
+            Self::SetLimit => Self::Add,
+            Self::Remove => Self::SetLimit,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Add => Self::SetLimit,
+            Self::SetLimit => Self::Remove,
+            Self::Remove => Self::Add,
+        }
+    }
+}
+
+struct TrustlineForm {
+    action: TrustlineFormAction,
+    asset: String,
+    limit: String,
+    active: usize,
+}
+
+impl TrustlineForm {
+    fn new() -> Self {
+        Self {
+            action: TrustlineFormAction::Add,
+            asset: String::new(),
+            limit: String::new(),
+            active: 0,
+        }
+    }
+
+    fn current_mut(&mut self) -> Option<&mut String> {
+        match self.active {
+            1 => Some(&mut self.asset),
+            2 => Some(&mut self.limit),
+            _ => None,
+        }
+    }
+
+    fn request(&self, wallet: &str) -> TrustlineRequest {
+        let action = match self.action {
+            TrustlineFormAction::Add => TrustlineAction::Add {
+                limit: (!self.limit.is_empty()).then(|| self.limit.clone()),
+            },
+            TrustlineFormAction::SetLimit => TrustlineAction::SetLimit {
+                limit: self.limit.clone(),
+            },
+            TrustlineFormAction::Remove => TrustlineAction::Remove,
+        };
+        TrustlineRequest {
+            wallet: Some(wallet.to_owned()),
+            asset: self.asset.clone(),
+            action,
         }
     }
 }
@@ -280,7 +366,9 @@ impl App {
 
     fn handle_key(&mut self, code: KeyCode) -> bool {
         let wallet_name = self.selected_wallet().name.clone();
-        let mut prepare = None;
+        let wallet_watch_only = self.selected_wallet().watch_only();
+        let mut payment_request = None;
+        let mut trustline_request = None;
         let mut submit = false;
 
         match &mut self.mode {
@@ -290,13 +378,23 @@ impl App {
                 KeyCode::Char('[') | KeyCode::Left => self.select_previous(),
                 KeyCode::Char(']') | KeyCode::Right => self.select_next(),
                 KeyCode::Char('s') => {
-                    if self.selected_wallet().watch_only() {
+                    if wallet_watch_only {
                         self.status =
                             "Selected wallet is watch-only; attach a signer before sending"
                                 .to_owned();
                     } else {
                         self.mode = Mode::Send(SendForm::new());
                         self.status = "Preparing payment".to_owned();
+                    }
+                }
+                KeyCode::Char('t') => {
+                    if wallet_watch_only {
+                        self.status =
+                            "Selected wallet is watch-only; attach a signer before changing trustlines"
+                                .to_owned();
+                    } else {
+                        self.mode = Mode::Trustline(TrustlineForm::new());
+                        self.status = "Preparing trustline change".to_owned();
                     }
                 }
                 _ => {}
@@ -309,17 +407,51 @@ impl App {
                 KeyCode::Tab | KeyCode::Down => form.active = (form.active + 1) % 4,
                 KeyCode::BackTab | KeyCode::Up => form.active = (form.active + 3) % 4,
                 KeyCode::Enter if form.active < 3 => form.active += 1,
-                KeyCode::Enter => prepare = Some(form.request(&wallet_name)),
+                KeyCode::Enter => payment_request = Some(form.request(&wallet_name)),
                 KeyCode::Backspace => {
                     form.current_mut().pop();
                 }
                 KeyCode::Char(character) => form.current_mut().push(character),
                 _ => {}
             },
-            Mode::Review(prepared) => match code {
+            Mode::Trustline(form) => match code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Trustline change cancelled before review".to_owned();
+                }
+                KeyCode::Tab | KeyCode::Down => form.active = (form.active + 1) % 3,
+                KeyCode::BackTab | KeyCode::Up => form.active = (form.active + 2) % 3,
+                KeyCode::Left if form.active == 0 => form.action = form.action.previous(),
+                KeyCode::Right if form.active == 0 => form.action = form.action.next(),
+                KeyCode::Char('a') if form.active == 0 => form.action = TrustlineFormAction::Add,
+                KeyCode::Char('l') if form.active == 0 => {
+                    form.action = TrustlineFormAction::SetLimit
+                }
+                KeyCode::Char('r') if form.active == 0 => form.action = TrustlineFormAction::Remove,
+                KeyCode::Enter if form.active == 0 => form.active = 1,
+                KeyCode::Enter
+                    if form.active == 1 && form.action == TrustlineFormAction::Remove =>
+                {
+                    trustline_request = Some(form.request(&wallet_name));
+                }
+                KeyCode::Enter if form.active == 1 => form.active = 2,
+                KeyCode::Enter => trustline_request = Some(form.request(&wallet_name)),
+                KeyCode::Backspace => {
+                    if let Some(value) = form.current_mut() {
+                        value.pop();
+                    }
+                }
+                KeyCode::Char(character) => {
+                    if let Some(value) = form.current_mut() {
+                        value.push(character);
+                    }
+                }
+                _ => {}
+            },
+            Mode::PaymentReview(prepared) => match code {
                 KeyCode::Char('y') | KeyCode::Enter => {
                     self.mode = Mode::Passcode {
-                        prepared: prepared.clone(),
+                        prepared: PreparedWrite::Payment(prepared.clone()),
                         passcode: String::new(),
                     };
                     self.status = "Enter Fresnica passcode; input is masked".to_owned();
@@ -330,11 +462,25 @@ impl App {
                 }
                 _ => {}
             },
+            Mode::TrustlineReview(prepared) => match code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.mode = Mode::Passcode {
+                        prepared: PreparedWrite::Trustline(prepared.clone()),
+                        passcode: String::new(),
+                    };
+                    self.status = "Enter Fresnica passcode; input is masked".to_owned();
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Trustline change cancelled after review".to_owned();
+                }
+                _ => {}
+            },
             Mode::Passcode { passcode, .. } => match code {
                 KeyCode::Esc => {
                     passcode.zeroize();
                     self.mode = Mode::Browse;
-                    self.status = "Payment cancelled before signing".to_owned();
+                    self.status = "Transaction cancelled before signing".to_owned();
                 }
                 KeyCode::Enter if passcode.is_empty() => {
                     self.status = "Fresnica passcode cannot be empty".to_owned();
@@ -348,11 +494,22 @@ impl App {
             },
         }
 
-        if let Some(request) = prepare {
+        if let Some(request) = payment_request {
             match self.client.prepare_payment(&request) {
                 Ok(prepared) => {
-                    self.mode = Mode::Review(prepared);
+                    self.mode = Mode::PaymentReview(prepared);
                     self.status = "Review the exact prepared payment before signing".to_owned();
+                }
+                Err(error) => self.status = error,
+            }
+        }
+
+        if let Some(request) = trustline_request {
+            match self.client.prepare_trustline(&request) {
+                Ok(prepared) => {
+                    self.mode = Mode::TrustlineReview(prepared);
+                    self.status =
+                        "Review the exact prepared trustline change before signing".to_owned();
                 }
                 Err(error) => self.status = error,
             }
@@ -363,7 +520,14 @@ impl App {
                 Mode::Passcode { prepared, passcode } => {
                     let submitted_passcode = passcode.clone();
                     passcode.zeroize();
-                    self.client.submit_payment(prepared, submitted_passcode)
+                    match prepared {
+                        PreparedWrite::Payment(prepared) => {
+                            self.client.submit_payment(prepared, submitted_passcode)
+                        }
+                        PreparedWrite::Trustline(prepared) => {
+                            self.client.submit_trustline(prepared, submitted_passcode)
+                        }
+                    }
                 }
                 _ => return false,
             };
@@ -416,7 +580,9 @@ impl App {
         match &self.mode {
             Mode::Browse => {}
             Mode::Send(form) => self.render_send_form(frame, form),
-            Mode::Review(prepared) => self.render_review(frame, prepared),
+            Mode::Trustline(form) => self.render_trustline_form(frame, form),
+            Mode::PaymentReview(prepared) => self.render_payment_review(frame, prepared),
+            Mode::TrustlineReview(prepared) => self.render_trustline_review(frame, prepared),
             Mode::Passcode { passcode, .. } => self.render_passcode(frame, passcode),
         }
     }
@@ -501,9 +667,12 @@ impl App {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let help = match &self.mode {
-            Mode::Browse => "q quit   r refresh   [ / ] switch wallet   s send",
+            Mode::Browse => "q quit   r refresh   [ / ] switch wallet   s send   t trustline",
             Mode::Send(_) => "type value   Tab/Up/Down field   Enter next/prepare   Esc cancel",
-            Mode::Review(_) => "y/Enter sign   n/Esc cancel",
+            Mode::Trustline(_) => {
+                "action: Left/Right or a/l/r   Tab field   Enter next/prepare   Esc cancel"
+            }
+            Mode::PaymentReview(_) | Mode::TrustlineReview(_) => "y/Enter sign   n/Esc cancel",
             Mode::Passcode { .. } => "Enter submit   Backspace edit   Esc cancel",
         };
         let body = format!("{}\n{help}", self.status);
@@ -541,7 +710,44 @@ impl App {
         );
     }
 
-    fn render_review(&self, frame: &mut Frame, prepared: &PreparedPayment) {
+    fn render_trustline_form(&self, frame: &mut Frame, form: &TrustlineForm) {
+        let area = popup_area(frame.area());
+        let limit_value = if form.action == TrustlineFormAction::Remove {
+            "(not used)"
+        } else if form.limit.is_empty() && form.action == TrustlineFormAction::Add {
+            "(default Fresnica limit)"
+        } else {
+            form.limit.as_str()
+        };
+        let fields = [
+            ("Action", form.action.label()),
+            ("Asset", form.asset.as_str()),
+            ("Limit", limit_value),
+        ];
+        let lines = fields
+            .iter()
+            .enumerate()
+            .map(|(index, (label, value))| {
+                let line = Line::from(format!("{label:<18} {value}"));
+                if index == form.active {
+                    line.style(Style::new().add_modifier(Modifier::BOLD))
+                } else {
+                    line
+                }
+            })
+            .chain(std::iter::once(Line::from("")))
+            .chain(std::iter::once(Line::from(
+                "Asset format: CODE:GISSUER. Add may leave limit empty for the default.",
+            )))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Prepare trustline change")),
+            area,
+        );
+    }
+
+    fn render_payment_review(&self, frame: &mut Frame, prepared: &PreparedPayment) {
         let review = &prepared.review;
         let mut lines = vec![
             Line::from(format!("Operation: {}", review.operation.label())),
@@ -569,6 +775,34 @@ impl App {
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(lines).block(Block::bordered().title("Review transaction")),
+            area,
+        );
+    }
+
+    fn render_trustline_review(&self, frame: &mut Frame, prepared: &PreparedTrustline) {
+        let review = &prepared.review;
+        let mut lines = vec![
+            Line::from(format!(
+                "Operation: ChangeTrust ({})",
+                review.operation.label()
+            )),
+            Line::from(format!(
+                "Wallet:    {} ({})",
+                review.wallet_name, review.source
+            )),
+            Line::from(format!("Asset:     {}", review.asset)),
+            Line::from(format!("Fee:       {} XLM", review.fee_xlm)),
+            Line::from(format!("Network:   {}", review.network)),
+        ];
+        if let Some(limit) = &review.limit {
+            lines.insert(3, Line::from(format!("Limit:     {limit}")));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from("Press y/Enter to continue to signing."));
+        let area = popup_area(frame.area());
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Review trustline change")),
             area,
         );
     }
@@ -675,5 +909,21 @@ mod tests {
         assert_eq!(request.asset, "XLM");
         assert_eq!(request.destination, "Alice");
         assert_eq!(request.memo.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn trustline_form_builds_shared_service_request() {
+        let mut form = TrustlineForm::new();
+        form.action = TrustlineFormAction::SetLimit;
+        form.asset = "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".to_owned();
+        form.limit = "2500".to_owned();
+        let request = form.request("primary");
+        assert_eq!(request.wallet.as_deref(), Some("primary"));
+        assert_eq!(
+            request.action,
+            TrustlineAction::SetLimit {
+                limit: "2500".to_owned()
+            }
+        );
     }
 }
