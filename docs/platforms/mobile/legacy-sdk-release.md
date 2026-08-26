@@ -2,9 +2,9 @@
 
 Status: **frozen historical contract for `mobile-sdk-v0.1.0` only**.
 
-This document records the transitional `mobile-sdk-v0.1.0` release that preceded the generalized Native-SDK/framework-adapter split. It is retained for audit/migration reference only. New Mobile integrations use the current generalized Native SDK baseline from `docs/mobile-sdk-usage.md` (`native-sdk-v0.2.1` at the time of this update).
+This document records the transitional `mobile-sdk-v0.1.0` release that preceded the generalized Native-SDK/framework-adapter split. It is retained for audit/migration reference only. New Mobile integrations use the current generalized Native SDK baseline from `docs/platforms/mobile/sdk-usage.md` (`native-sdk-v0.2.1` at the time of this update).
 
-The finalized framework boundary is defined in `docs/mobile-framework-adapter-contract.md`; the generalized binary release policy is `docs/native-sdk-release.md`. Do not add new `mobile-sdk-v*` releases. The old release workflow is kept in Git history/tagged source, not as an active `main` publisher.
+The finalized framework boundary is defined in `docs/platforms/mobile/framework-adapter.md`; the generalized binary release policy is `docs/sdk/native-release.md`. Do not add new `mobile-sdk-v*` releases. The old release workflow is kept in Git history/tagged source, not as an active `main` publisher.
 
 ## Versioning
 
@@ -43,7 +43,7 @@ The Mobile application should query/report these versions in diagnostics and rej
 - React Native adapter implementation: conventional/legacy native module
 - Android RN compile-only baseline: React Native `0.74.2`
 
-The RN compile baseline is **not** a statement that the adapter has already been validated against React Native 0.87. New-Architecture/TurboModule migration is governed by `docs/react-native-upgrade-playbook.md`; Core/UniFFI/security contracts must remain unchanged during that migration.
+The RN compile baseline is **not** a statement that the adapter has already been validated against React Native 0.87. New-Architecture/TurboModule migration is governed by `docs/platforms/mobile/react-native-upgrade-playbook.md`; Core/UniFFI/security contracts must remain unchanged during that migration.
 
 `mobile-sdk-v0.1.0` predates the finalized Native-SDK/framework-adapter packaging split. Its artifact layout below is therefore a **transitional integration baseline**, not the target layout for future releases.
 
@@ -100,7 +100,7 @@ Source tree / adapter package
 
 The Native SDK binary must not contain React Native, Flutter, or other framework-specific code. A native Android/iOS consumer uses the Native SDK directly.
 
-React Native/Flutter consumers follow `docs/mobile-framework-adapter-contract.md`: compile the canonical adapter once against the consumer's framework/toolchain, store the generated adapter binary and compatibility manifest, and do not compile adapter source during ordinary app builds.
+React Native/Flutter consumers follow `docs/platforms/mobile/framework-adapter.md`: compile the canonical adapter once against the consumer's framework/toolchain, store the generated adapter binary and compatibility manifest, and do not compile adapter source during ordinary app builds.
 
 A future Swift Package or Maven publication may wrap the native binary layout, but packaging convenience must not change the Core/mobile API contract.
 
@@ -113,9 +113,9 @@ The SDK release does not package the application-side donor TypeScript from PR #
 - account provisioning coordinator;
 - signer Reveal/Export product coordinator.
 
-Those belong in the independent Mobile application. See `docs/mobile-app-migration-pr81-pr84.md` for absorption guidance.
+Those belong in the independent Mobile application. See `docs/platforms/mobile/app-migration-pr81-pr84.md` for absorption guidance.
 
-Framework adapter source is also not application product logic. It remains Fresnica-owned canonical glue and is compiled by the consuming framework project according to `docs/mobile-framework-adapter-contract.md`.
+Framework adapter source is also not application product logic. It remains Fresnica-owned canonical glue and is compiled by the consuming framework project according to `docs/platforms/mobile/framework-adapter.md`.
 
 ## Historical release marker
 
@@ -123,9 +123,9 @@ Framework adapter source is also not application product logic. It remains Fresn
 
 ## Consumer rule for `fresnica-mobile`
 
-The independent Mobile project must not pin this legacy Mobile SDK. Use the generalized dependency record from `docs/mobile-sdk-usage.md` (current baseline `native-sdk-v0.2.1`, Native Binding API 2, SDK API 3, Core Client API 3).
+The independent Mobile project must not pin this legacy Mobile SDK. Use the generalized dependency record from `docs/platforms/mobile/sdk-usage.md` (current baseline `native-sdk-v0.2.1`, Native Binding API 2, SDK API 3, Core Client API 3).
 
-For React Native, Mobile must additionally record the generated adapter compatibility manifest defined in `docs/mobile-framework-adapter-contract.md`. A stale framework/Binding-API combination should fail CI with an adapter-rebuild requirement; CI must not silently rebuild the adapter on every application build.
+For React Native, Mobile must additionally record the generated adapter compatibility manifest defined in `docs/platforms/mobile/framework-adapter.md`. A stale framework/Binding-API combination should fail CI with an adapter-rebuild requirement; CI must not silently rebuild the adapter on every application build.
 
 ## Release acceptance criteria
 

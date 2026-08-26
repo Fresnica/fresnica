@@ -247,7 +247,7 @@ The Python runtime discovers the Rust Core in this order:
 When Rust Core is active:
 
 ```text
-Python TUI / services
+Python TUI / capability layer
         |
         | identity / signer envelope / credentials / transaction XDR
         v

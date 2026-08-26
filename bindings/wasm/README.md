@@ -22,7 +22,7 @@ The encrypted signer envelope is opaque application data and may be persisted by
 
 No browser biometric/passkey persistence policy is implied by this first WASM package. A WebAuthn/passkey authorization design requires a separate security review.
 
-See `../../docs/wasm-sdk-security.md` for the full boundary.
+See `../../docs/platforms/web/wasm-security.md` for the full boundary.
 
 ## Public surface
 

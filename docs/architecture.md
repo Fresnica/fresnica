@@ -1,170 +1,126 @@
 # Fresnica Architecture
 
-## Current Phase
+## Purpose
 
-Python reference implementation plus production Rust Core slices.
+This document defines the top-level architecture shared by Fresnica products. Detailed semantics live in the linked contracts; this file is the map, not a duplicate specification.
 
-The Python implementation remains a behavioral authority and source of stable test vectors while production semantics are moved into Rust Core.
+## Canonical vocabulary
 
-## Architecture
+Fresnica uses four architectural terms across projects:
 
-```text
-Clients / Platform Layers
-Mobile / Desktop / CLI / TUI / SDK
-            |
-      CoreClientApi
-            |
-         Rust Core
-            |
-      Stellar Adapter
-            |
-      Stellar Network
-```
+### Application Flow
 
-Platform clients own UI, persistence, operating-system integration, network state, and lifecycle. Rust Core owns Stellar identity parsing, cryptography, signer behavior, transaction-signing semantics, and security-critical signer identity checks.
+A user goal and its product orchestration.
 
-`CoreClientApi` is the transport-neutral library boundary. Process JSON, UniFFI, JNI, Swift, C ABI, or other bindings adapt native types to this same facade rather than reimplementing Core behavior.
+Examples: Send, Manage Accounts, Trade, Anchor Deposit, Dapp Approval.
 
-## Mobile / Core boundary
+A Flow owns **why**, **when**, product sequence, confirmation points, transient UI state and product-facing outcomes.
 
-For `fresnica-mobile`, the Xaman-derived platform layer may continue to own:
+A platform may organize Flows however it likes. In `fresnica-mobile`, a `Feature` is the natural code/product unit that implements one or more Application Flows. Rust/Cargo code should avoid using `Feature` as the cross-platform architecture term because `feature` already has a technical meaning there.
 
-- iOS Keychain / Android Keystore integration;
-- biometrics and system authentication;
-- Realm/database encryption and persistence;
-- app lock/session behavior;
-- React Native UI and platform lifecycle;
-- Horizon/RPC state and current account signer authorization.
+See [Application Flows](application-flows.md).
 
-Rust Core is authoritative for protected software-signer formats, key derivation, software/external signer semantics, identity verification, transaction hashes, signatures, and re-protection.
+### Application Capability
 
-Mobile stores Core-generated encrypted signer envelopes as opaque data. System authentication authorizes signer use; it does not define a second signer encryption format.
+A reusable wallet/application semantic contract below product UI.
 
-See [Mobile / Rust Core Vault Contract](mobile-core-contract.md), [Client / Rust Core Security Contract](client-core-security.md), and [Wallet Protection Model](protection.md).
+Examples: Account, Signer, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination.
 
-## Core Concepts
+A Capability defines **what an operation means**: stable identities, inputs, outputs, invariants, lifecycle and errors. It does not require a shared source implementation.
 
-### Account Identity
+See [Application Capabilities](application-capabilities.md).
 
-An account identity is the chain object the user observes.
+### Fresnica Core
 
-Current Core identity parsing recognizes:
+The Rust cryptographic/security authority.
 
-- classic Stellar `G...` identities;
-- Soroban contract `C...` identities.
+Core owns cryptographic meaning, signer identity derivation/verification, protected signer envelopes, transaction hashing/signing and stable crypto/security errors. `Core` is reserved for this meaning in cross-project documentation.
 
-Account identity contains no implication that Fresnica owns a private key for it.
+See [Core Security Boundary](core-security-boundary.md).
 
-A watch-only account is simply an account identity without a locally available signer.
+### Infrastructure / Port
 
-### Signer
+A platform/runtime mechanism used by a Flow or Capability: Horizon/RPC, a Stellar SDK, Realm/SQLite, Keychain/Keystore, system auth, notifications, deep links, browser transports and similar facilities.
 
-A signer is a capability that can produce or authorize a signature. It is not the account record.
+Mechanisms are platform-specific unless a separate contract standardizes their semantic result.
 
-Supported/future signer forms include:
-
-- protected software signer;
-- hardware wallet;
-- mobile/platform-backed external Ed25519 signer;
-- future passkey/contract authorization.
-
-For a simple master-key software wallet:
+## Layering
 
 ```text
-Account GABC...
-Signer  GABC...
+Product / App
+     |
+     v
+Application Flows
+user intent / product sequence / UI state
+     |
+     v
+Application Capabilities
+shared wallet semantics / stable contracts
+     |
+     +-------------------+--------------------+--------------------+
+     |                   |                    |                    |
+     v                   v                    v                    v
+Fresnica SDK/Core    Stellar SDK/Gateway  Repositories        Platform ports
+security authority   chain/protocol mech. durable state       OS/runtime mech.
 ```
 
-For Stellar additional signers or multisig:
+Dependency direction should remain downward. A Flow may compose multiple Capabilities. A Capability may use Core/SDK and narrow infrastructure ports. UI code must not become a crypto or protocol authority.
+
+## Shared semantics, independent implementations
+
+The architecture standardizes behavior rather than source code.
 
 ```text
-Account GABC...
-Signer  G111...
-Signer  G222...
+Payment Capability Contract
+        |
+        +--> Rust implementation (`clients/rust-client`)
+        +--> Mobile implementation (for example Stellar JS SDK + Native SDK)
+        +--> Web implementation
+        +--> Desktop implementation
 ```
 
-Therefore generic signing APIs validate the **expected signer public key**, not an assumed wallet/account public key. Whether a signer is currently authorized for an account depends on ledger state and client policy and is not encoded into a local software-signer envelope.
+A platform is free to choose its implementation language, Stellar SDK, storage engine and UI framework. A conforming implementation preserves the normative capability semantics and Core security invariants.
 
-### Protected Software Signer
+The current Rust `fresnica-client` is a reusable Rust implementation and reference implementation for many Capabilities. It is not mandatory runtime code for every Fresnica product.
 
-A protected software signer contains:
+See [Platform Implementation](platform-implementation.md).
+
+## Product ownership
+
+UI/UX is intentionally not standardized.
+
+For example, the same Send semantics may appear as:
 
 ```text
-signer_public_key
-opaque protected envelope
+CLI      command -> textual review -> confirmation
+TUI      form/panel -> review -> confirmation
+Mobile   screens -> review -> system-auth/passcode UX
+Web      page/modal -> browser-appropriate authorization UX
+Desktop  native/professional workflow
 ```
 
-The envelope protects mnemonic or `S...` recovery material. It is owned semantically by the signer, not by the Account record.
+The shared contract is underneath those experiences.
 
-This permits:
+## Security authority
 
-- account creation with a software signer;
-- watch-only account with no signer;
-- later attachment of matching signing material;
-- removal of local signing material without deleting the account;
-- future multiple signers per account.
-
-### Wallet
-
-"Wallet" is a user/product aggregate, not a cryptographic primitive that must collapse account identity and signer state into one object.
-
-A client wallet may contain or reference:
+The architecture must preserve these non-negotiable distinctions:
 
 ```text
-Wallet
-  AccountRecord
-  zero or more SignerRecords
-  network / name / UI metadata
+Account identity != Signer capability != Recovery source
+System Auth != Fresnica passcode
+Product authorization != cryptographic meaning
 ```
 
-Core APIs therefore operate on account identities and signer capabilities directly where security semantics require it.
+Watch-only is an account with no applicable local signer capability. Attaching signer/recovery material must verify identity inside Core/SDK before durable state changes. Reveal/Export is a higher-privilege boundary than routine signing.
 
-### Transaction Intent
+See [Core Security Boundary](core-security-boundary.md).
 
-Transaction flow:
+## Specification evolution
 
-```text
-Intent
-  |
-Build Transaction
-  |
-Review
-  |
-Select authorized signer(s)
-  |
-Sign
-  |
-Submit
-```
+Application Capability contracts evolve from real platform work. Mobile, Web, Desktop or Rust implementations may propose new common semantics when they discover a stable cross-platform requirement.
 
-Transaction construction and ledger authorization may be client/network concerns, while cryptographic hash/signature semantics remain Core-authoritative.
+The rule is:
 
-### System Authentication
+> **Promote stable semantics into shared contracts; keep platform mechanisms local.**
 
-System authentication is signer authorization and remains independent from account identity and signer cipher format.
-
-For protected software signers, successful platform authorization may release a per-signer `WalletUnlockKey`. For hardware/external signers, it may authorize provider invocation without any local Core private material.
-
-### Re-protection
-
-Changing the Fresnica app passcode re-protects software signer envelopes inside Core. Clients must not implement password rotation by exporting plaintext recovery material and encrypting it themselves.
-
-Global passcode rotation across multiple signers is client orchestration around an atomic/recoverable batch of Core `reprotect` operations.
-
-## Rust Core clients
-
-- Mobile
-- Desktop
-- CLI
-- TUI
-- SDK
-
-Clients must consume the same `CoreClientApi` identity, protection, signing, and error semantics rather than creating parallel cryptographic implementations.
-
-The process binary is only one adapter over this library API and should contain transport concerns only.
-
-## History Cache
-
-History is a network-and-account-scoped cache of raw Horizon operations, not a full-chain indexer. The default cache retains the newest 2,000 operations; users may opt into keeping all history that their Horizon source still exposes. Empty caches are built from the current head backwards, while later refreshes always move from the newest local cursor forward to the current head.
-
-See [History Cache Model](history-cache.md) and the [Architecture Decision Log](decision-log.md).
+A product does not need to implement every defined Capability, and a new platform-specific capability does not need to wait for a fully normative contract before useful implementation work begins.

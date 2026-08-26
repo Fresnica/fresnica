@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/native-sdk-release.yml"
-      - "docs/native-sdk-release.md"
+      - "docs/sdk/native-release.md"
       - "bindings/native/**"
       - "sdk/rust/**"
       - "core/rust/**"
@@ -313,7 +313,7 @@ jobs:
           - Android: minSdk 26, four native ABIs, framework-neutral AAR; raw-AAR host dependencies are recorded in the release manifest
           - Apple: FresnicaSDK + FresnicaSDKFFI XCFramework package (iOS + macOS)
 
-          React Native/Flutter adapters and application product code are intentionally not embedded in these Native SDK binaries. See docs/native-sdk-release.md in the tagged source tree.
+          React Native/Flutter adapters and application product code are intentionally not embedded in these Native SDK binaries. See docs/sdk/native-release.md in the tagged source tree.
           EOF_NOTES
 
           gh release create "$TAG" \

@@ -12,7 +12,7 @@ The canonical term is:
 
 In ordinary discussion, **Capabilities** is sufficient.
 
-The old Rust-side term `Service` and the Fresnica Mobile term `Core` may still appear in existing code and older documents, but they should not be used as the cross-platform architectural name going forward.
+The old Rust-side term `Service` and the Fresnica Mobile term `Core` may still appear in existing code and older documents, but they should not be used as the cross-platform architectural name going forward. The product layer is called **Application Flows**; Mobile may continue to organize its Flow implementations as local `Feature`s.
 
 ---
 
@@ -51,31 +51,34 @@ Application Capabilities define those common semantics.
 
 Fresnica uses the following terms consistently.
 
-### 2.1 Feature
+### 2.1 Application Flow
 
-A **Feature** is a user-facing product capability.
+An **Application Flow** is a user goal plus product orchestration. In ordinary discussion, **Flow** is sufficient.
 
 Examples:
 
 - onboarding;
-- accounts;
+- account management;
 - send;
 - portfolio;
 - history;
 - trustlines;
-- SDEX;
-- anchor;
-- security;
-- settings;
-- future dApp interaction.
+- SDEX trading;
+- anchor deposit/withdraw;
+- security settings;
+- future dApp interaction/approval.
 
-A Feature owns product intent, interaction sequence, UI state and product-facing outcome mapping.
+A Flow owns product intent, interaction sequence, confirmation boundaries, transient UI state and product-facing outcome mapping.
 
-A Feature answers:
+A Flow answers:
 
-> **Why is this operation happening, when should it happen, and how should the product present it?**
+> **Why is this operation happening, when should it happen, and how should the product guide the user?**
 
-Features are free to differ between TUI, Mobile, Web and Desktop.
+Flows are free to differ between TUI, Mobile, Web and Desktop.
+
+`Feature` is a platform-local organization term. In Fresnica Mobile, a Feature naturally implements one or more Application Flows. It is not the cross-project architectural name.
+
+See [Application Flows](application-flows.md).
 
 ### 2.2 Application Capability
 
@@ -125,7 +128,7 @@ It is not the whole Application Capability layer.
 
 ### 2.5 Infrastructure / Ports
 
-Infrastructure provides mechanisms required by Capabilities or Features, for example:
+Infrastructure provides mechanisms required by Capabilities or Flows, for example:
 
 - Horizon/RPC/network transport;
 - Realm/SQLite/file persistence;
@@ -163,7 +166,7 @@ The Capability contract must not prescribe presentation unless presentation chan
 Product / App
      |
      v
-Features
+Application Flows
 why / when / product sequence / UI state
      |
      v
@@ -259,7 +262,7 @@ Examples:
 
 Stable error categories that product layers can map into local UX.
 
-A Feature should not need to parse Horizon error strings, JavaScript exceptions or Rust implementation details.
+A Flow should not need to parse Horizon error strings, JavaScript exceptions or Rust implementation details.
 
 ### State / lifecycle
 
@@ -343,7 +346,7 @@ Canonical IDs are documentation/conformance identifiers; they do not require imp
 | `sdex` | SDEX | Normative |
 | `anchor` | Anchor | Normative |
 | `signing` | Signing Coordination | Normative |
-| `security` | Security Settings | Defined |
+| `security` | Application Security | Defined |
 | `dapp` | Dapp Interaction | Defined |
 | `external-signer` | Hardware / External Signer Interaction | Defined |
 | `network` | Network / Gateway | Defined |
@@ -455,7 +458,7 @@ Storage/cache mechanisms remain implementation-specific.
 
 ### 7.9 Contacts / Destination Resolution — Normative
 
-Defines reusable contact/destination resolution semantics used by product Features.
+Defines reusable contact/destination resolution semantics used by product Flows.
 
 Storage implementation and contact UX remain product/platform-owned.
 
@@ -491,34 +494,34 @@ Current common scope includes:
 - transaction status;
 - common SEP-12 customer status/update handoff.
 
-SEP-specific protocol rules belong here rather than in individual screens.
+SEP-specific protocol rules belong here rather than in individual Flows/screens.
 
-Anchor interactive/KYC UX remains Feature-owned.
+Anchor interactive/KYC UX remains Flow-owned.
 
 SEP-45 contract-account authentication remains a separate capability boundary until its execution semantics are deliberately specified.
 
 ### 7.12 Signing Coordination — Normative
 
-Defines the application-level authorization/signing sequence shared by transaction-producing Features.
+Defines the application-level authorization/signing sequence shared by transaction-producing Flows.
 
-A Feature decides **that** signing is needed.
+A Flow decides **that** signing is needed.
 
 Signing coordination decides **which authorized local/external signer capability is used and when authorization is required**, then invokes the platform authorization capability/port.
 
 The platform remains free to implement biometric, passcode, hardware-confirmation or other authorization UX according to its policy. Fresnica SDK/Core decides the cryptographic signing meaning.
 
-No Feature may invent its own incompatible passcode-vs-biometric signing semantics.
+No Flow may invent its own incompatible passcode-vs-biometric signing semantics.
 
-### 7.13 Security Settings — Defined
+### 7.13 Application Security — Defined
 
-Defines the product-facing scope of application security configuration, for example:
+Defines the reusable application boundary needed by security-related Flows, for example:
 
-- change application passcode flow;
-- enable/disable system authentication;
-- lock/session policy;
-- recovery UX.
+- passcode verification/re-protection coordination;
+- system-auth availability/enrollment/removal capabilities;
+- application lock/session authorization signals;
+- secure cleanup/recovery coordination inputs/results.
 
-Detailed implementation remains platform-specific because secure storage and system-auth mechanisms differ.
+Detailed implementation remains platform-specific because secure storage and system-auth mechanisms differ. The **Security Settings Flow** owns screens, user confirmation and product policy.
 
 Fresnica Core cryptographic primitives are not owned by this capability.
 
@@ -602,11 +605,11 @@ Do not introduce cross-platform abstractions merely to make implementations look
 
 ---
 
-## 10. Feature / Capability boundary example: Send
+## 10. Flow / Capability boundary example: Send
 
-All products may expose a `Send` Feature.
+All products may expose a `Send` Application Flow. A platform may package that Flow inside a local Feature/module/screen architecture.
 
-The Feature may own:
+The Flow may own:
 
 ```text
 recipient form
@@ -643,12 +646,12 @@ Rust TUI
      -> Rust Payment/Transaction capability implementation
 
 Mobile
-  Send Feature
+  Send Feature -> Send Flow
      -> Mobile Payment/Transaction capability implementation
         using Stellar JS SDK + Fresnica Native SDK
 
 Web
-  Send Feature
+  Send Flow
      -> Web capability implementation
         using JavaScript/WASM as appropriate
 ```
@@ -748,7 +751,7 @@ Likewise, Fresnica Mobile may keep a local `core/` folder if useful internally, 
 
 The compact rule for all Fresnica products is:
 
-> **Feature defines user intent and product sequence. Application Capabilities define reusable wallet semantics. Platform code provides mechanisms. Fresnica Core/SDK remains the authority for cryptographic meaning.**
+> **Application Flows define user intent and product sequence. Application Capabilities define reusable wallet semantics. Platform code provides mechanisms. Fresnica Core/SDK remains the authority for cryptographic meaning.**
 
 And the implementation rule is:
 

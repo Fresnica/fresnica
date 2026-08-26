@@ -2,7 +2,7 @@
 
 Updated: 2026-08-26
 
-This is the compact continuation document for Fresnica. It records the current architecture, product invariants, SDK direction, Mobile handoff boundary and the next major work. Read `roadmap.md` together with this file before starting a new phase.
+This is the compact continuation document for Fresnica. It records current implementation state and near-term work. Architecture terminology is normative in `docs/README.md` and the five common contracts; read those before using older implementation terminology in this handoff.
 
 ## Repository State
 
@@ -22,48 +22,48 @@ Do not treat a SHA in this handoff as the permanent head. Verify `main` and curr
 
 ## Current Strategic Direction
 
-The project is now **SDK-first and multi-platform**.
+The project is now **multi-platform with shared semantic contracts**.
 
-The near-term sequence is:
+The canonical product architecture is:
+
+```text
+Application Flows
+  user goal / product sequence / UI state
+        |
+        v
+Application Capabilities
+  shared wallet semantics
+        |
+        +----------------------+----------------------+------------------+
+        |                      |                      |                  |
+        v                      v                      v                  v
+Fresnica SDK / Core       Stellar SDK/Gateway   Repositories       Platform ports
+crypto/security authority chain mechanisms       durable state      OS/runtime mechanisms
+```
+
+The SDK delivery chain remains independently important:
 
 ```text
 Rust Core
-  -> stable universal SDK contract
+  -> stable universal SDK
   -> compiled Native SDKs / WASM package
-  -> canonical framework adapter source
-  -> one-time consumer-side adapter compilation
-  -> reusable wallet functional coverage / SEP alignment
-  -> Mobile / Desktop / Web wallet experience
+  -> optional framework adapters
+  -> platform Capability implementations
+  -> product Application Flows
 ```
 
-The universal SDK, generalized Native SDK release and canonical one-time React Native adapter path are now established. The independent React Native product can start from `mobile-sdk-usage.md` without waiting for more Core infrastructure. This repository continues reusable SDK/Core/SEP/provider work; `fresnica-mobile` owns product/application development.
+The universal SDK, generalized Native SDK release and canonical one-time React Native adapter path are established. The independent React Native product can start from `docs/platforms/mobile/sdk-usage.md` without waiting for more Core infrastructure. Mobile may implement Capabilities with Stellar JS SDK + Native SDK + Mobile code; it is not required to link `fresnica-client`.
 
 ## Target Layering
 
-```text
-                         Rust Core
-                            |
-                            v
-               Stable SDK API / DTO / errors
-                    /                 \
-                   /                   \
-          Native SDK binaries          WASM SDK
-      Android / Apple / Win /          Web/browser
-          Linux / macOS                   |
-                   |                      |
-             native application       web application
-                   |
-          framework adapter source
-       RN / Flutter / Electron / ...
-                   |
-        compile once in consumer env
-                   |
-          generated adapter binary
-                   |
-             product application
-```
+The normative layering is defined by:
 
-The shared contract is semantic, not a requirement that every target use the same binary format.
+- `docs/application-flows.md`;
+- `docs/application-capabilities.md`;
+- `docs/core-security-boundary.md`;
+- `docs/platform-implementation.md`.
+
+`fresnica-client` is the Rust reference/reusable Capability implementation used by CLI/TUI. Fresnica Core remains the cryptographic authority; Application Capabilities are not another crypto Core.
 
 ## Universal SDK Rules
 
@@ -106,11 +106,11 @@ Do not copy Mobile security assumptions blindly into browsers. Browser key prote
 
 Web may consume WASM directly. Add framework glue only where a real framework integration requires it.
 
-Passkey smart accounts are explicitly **not** a WebAuthn wrapper around `WalletUnlockKey`. `passkey-smart-account.md` defines them as `C...` contract accounts with provider/on-chain authorization. The first interoperability target is Stellar `smart-account-kit`; keep that integration outside protected Ed25519 signer records and outside Core platform-auth APIs. The provider boundary under `providers/smart-account-kit` is pinned to upstream 0.6.2 plus the published 2026-07-09 Protocol 27 Testnet deployment. Local mock conformance is green, and on 2026-08-25 the localhost browser harness completed a real WebAuthn/Testnet create/connect/sign-and-submit flow. Its verified auth-XDR/context-rule fixture is checked in as `spec/test-vectors/smart-account-auth-v1.json`.
+Passkey smart accounts are explicitly **not** a WebAuthn wrapper around `WalletUnlockKey`. `docs/capabilities/passkey-smart-account.md` defines them as `C...` contract accounts with provider/on-chain authorization. The first interoperability target is Stellar `smart-account-kit`; keep that integration outside protected Ed25519 signer records and outside Core platform-auth APIs. The provider boundary under `providers/smart-account-kit` is pinned to upstream 0.6.2 plus the published 2026-07-09 Protocol 27 Testnet deployment. Local mock conformance is green, and on 2026-08-25 the localhost browser harness completed a real WebAuthn/Testnet create/connect/sign-and-submit flow. Its verified auth-XDR/context-rule fixture is checked in as `spec/test-vectors/smart-account-auth-v1.json`.
 
 ## Framework Adapter Contract
 
-Authoritative document: `mobile-framework-adapter-contract.md`.
+Authoritative document: `docs/platforms/mobile/framework-adapter.md`.
 
 Fresnica owns and publishes **canonical adapter source/reference implementation**. The framework adapter is not part of the Native SDK binary.
 
@@ -231,9 +231,9 @@ Future `fresnica-mobile` owns:
 - Reveal/Export UX;
 - hardware signer UX.
 
-PR #81-#84 application-side TypeScript remains migration/reference material until the independent Mobile project absorbs the required behavior. See `mobile-app-migration-pr81-pr84.md`.
+PR #81-#84 application-side TypeScript remains migration/reference material until the independent Mobile project absorbs the required behavior. See `docs/platforms/mobile/app-migration-pr81-pr84.md`.
 
-The Mobile onboarding order is now executable and documented in `mobile-sdk-usage.md`:
+The Mobile onboarding order is now executable and documented in `docs/platforms/mobile/sdk-usage.md`:
 
 1. pin an exact React Native version;
 2. pin `native-sdk-v0.2.1` / Native Binding API 2 / matching RN adapter source 0.2.0;
@@ -248,7 +248,7 @@ The Mobile onboarding order is now executable and documented in `mobile-sdk-usag
 
 Desktop is no longer a separate architecture problem. It should use the same universal SDK contract.
 
-The direct-consumer contract is now explicit in `desktop-sdk-contract.md`:
+The direct-consumer contract is now explicit in `docs/platforms/desktop/sdk-contract.md`:
 
 - Rust desktop clients consume `fresnica-sdk` directly;
 - macOS Swift reuses the compiled `FresnicaSDK` packaging; the universal macOS slices passed real-Xcode validation on 2026-08-25;
@@ -265,9 +265,9 @@ The Rust CLI is substantially implemented and remains the reference native comma
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
 The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking, an explicit reviewed withdrawal-payment handoff, and a shared SEP-12 customer status/common-update handoff. SEP-45 contract-account execution remains separate; uncommon SEP-12 nested-structure + `/customer/files` workflows remain follow-up work when required by a concrete anchor.
 
-A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, payment/trustline prepare-review-submit semantics, SDEX offer/market services, SEP-12 customer handoff, and the shared SEP-1/SEP-10/SEP-6/SEP-24 anchor protocol boundary. Shared service DTOs should remain transport-neutral; presentation clients do not own Horizon/anchor HTTP parsing or SEP challenge validation. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
+A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, Account/Balance/History Capability implementations, UI-free Transaction orchestration, pending-transaction protection, Payment/Trustline semantics, SDEX Capability implementations, SEP-12 customer handoff, and the shared SEP-1/SEP-10/SEP-6/SEP-24 Anchor Capability boundary. Shared Capability DTOs should remain transport-neutral; presentation clients do not own Horizon/anchor HTTP parsing or SEP challenge validation. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
-Mobile should mirror this same application-layer shape rather than inventing a separate product architecture: React Native screens/state -> Mobile application services -> Realm/network/platform adapters + Fresnica Native SDK. Reuse the service responsibilities and wallet semantics where they are common, but do not require Mobile to link the concrete `fresnica-client` Rust implementation; persistence technology, platform lifecycle and product orchestration remain application-owned.
+Mobile uses its Feature-first organization to implement Application Flows, and those Flows consume Mobile Application Capability implementations plus Realm/network/platform ports and the Fresnica Native SDK. Reuse the shared Capability semantics where they are normative, but do not require Mobile to link the concrete `fresnica-client` Rust implementation; implementation language, persistence technology, platform lifecycle and UI/UX remain application-owned.
 
 The native Rust TUI lives at `clients/rust-tui`. It consumes `fresnica-client` rather than importing CLI command handlers. Its current reference slice includes:
 
@@ -276,13 +276,15 @@ The native Rust TUI lives at `clients/rust-tui`. It consumes `fresnica-client` r
 - balances/liabilities;
 - recent account activity;
 - manual refresh;
-- reviewed XLM/issued-asset payment preparation through the shared payment service;
+- reviewed XLM/issued-asset payment preparation through the shared Rust Payment Capability implementation;
 - masked passcode entry and SDK-backed payment submission, including shared pending-transaction protection;
 - reviewed trustline add/limit/remove preparation and submission through the same shared client layer;
-- reviewed SDEX BUY/SELL offer creation, offer update and offer cancellation through shared offer services;
-- typed current open-offer display from the shared SDEX read service.
+- reviewed SDEX BUY/SELL offer creation, offer update and offer cancellation through shared Rust SDEX Capability implementations;
+- typed current open-offer display from the shared Rust SDEX Capability implementation;
+- pair-scoped market view combining shared order book, recent pair trades and 1h candles;
+- exact BID/BUY vs ASK/SELL presentation using the shared SDEX price/amount semantics.
 
-Richer pair/orderbook screens remain follow-up TUI work. Terminal interaction, confirmation state and passcode entry remain presentation-owned and must not be copied from CLI command handlers.
+Further terminal views such as account-fill history remain optional product work. Terminal interaction, confirmation state and passcode entry remain presentation-owned and must not be copied from CLI command handlers.
 
 ## Python Wallet Reference
 
@@ -325,10 +327,9 @@ Full asset identity remains authoritative: classic issued assets are `CODE:GISSU
 
 ## SEP / Anchor Policy
 
-The anchor separation remains:
+The canonical cross-platform name is the **Anchor Application Capability**. Existing Rust symbols such as `AnchorService` / `AnchorTransferService` are implementation names and do not define the architecture.
 
-- `AnchorService`: protocol/transport operations such as SEP-1, SEP-10, SEP-6, SEP-24;
-- `AnchorTransferService`: wallet-facing protocol selection, field planning and response interpretation.
+The Capability covers protocol/transport semantics such as SEP-1, SEP-10, SEP-6 and SEP-24 plus wallet-facing protocol selection, field planning and normalized response interpretation.
 
 Current reference behavior:
 
@@ -347,7 +348,7 @@ Policy going forward:
 
 > Follow Stellar SEP standards and official ecosystem behavior where applicable; do not invent product-specific protocol substitutes merely to make a UI flow appear complete.
 
-SEP-12 or other SEPs should be added when product requirements justify them and should remain protocol/service behavior below the UI.
+SEP-12 or other SEPs should be added when product requirements justify them and should remain Anchor Capability behavior below Application Flows/UI.
 
 ## Existing Wallet Product Invariants
 
@@ -395,23 +396,21 @@ Real-browser validation exposed upstream `smart-account-kit` 0.6.2 requesting We
 
 ## Immediate Next Work
 
-The infrastructure handoff is now split cleanly between SDK maintenance and product work:
+The current architecture/documentation phase is intentionally a stabilization boundary:
 
-1. **Mobile can start independently**: follow `mobile-sdk-usage.md`, pin `native-sdk-v0.2.1`, compile/store the RN adapter binaries once, pass the compatibility check and prove `FresnicaCore.parseAccount` on Android/iOS.
-2. **Mobile owns product/application migration**: absorb #81-#84 Account/Signer/Recovery-Source/Realm/provisioning/passcode/export behavior in `fresnica-mobile`; use one device System Auth Domain and the v0.2 `deriveMnemonicSigner` contract without moving crypto or WalletUnlockKey policy into JavaScript.
-3. **Fresnica keeps SDK evolution additive/released**: Core/SDK/native changes continue here and reach Mobile only through reviewed release/version contracts; normal Mobile builds never compile Rust/UniFFI.
-4. **Wallet standards continue below product UI**: the first shared SEP-12 customer-information handoff is implemented; validate it against concrete anchors and add nested `/customer/files` support only when required. SEP-45 remains the contract-account auth path.
-5. **Smart account / passkey**: keep the real Testnet conformance vector; implement platform-native Mobile provider integration when the Mobile product reaches that feature.
-6. **Hardware signer**: retain the external-signer prepare/apply boundary and wait for a compatible Ledger transport/XDR path instead of forcing conversion.
-7. **Reference/other clients**: keep Rust CLI current; Desktop/Web reuse the same stable SDK architecture.
+1. **Land and validate the current Rust reference batch**: the shared Anchor Capability extraction must pass real Rust tests/release builds after it reaches GitHub main.
+2. **Use the five common contracts as the cross-project vocabulary**: Application Flows, Application Capabilities, Core Security Boundary and Platform Implementation now govern new Mobile/Web/Desktop/TUI design.
+3. **Mobile can start independently**: follow `docs/platforms/mobile/sdk-usage.md`; implement Mobile Features as Application Flows over Mobile Capability implementations, without requiring `fresnica-client`.
+4. **Capability changes are demand-driven**: validate Anchor/SEP behavior against concrete anchors; add nested `/customer/files`, SEP-45, Dapp details or hardware/provider semantics only when a real product implementation requires them.
+5. **Platform discoveries may upgrade the specification**: mature Mobile/Web/Desktop behavior should feed stable cross-platform semantics back into `docs/application-capabilities.md` instead of being copied mechanically across runtimes.
 
 ## Start Here Next Session
 
 1. Verify `main` HEAD and relevant CI/release status.
-2. Read `roadmap.md` for phase order.
-3. Read `mobile-sdk-usage.md` to start the independent Mobile project; read `mobile-framework-adapter-contract.md` before changing Native SDK or RN packaging.
-4. Read `mobile-app-migration-pr81-pr84.md` before starting the independent Mobile application.
-5. Read `client-core-security.md` and `mobile-core-contract.md` before changing signer/passcode/system-auth boundaries.
+2. Read `docs/README.md` and the five common contracts before changing architecture terminology or boundaries.
+3. Read `docs/roadmap.md` / `docs/tasks.md` for current implementation status; treat them as state documents, not normative contracts.
+4. For Mobile, then read `docs/platforms/mobile/sdk-usage.md`, `docs/platforms/mobile/framework-adapter.md` and the independent Mobile Feature-first design.
+5. Read `docs/core/client-security.md` and `docs/platforms/mobile/security-vault-contract.md` before changing signer/passcode/system-auth boundaries.
 6. Preserve Account != Signer != Recovery Source, `Passcode > System Auth`, `C...` identity semantics, native-only routine signing and fresh-passcode-only Reveal/Export.
 7. Treat `mobile-sdk-v0.1.0` and `native-sdk-v0.1.0` as frozen history; new Mobile work pins `native-sdk-v0.2.1` and its generated RN adapter binaries.
-8. Do not start product-specific Desktop/Web framework code until the universal SDK contract has a stable shape.
+8. New platform implementations may differ internally, but normative Application Capability semantics must remain compatible.

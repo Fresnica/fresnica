@@ -185,10 +185,10 @@ New work uses `bindings/native` outputs and `adapters/react-native`.
 
 ## Build and validation references
 
-- Native release contract: [`native-sdk-release.md`](native-sdk-release.md)
-- Framework adapter contract: [`mobile-framework-adapter-contract.md`](mobile-framework-adapter-contract.md)
-- System authentication: [`mobile-system-auth.md`](mobile-system-auth.md)
-- Mobile lifecycle migration: [`mobile-app-migration-pr81-pr84.md`](mobile-app-migration-pr81-pr84.md)
-- React Native upgrade rules: [`react-native-upgrade-playbook.md`](react-native-upgrade-playbook.md)
+- Native release contract: [Native SDK release contract](../../sdk/native-release.md)
+- Framework adapter contract: [Framework adapter contract](framework-adapter.md)
+- System authentication: [System authentication](system-auth.md)
+- Mobile lifecycle migration: [Mobile lifecycle migration](app-migration-pr81-pr84.md)
+- React Native upgrade rules: [React Native upgrade rules](react-native-upgrade-playbook.md)
 
-The consumer-facing installation, one-time adapter build and first-app smoke-test steps are documented in [`mobile-sdk-usage.md`](mobile-sdk-usage.md).
+The consumer-facing installation, one-time adapter build and first-app smoke-test steps are documented in [Mobile SDK usage guide](sdk-usage.md).

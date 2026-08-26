@@ -434,7 +434,7 @@ After the smoke test succeeds:
 1. Define the Mobile-owned Realm schema/migrations for Account / Signer / Reference plus optional Recovery Source grouping metadata.
 2. Establish one Fresnica app passcode during onboarding.
 3. If the user enables system auth, call `initializeSystemAuth(reason)` once for the installation.
-4. Absorb watch-only create, attach and downgrade semantics from `docs/mobile-app-migration-pr81-pr84.md`.
+4. Absorb watch-only create, attach and downgrade semantics from `docs/platforms/mobile/app-migration-pr81-pr84.md`.
 5. Absorb secret/mnemonic import and mnemonic generation provisioning; after a signer is persisted, call `registerSignerSystemAuth(...)` when a System Auth Domain exists. Registration verifies the passcode but does not prompt for biometrics.
 6. For another address from the same mnemonic, call `deriveMnemonicSigner(sourceEnvelope, appPasscode, expectedSourceSignerPublicKey, index)` instead of revealing/re-entering the mnemonic. Default first-account index is `0`; Mobile may explicitly choose later indices.
 7. Add global app-passcode rotation using all-signer staged `reprotect`, one atomic persistence commit, then re-register all new unlock keys into the existing System Auth Domain.

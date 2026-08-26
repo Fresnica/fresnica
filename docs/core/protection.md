@@ -20,7 +20,7 @@ Client Persistence
 
 System authentication sits beside this flow as **client-side signer authorization**. It is not a Core protection provider and it is not a wallet encryption algorithm.
 
-See [Client / Core Security Contract](client-core-security.md) for the cross-client boundary and [Mobile / Rust Core Vault Contract](mobile-core-contract.md) for the mobile mapping.
+See [Client / Core Security Contract](client-security.md) for the cross-client boundary and [Mobile / Rust Core Vault Contract](../platforms/mobile/security-vault-contract.md) for the mobile mapping.
 
 ## App passcode and local software signers
 

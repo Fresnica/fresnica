@@ -2,7 +2,7 @@
 
 Status: **client path implemented; OS backends are platform-specific**.
 
-This document applies the [Client / Rust Core Security Contract](client-core-security.md) to the current Fresnica TUI/CLI.
+This document applies the [Client / Rust Core Security Contract](../../core/client-security.md) to the current Fresnica TUI/CLI.
 
 ## Boundary
 

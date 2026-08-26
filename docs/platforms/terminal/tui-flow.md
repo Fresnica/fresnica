@@ -45,8 +45,8 @@ The TUI provides:
 - wallet management
 - pair-scoped SDEX trading
 
-CLI and TUI use the same wallet/runtime services and review semantics. Send
+CLI and TUI use the same wallet/runtime Capability implementations and review semantics. Send
 destinations are resolved through the same local contact resolver before the
-transfer service is called. An explicit memo overrides a contact's default memo,
+Payment/Transaction Capability implementation is called. An explicit memo overrides a contact's default memo,
 and the final review shows both the contact name and the resolved Stellar
 address.

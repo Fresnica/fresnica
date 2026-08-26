@@ -1,9 +1,20 @@
 # Fresnica Tasks
 
+
+## Documentation / Cross-Platform Contracts
+
+- [x] Canonical cross-project vocabulary: Application Flows / Application Capabilities / Fresnica Core / Infrastructure Ports
+- [x] Application Flow contract (`docs/application-flows.md`)
+- [x] Application Capability contract and maturity model (`docs/application-capabilities.md`)
+- [x] Core security boundary (`docs/core-security-boundary.md`)
+- [x] Platform implementation contract (`docs/platform-implementation.md`)
+- [x] Documentation index and directory reorganization (`docs/README.md`)
+- [x] Preserve `fresnica-client` as Rust reference Capability implementation without requiring other platforms to link it
+
 ## Runtime
 
 - [x] Compose Runtime dependencies
-- [x] Per-network service composition
+- [x] Per-network Capability composition
 - [x] Application home/config root (`FRESNICA_HOME`)
 - [x] User configuration file
 
@@ -19,7 +30,7 @@
 - [x] Export/backup workflow
 - [x] Verified external Ed25519 signer adapter
 - [ ] Hardware transport adapters
-- [x] Ledger hardware-provider boundary/dependency review (`docs/hardware-signer.md`)
+- [x] Ledger hardware-provider boundary/dependency review (`docs/capabilities/external-signer.md`)
 
 ## Data
 
@@ -76,21 +87,24 @@
 - [x] Explicit Reveal / Export boundary
 - [x] Account `G...` / `C...` identity parsing
 - [x] Account identity / signer capability separation
-- [x] Library-level `CoreClientApi` v2
+- [x] Library-level `CoreClientApi` v3
 - [x] Thin `fresnica-core` process adapter
 - [x] Watch-only signer attachment identity verification
 - [x] Core-side passcode re-protection
 - [x] External Ed25519 prepare/apply signing boundary
 - [x] Native Rust CLI direct SDK/Core reference client
-- [x] Reusable Rust application client/service crate shared by CLI/TUI (`clients/rust-client`)
-- [x] First native Rust TUI dashboard over shared client services (`clients/rust-tui`)
-- [x] Shared UI-free Rust transaction/payment prepare-review-submit services with pending retry protection
-- [x] First native Rust TUI reviewed payment write flow over shared client services
-- [x] Shared UI-free Rust trustline prepare-review-submit services
-- [x] Native Rust TUI trustline add/limit/remove flow over shared client services
-- [x] Shared UI-free Rust SDEX offer create/update/cancel services
-- [x] Native Rust TUI SDEX offer create/update/cancel flow over shared client services
-- [x] Shared typed SDEX open-offer read service with CLI/TUI consumers
+- [x] Reusable Rust Application Capability/reference client crate shared by CLI/TUI (`clients/rust-client`)
+- [x] First native Rust TUI dashboard over shared Rust Capability implementations (`clients/rust-tui`)
+- [x] Shared UI-free Rust transaction/payment prepare-review-submit Capability implementations with pending retry protection
+- [x] First native Rust TUI reviewed payment write flow over shared Rust Capability implementations
+- [x] Shared UI-free Rust trustline prepare-review-submit Capability implementations
+- [x] Native Rust TUI trustline add/limit/remove flow over shared Rust Capability implementations
+- [x] Shared UI-free Rust SDEX offer create/update/cancel Capability implementations
+- [x] Native Rust TUI SDEX offer create/update/cancel flow over shared Rust Capability implementations
+- [x] Shared typed SDEX open-offer read Capability implementation with CLI/TUI consumers
+- [x] Shared typed SDEX order-book Capability implementation with exact `price_r` semantics
+- [x] Shared typed pair-trade/account-fill/candle Capability implementations
+- [x] Native Rust TUI pair market view with order book, recent trades and candles
 - [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
 - [x] Native Rust CLI SEP-1 + SEP-6/SEP-24 anchor capability discovery (`anchor discover CODE:GISSUER`)
 - [x] Native Rust CLI SEP-10/SEP-45 authentication metadata discovery and G/C capability classification
@@ -98,7 +112,7 @@
 - [x] Native Rust CLI SEP-24-preferred / SEP-6-fallback deposit and withdraw initiation
 - [x] Native Rust CLI reviewed withdrawal payment handoff and anchor transaction-status tracking
 - [x] Native Rust CLI SEP-12 customer status/common field update handoff for anchor KYC/update states
-- [x] Shared Rust AnchorService boundary for SEP-1 discovery, Classic SEP-10 challenge/session, SEP-6/SEP-24 transfer transport and transaction status
+- [x] Shared Rust Anchor Capability implementation for SEP-1 discovery, Classic SEP-10 challenge/session, SEP-6/SEP-24 transfer transport and transaction status
 - [ ] SEP-12 nested structured values and optional `/customer/files` file-id workflow when a concrete anchor requires them
 
 ## Universal / Native SDK
@@ -136,7 +150,7 @@
 - [x] Preserve `Passcode > System Auth`; Reveal/Export and passcode rotation remain passcode-authorized
 - [x] Atomic all-signer passcode rotation contract followed by no-biometric wrapped-key replacement in the existing domain
 - [x] Retire legacy `mobile-sdk-v*` publisher from active `main` workflows
-- [x] Mobile Native SDK / React Native adapter onboarding guide (`docs/mobile-sdk-usage.md`)
+- [x] Mobile Native SDK / React Native adapter onboarding guide (`docs/platforms/mobile/sdk-usage.md`)
 - [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
 - [x] Passkey/smart-account architecture decision: contract-account signer, not WalletUnlockKey wrapper
 - [x] Pinned `smart-account-kit` provider boundary + Testnet deployment fixture + mock conformance tests

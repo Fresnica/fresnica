@@ -71,7 +71,7 @@ Account GABC...
   +-- master GABC...  weight K
 ```
 
-Therefore generic Core signing operations validate `expected_signer_public_key`, not an assumed account public key. Clients/network services resolve the current signer/threshold authorization for the account from ledger state.
+Therefore generic Core signing operations validate `expected_signer_public_key`, not an assumed account public key. Clients/network Capability implementations resolve the current signer/threshold authorization for the account from ledger state.
 
 ## Protected software signer
 
@@ -130,7 +130,7 @@ Passkey smart accounts are a separate contract-account authorization model rathe
 
 Do not overload `ProtectedSoftwareSigner` / `signer_public_key: G...` for passkeys. A future passkey signer record needs separate credential/verifier/provider identity and must remain attached to a `C...` AccountRecord through the ordinary Account != Signer relationship.
 
-See `passkey-smart-account.md` for the current design contract.
+See [`../capabilities/passkey-smart-account.md`](../capabilities/passkey-smart-account.md) for the current design contract.
 
 ## Client/Core responsibility split
 

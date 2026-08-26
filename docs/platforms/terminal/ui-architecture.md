@@ -1,11 +1,11 @@
-# Fresnica UI Architecture
+# Fresnica Terminal UI Architecture
 
 ## Interfaces
 
-Fresnica provides multiple user interfaces over the same service layer.
+Fresnica provides multiple user interfaces over the same Rust Application Capability implementation.
 
 ```
-                 Services
+              Capabilities
                     |
         +-----------+-----------+
         |                       |
@@ -60,4 +60,4 @@ Rich is the rendering layer for command output:
 
 Textual is the application framework for interactive terminal UI.
 
-Both interfaces consume the same Fresnica services.
+Both interfaces consume the same Rust Fresnica Application Capability implementations. UI/UX and command interaction remain terminal-owned.

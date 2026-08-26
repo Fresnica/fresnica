@@ -1,18 +1,25 @@
 # Fresnica
 
-Fresnica is a self-custody Stellar wallet project focused on the layer that
-`stellar-sdk` intentionally does not provide: wallet lifecycle, encrypted local
-storage, user workflows, caching, CLI/TUI presentation, and later reusable Core
-bindings for Mobile/Desktop/SDK clients.
+Fresnica is a self-custody Stellar wallet project with shared cross-platform wallet semantics and a Rust cryptographic/security Core. CLI/TUI are engineering/reference products; Mobile, Web and Desktop may implement the same Application Capability contracts with platform-appropriate SDKs and infrastructure.
 
 ## Direction
 
-1. **Python reference** — define behavior, tests, CLI/TUI workflows, and storage formats.
-2. **Rust Core** — port the proven wallet/runtime behavior for production reuse.
+```text
+Application Flows        product intent / UI / UX
+        |
+        v
+Application Capabilities shared wallet semantics
+        |
+        +--> Fresnica SDK / Rust Core   cryptographic authority
+        +--> Stellar/network gateways   chain mechanisms
+        +--> repositories/platform ports
+```
 
-Stellar protocol primitives stay delegated to the official SDK wherever
-possible: mnemonic/key derivation, Keypair/StrKey, XDR, transaction building,
-signing primitives, and Horizon access.
+The Rust `fresnica-client` is the reusable/reference Capability implementation for CLI/TUI, not a mandatory implementation for every platform. The Python implementation remains a behavioral/reference source where useful.
+
+Start with [`docs/README.md`](docs/README.md) for the canonical architecture vocabulary and documentation map.
+
+Stellar protocol primitives should remain delegated to official ecosystem SDKs wherever appropriate rather than being reimplemented merely for Fresnica. Core-owned cryptographic/security semantics remain authoritative through the Fresnica SDK/Core boundary.
 
 ## Python reference
 
@@ -322,7 +329,7 @@ CLI (Rich) / TUI (Textual)
           |
    +------+------------------+
    |                         |
-WalletManager             Services
+WalletManager          Capabilities
    |              /     /      \       \
 WalletStorage        Balance History   DEX   Offer
                      \       |       /       /
@@ -335,6 +342,6 @@ WalletStorage        Balance History   DEX   Offer
 
 `WalletManager` owns lifecycle and session state. `Wallet` represents identity
 plus optional signing capability. A watch-only wallet therefore uses the same
-balance/history/market services but cannot enter a signing state. Payment and
-SDEX writes share the same transaction builder, signer, submit service, review
+balance/history/market Capability implementations but cannot enter a signing state. Payment and
+SDEX writes share the same transaction/signing/submission semantics, review
 boundary, and wallet session lifecycle.

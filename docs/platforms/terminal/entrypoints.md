@@ -1,4 +1,4 @@
-# Fresnica Application Flow
+# Fresnica Terminal Entrypoints
 
 ## Entry Points
 
@@ -26,9 +26,9 @@ Both share the same Runtime.
 Runtime
  |
  +-- WalletManager
- +-- Services
+ +-- Application Capabilities
  +-- StellarAdapter
  +-- DataStore
 ```
 
-No interface owns business logic.
+No terminal interface owns shared wallet semantics. CLI and TUI implement terminal-specific Application Flows over the same Capability layer.

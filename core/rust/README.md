@@ -44,7 +44,7 @@ A client obtains a key for enrollment through `derive_verified_unlock_key`, whic
 
 No second wallet ciphertext or independent system wallet key is created.
 
-See [`docs/client-core-security.md`](../../docs/client-core-security.md), [`docs/core-client-protocol.md`](../../docs/core-client-protocol.md), and [`docs/protection.md`](../../docs/protection.md).
+See [`docs/core/client-security.md`](../../docs/core/client-security.md), [`docs/core/client-protocol.md`](../../docs/core/client-protocol.md), and [`docs/core/protection.md`](../../docs/core/protection.md).
 
 ## First real client: Python TUI
 
@@ -86,7 +86,7 @@ Changing the app passcode or re-encrypting with a new salt changes the unlock ke
 
 It reconstructs and validates the signer identity before returning either the stored Stellar secret or the stored mnemonic plus passphrase/derivation metadata. A client-held unlock key or system-authenticated session is insufficient to use this API.
 
-See [`docs/secret-export.md`](../../docs/secret-export.md).
+See [`docs/core/secret-export.md`](../../docs/core/secret-export.md).
 
 ## Agent Access boundary
 

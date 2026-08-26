@@ -295,4 +295,4 @@ The CLI also exercises the watch-only signer transition directly: `attach-secret
 
 OS-specific system-auth work still belongs to the client that releases a `WalletUnlockKey`; it is not implemented in Core or in the machine protocol.
 
-See [`docs/core-client-protocol.md`](core-client-protocol.md).
+See [`docs/core/client-protocol.md`](client-protocol.md).

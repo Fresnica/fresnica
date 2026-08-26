@@ -25,9 +25,9 @@ React Native UI / navigation / product state        replaceable
         |
 RN module registration / Codegen / TurboModule      replaceable
         |
-Fresnica native service adapter                     mostly stable
+Fresnica Native SDK adapter                     mostly stable
         |
-Keychain / Keystore authorization service           stable security boundary
+Keychain / Keystore authorization layer           stable security boundary
         |
 UniFFI Swift / Kotlin API                            generated boundary
         |
@@ -66,7 +66,7 @@ The following areas may legitimately change during a React Native upgrade:
 - React Native-facing TypeScript types and imports;
 - host lifecycle integration required by a newer React Native release.
 
-These changes should remain thin adapters around existing Fresnica-owned services.
+These changes should remain thin adapters around existing Fresnica-owned SDK/Capability boundaries.
 
 ## Work that must not be redone merely because React Native changed
 
@@ -117,17 +117,17 @@ Before changing wallet logic, prove that an empty/minimal Fresnica host can:
 
 This separates framework/build failures from wallet failures.
 
-### 3. Reattach the existing Fresnica native service
+### 3. Reattach the existing Fresnica Native SDK adapter
 
 Do not port Core logic into the new RN mechanism.
 
-The new bridge must call the existing platform service surface. If migrating to TurboModules, implement only the RN-specific spec/registration/glue necessary to expose the same high-level operations.
+The new bridge must call the existing platform SDK/authorization surface. If migrating to TurboModules, implement only the RN-specific spec/registration/glue necessary to expose the same high-level operations.
 
 Routine signing must remain:
 
 ```text
 JS request
-  -> native authorization service
+  -> native authorization layer
   -> Keychain/Keystore user authentication
   -> WalletUnlockKey in native memory
   -> UniFFI
@@ -178,7 +178,7 @@ Expected migration surface:
 - Objective-C/Objective-C++ glue required by React Native;
 - Xcode/CocoaPods/SwiftPM integration.
 
-Keep Swift signer authorization, Keychain handling, generated UniFFI API usage, and Fresnica service semantics independent from RN registration glue.
+Keep Swift signer authorization, Keychain handling, generated UniFFI API usage, and Fresnica Capability/SDK semantics independent from RN registration glue.
 
 React Native's Swift New Architecture guidance still requires small Objective-C++ glue because the React Native core is C++-heavy. Keep that glue minimal and outside wallet/security logic.
 
@@ -220,7 +220,7 @@ Run only the gates implied by the changed layer.
 | RN host glue under Android only | Android native-module/AAR compile + lint |
 | RN host glue under Apple only | Apple native-module type-check/build |
 | Keychain/Keystore authorization code | corresponding platform auth/native signing gate |
-| `bindings/mobile/src`, Cargo/UniFFI metadata | full mobile Core binding generation |
+| `bindings/mobile/src`, Cargo/UniFFI metadata | full legacy Mobile binding generation |
 | Rust Core / `CoreClientApi` | Rust Core + mobile facade + binding conformance |
 | Android/Apple Rust packaging scripts or ABI configuration | platform packaging gates |
 | docs only | no mobile build |

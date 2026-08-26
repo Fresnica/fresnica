@@ -4,7 +4,7 @@ Status: **handoff source for the independent Fresnica Mobile application**.
 
 This document identifies the React Native/application-side work that was implemented temporarily inside the `fresnica` repository during PR #81-#84. The independent Mobile project should use this document to decide what to absorb, adapt, or leave behind.
 
-Before absorbing any application-side code, Mobile should establish its SDK/framework boundary using `docs/mobile-framework-adapter-contract.md`. That document is the authoritative integration baseline: pin compiled Native SDK binaries, compile the canonical framework adapter once in the Mobile framework environment, store the generated adapter binaries/manifest, and keep adapter-source compilation out of ordinary app builds.
+Before absorbing any application-side code, Mobile should establish its SDK/framework boundary using `docs/platforms/mobile/framework-adapter.md`. That document is the authoritative integration baseline: pin compiled Native SDK binaries, compile the canonical framework adapter once in the Mobile framework environment, store the generated adapter binaries/manifest, and keep adapter-source compilation out of ordinary app builds.
 
 The repository boundary going forward is:
 
@@ -212,7 +212,7 @@ The canonical RN adapter source remains Fresnica-owned, but Mobile compiles it *
 ## Suggested absorption order in `fresnica-mobile`
 
 1. Choose/pin the Mobile React Native version and Fresnica Native SDK/Binding API.
-2. Follow `docs/mobile-framework-adapter-contract.md` to compile the RN adapter once, store its binaries/manifest and prove `parseAccount` from React Native.
+2. Follow `docs/platforms/mobile/framework-adapter.md` to compile the RN adapter once, store its binaries/manifest and prove `parseAccount` from React Native.
 3. Define the host Realm schema/migration around Account / Signer / Reference plus optional Recovery Source grouping.
 4. Establish the Fresnica app passcode; optionally initialize the device System Auth Domain once.
 5. Absorb #81 watch-only create, attach and downgrade semantics.

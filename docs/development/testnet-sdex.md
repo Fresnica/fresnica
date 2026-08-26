@@ -29,7 +29,7 @@ Secret keys are not printed or persisted.
 
 ## What it verifies
 
-The probe exercises the real Python reference services and Stellar SDK against
+The probe exercises the real Python reference Capability implementations and Stellar SDK against
 Testnet:
 
 1. Explicit receiving-trustline approval builds and submits

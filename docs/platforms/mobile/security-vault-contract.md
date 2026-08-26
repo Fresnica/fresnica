@@ -2,7 +2,7 @@
 
 Status: **accepted target architecture for the pre-release integration phase**.
 
-This document maps the cross-client security contract onto `fresnica-mobile`. The normative cross-client boundary is [Client / Rust Core Security Contract](client-core-security.md).
+This document maps the cross-client security contract onto `fresnica-mobile`. The normative cross-client boundary is [Client / Rust Core Security Contract](../../core/client-security.md).
 
 Because Fresnica has not had a public wallet release yet, this phase does **not** require compatibility migration code for internal test data. Once a public release exists, every persisted-format change must include an explicit migration and rollback strategy.
 
@@ -380,7 +380,7 @@ original mnemonic / S... material
 
 A `WalletUnlockKey`, Face ID success, or an already-unlocked Mobile session MUST NOT be sufficient to invoke this path.
 
-See [Signing Material Reveal and Export](secret-export.md).
+See [Signing Material Reveal and Export](../../core/secret-export.md).
 
 ## 12. External / hardware signer flow
 

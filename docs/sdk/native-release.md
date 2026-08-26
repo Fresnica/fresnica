@@ -106,7 +106,7 @@ FresnicaSDKFFI.xcframework/
 
 The Apple release job runs `bindings/native/scripts/validate-apple-local.sh` before staging the zip. The complete iOS + macOS direct-consumer path passed on real macOS/Xcode on 2026-08-25, including independent Swift consumer import/typecheck. That gate cleared the first generalized Native SDK release marker.
 
-React Native adapter binaries are deliberately absent. A framework consumer builds the canonical adapter once in its own framework environment according to `mobile-framework-adapter-contract.md`.
+React Native adapter binaries are deliberately absent. A framework consumer builds the canonical adapter once in its own framework environment according to `docs/platforms/mobile/framework-adapter.md`.
 
 ## Manifest
 

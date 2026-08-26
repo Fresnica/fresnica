@@ -257,6 +257,6 @@ The independent `fresnica-mobile` project should use this document as its integr
 4. store the adapter binaries and manifest under Mobile ownership;
 5. run a native/framework smoke test such as `parseAccount`;
 6. establish the one app passcode and optional one-time device System Auth Domain;
-7. only then absorb the application-side lifecycle/persistence flows described in `docs/mobile-app-migration-pr81-pr84.md`.
+7. only then absorb the application-side lifecycle/persistence flows described in `docs/platforms/mobile/app-migration-pr81-pr84.md`.
 
 The Mobile project must not make Rust/Core/UniFFI or adapter-source compilation part of ordinary application builds.

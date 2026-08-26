@@ -2,17 +2,24 @@
 
 Updated: 2026-08-26
 
-Fresnica now has an **SDK-first, multi-platform foundation**. Rust Core is consumable through released native/WASM SDK boundaries, while React Native and future frameworks remain thin adapters. The independent Mobile product can start against the pinned Native SDK without waiting for more Core infrastructure.
+Fresnica now has a **multi-platform foundation with shared semantic contracts**. Rust Core is consumable through released native/WASM SDK boundaries, while Application Capabilities define wallet semantics above platform mechanisms and Application Flows own product-specific UI/UX.
 
-The product sequence is deliberately:
+The current architecture is:
 
 ```text
-Core semantics
+Application Flows
+  -> Application Capabilities
+  -> Fresnica SDK/Core + Stellar/network/repository/platform ports
+```
+
+The delivery chain for Core-owned security capabilities remains:
+
+```text
+Rust Core
   -> universal SDK contract
   -> platform SDK binaries / WASM package
-  -> framework adapter source + one-time consumer build
-  -> wallet functional coverage / SEP alignment
-  -> product-specific wallet experience
+  -> optional framework adapters
+  -> platform Capability implementations
 ```
 
 ## Phase 0 - Architecture Foundation
@@ -22,7 +29,7 @@ Completed:
 - Wallet / Account / Signer separation
 - watch-only wallet concept
 - Stellar SDK as protocol layer in the reference implementation
-- WalletManager / service / datastore layering
+- WalletManager / application-capability / datastore layering
 - CLI and TUI separation
 - network-scoped chain-derived data
 - full Stellar asset identity instead of code-only identity
@@ -50,7 +57,7 @@ The Python implementation remains useful for wallet behavior, UX experiments and
 Substantially completed:
 
 - production Rust wallet derivation and signer primitives
-- stable library-level `CoreClientApi` v2
+- stable library-level `CoreClientApi` v3
 - Account identity / Signer capability separation
 - `G...` / `C...` identity parsing
 - watch-only signer attachment identity verification
@@ -129,7 +136,7 @@ Apple    -> validated FFI XCFramework + compiled `FresnicaSDK.xcframework` direc
 
 The Apple direct-consumer module is now validated on real macOS/Xcode. The React Native one-time Apple build path compiles only framework glue into a static `FresnicaRNAdapter.xcframework` against that validated module; it does not absorb SDK-owned Swift/security source. On 2026-08-25 the full path also passed on a macOS runner against a freshly generated React Native 0.87 project after real `pod install`, including device arm64 and simulator arm64/x86_64 adapter slices. Modern prebuilt React Native is consumed through CocoaPods' installed `React.xcframework`; Fresnica does not reconstruct React header namespaces from `node_modules`.
 
-Desktop consumer surfaces are now defined in `desktop-sdk-contract.md`:
+Desktop consumer surfaces are now defined in `docs/platforms/desktop/sdk-contract.md`:
 
 ```text
 Rust desktop      -> consume `fresnica-sdk` directly
@@ -162,7 +169,7 @@ Validated on macOS with the Rust + `wasm-bindgen` toolchain via `bindings/wasm/s
 - generated JS/TypeScript surface validation;
 - Node-hosted runtime conformance against shared transaction vectors.
 
-The passkey architecture is defined separately in `passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally and deliberately delegates only the safe upstream `signAndSubmit` path. On 2026-08-25 the localhost browser harness completed a real WebAuthn/Testnet create/connect/sign-and-submit flow; the confirmed transaction's public relayer `func/auth` XDR was independently verified for the Protocol-27 digest, bound context-rule IDs, WebAuthn challenge, UP/UV flags and P-256 signature, then checked in as `spec/test-vectors/smart-account-auth-v1.json`. This remains a contract-account provider boundary, not an unlock-key API added to WASM.
+The passkey architecture is defined separately in `docs/capabilities/passkey-smart-account.md`: a passkey is a contract-account external signer, not a persistent browser `WalletUnlockKey`. The first interoperability target is Stellar's OpenZeppelin-based `smart-account-kit` model. A pinned provider boundary lives under `providers/smart-account-kit`, targeting upstream `smart-account-kit` 0.6.2 and the published 2026-07-09 Protocol 27 Testnet deployment. Its lifecycle/submission contract is mock-tested locally and deliberately delegates only the safe upstream `signAndSubmit` path. On 2026-08-25 the localhost browser harness completed a real WebAuthn/Testnet create/connect/sign-and-submit flow; the confirmed transaction's public relayer `func/auth` XDR was independently verified for the Protocol-27 digest, bound context-rule IDs, WebAuthn challenge, UP/UV flags and P-256 signature, then checked in as `spec/test-vectors/smart-account-auth-v1.json`. This remains a contract-account provider boundary, not an unlock-key API added to WASM.
 
 Web should normally consume the WASM SDK directly. Add a web-framework adapter only if a framework creates a real integration need.
 
@@ -193,7 +200,7 @@ Planned adapter boundary:
 - Flutter Mobile/Desktop: reserve and document the same contract; implement when needed
 - Desktop frameworks such as Electron/Node, Qt or .NET: reserve the extension boundary; implement based on product choice
 
-See `mobile-framework-adapter-contract.md` for the current one-time adapter-build model. This contract should be generalized rather than replaced when Desktop/Flutter support is added.
+See `docs/platforms/mobile/framework-adapter.md` for the current one-time adapter-build model. This contract should be generalized rather than replaced when Desktop/Flutter support is added.
 
 ### 4.5 Compatibility and release tooling
 
@@ -208,11 +215,11 @@ The universal SDK work should provide:
 
 The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
-The generalized Native SDK release contract is defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. `native-sdk-v0.1.0` established the generalized packaging boundary. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native package 0.2.1, Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.0. v0.2 added Core-owned derivation of another explicit mnemonic index without mnemonic re-export and replaced per-signer biometric enrollment with one device System Auth Protection Domain plus no-biometric public-key wrapping for later signers. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and React Native platform gates remain release requirements. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
+The generalized Native SDK release contract is defined in `docs/sdk/native-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. `native-sdk-v0.1.0` established the generalized packaging boundary. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native package 0.2.1, Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.0. v0.2 added Core-owned derivation of another explicit mnemonic index without mnemonic re-export and replaced per-signer biometric enrollment with one device System Auth Protection Domain plus no-biometric public-key wrapping for later signers. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and React Native platform gates remain release requirements. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
 
-## Phase 5 - Wallet Functional Foundation and Standards - CURRENT
+## Phase 5 - Application Capability Foundation and Standards - CURRENT / STABILIZING
 
-Continue wallet functionality while the SDK foundation is being completed. The goal is to stabilize reusable wallet behavior before investing heavily in final product UX.
+The reusable wallet foundation is substantially implemented in the Rust reference clients. The current goal is to stabilize the cross-platform Application Capability contracts and let product-specific Application Flows evolve independently.
 
 Priority areas:
 
@@ -225,15 +232,15 @@ Priority areas:
 - contacts/address resolution
 - network configuration
 - hardware/external signer transport
-
-The provider-neutral Core prepare/apply boundary is already sufficient for hardware wallets. Ledger is the first provider candidate, but its implementation is deliberately gated: Fresnica currently uses `stellar-xdr 28.0.0` while the current reviewed Stellar CLI workspace provides `stellar-ledger 27.1.0` on `stellar-xdr 27.0.0`, and Ledger has not yet published a Stellar-specific DMK signer kit. Do not add a lossy XDR-version conversion or move HID/BLE/WebHID into Core merely to close the checklist; see `hardware-signer.md`.
 - anchor workflows
+
+The provider-neutral Core prepare/apply boundary is already sufficient for hardware wallets. Ledger is the first provider candidate, but its implementation is deliberately gated: Fresnica currently uses `stellar-xdr 28.0.0` while the current reviewed Stellar CLI workspace provides `stellar-ledger 27.1.0` on `stellar-xdr 27.0.0`, and Ledger has not yet published a Stellar-specific DMK signer kit. Do not add a lossy XDR-version conversion or move HID/BLE/WebHID into Core merely to close the checklist; see `docs/capabilities/external-signer.md`.
 
 ### SEP policy
 
 Fresnica should follow Stellar ecosystem standards and official SDK behavior rather than inventing competing wallet-specific protocol semantics.
 
-Current/reference anchor coverage includes SEP-1, Classic SEP-10, SEP-6, SEP-24 and the common SEP-12 customer status/update handoff. `fresnica-client` now owns the shared Rust anchor protocol boundary: full-identity discovery, verified two-phase SEP-10 challenge/session semantics, SEP-24-preferred / SEP-6-fallback transfer transport and transaction-status lookup. The CLI keeps presentation, passcode prompting and reviewed withdrawal-payment confirmation outside that service boundary. SEP-45 contract-account execution remains separate. SEP-12/KYC has an explicit common customer status/update workflow; uncommon nested-value plus `/customer/files` handling remains intentionally deferred rather than faked or silently bypassed.
+Current/reference anchor coverage includes SEP-1, Classic SEP-10, SEP-6, SEP-24 and the common SEP-12 customer status/update handoff. `fresnica-client` now owns the shared Rust anchor protocol boundary: full-identity discovery, verified two-phase SEP-10 challenge/session semantics, SEP-24-preferred / SEP-6-fallback transfer transport and transaction-status lookup. The CLI keeps presentation, passcode prompting and reviewed withdrawal-payment confirmation outside that Capability boundary. SEP-45 contract-account execution remains separate. SEP-12/KYC has an explicit common customer status/update workflow; uncommon nested-value plus `/customer/files` handling remains intentionally deferred rather than faked or silently bypassed.
 
 Future SEP adoption should be driven by wallet/product requirements and reviewed as protocol behavior below the UI layer.
 
@@ -256,11 +263,12 @@ The first `clients/rust-tui` slice consumes the same client layer and provides:
 - manual refresh;
 - reviewed XLM/issued-asset payment preparation;
 - masked passcode entry and SDK-backed payment submission with shared pending-transaction protection;
-- trustline add/limit/remove review and submission through shared client services;
-- SDEX BUY/SELL offer creation, offer update and offer cancellation through shared offer services.
-- Typed current open-offer display through the shared SDEX read service.
+- trustline add/limit/remove review and submission through shared Rust Capability implementations;
+- SDEX BUY/SELL offer creation, offer update and offer cancellation through shared Rust SDEX Capability implementations;
+- typed current open-offer display through the shared Rust SDEX Capability implementation;
+- pair-scoped market view over shared order-book, recent-trade and candle semantics.
 
-Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. Richer pair/orderbook presentation can be added without creating a second wallet/service architecture or calling CLI command handlers from the TUI.
+Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. Further terminal presentation can evolve without creating a second wallet semantic architecture or calling CLI command handlers from the TUI.
 
 ## Phase 7 - Product Wallet Experience
 
@@ -292,10 +300,10 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. **Start independent Mobile integration now** from `mobile-sdk-usage.md`: pin `native-sdk-v0.2.1` / Native Binding API 2 and an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms. Establish one app passcode and optionally initialize one device System Auth Domain; later signers register with passcode verification but no repeat biometric prompt.
-2. **Move Mobile application ownership out of this repository**: Realm schema/migrations, Account/Signer persistence, watch-only/import/generate/passcode/reveal UX and product state belong in `fresnica-mobile`; preserve the #81-#84 invariants from `mobile-app-migration-pr81-pr84.md`.
+1. **Start independent Mobile integration now** from `docs/platforms/mobile/sdk-usage.md`: pin `native-sdk-v0.2.1` / Native Binding API 2 and an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms. Establish one app passcode and optionally initialize one device System Auth Domain; later signers register with passcode verification but no repeat biometric prompt.
+2. **Move Mobile application ownership out of this repository**: Realm schema/migrations, Account/Signer persistence, watch-only/import/generate/passcode/reveal UX and product state belong in `fresnica-mobile`; preserve the #81-#84 invariants from `docs/platforms/mobile/app-migration-pr81-pr84.md`.
 3. **Keep the SDK boundary stable**: new Core/SDK capability work may continue independently, but Mobile should upgrade through pinned Native SDK releases and `NATIVE_BINDING_API_VERSION`, not by compiling Rust/Core in normal app builds.
-4. Continue reusable wallet/SEP work below product UI: validate the shared AnchorService and common SEP-12 handoff against concrete anchors before adding anchor-specific branches; add nested `/customer/files` only when required, while SEP-45 remains separate.
+4. Continue reusable wallet/SEP work below product UI: validate the shared Anchor Capability implementation and common SEP-12 handoff against concrete anchors before adding anchor-specific branches; add nested `/customer/files` only when required, while SEP-45 remains separate.
 5. Keep the real smart-account Testnet vector as provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile product integration reaches contract-account signing.
 6. Keep hardware/external signer transport gated by the reviewed Ledger/XDR compatibility constraints rather than forcing lossy conversion.
 7. Keep Rust CLI as the reference native engineering client; Desktop/Web product work follows the same stable SDK boundaries rather than creating new Core architectures.

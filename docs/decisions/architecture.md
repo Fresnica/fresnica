@@ -18,7 +18,7 @@ This file records design decisions that materially change Fresnica behavior or b
 
 **Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). The final Mobile handoff baseline is v0.2.1; it keeps the same API constants and adapter source while correcting device-domain failure/cleanup atomicity and aligning the handoff documentation.
 
-See [Mobile System Authentication](mobile-system-auth.md), [Mobile / Rust Core Vault Contract](mobile-core-contract.md), [Wallet Protection Model](protection.md), and [Mobile SDK Usage](mobile-sdk-usage.md).
+See [Mobile System Authentication](../platforms/mobile/system-auth.md), [Mobile / Rust Core Vault Contract](../platforms/mobile/security-vault-contract.md), [Wallet Protection Model](../core/protection.md), and [Mobile SDK Usage](../platforms/mobile/sdk-usage.md).
 
 ## 2026-08-24 - OS authorization belongs to clients; Core accepts WalletUnlockKey
 
@@ -36,7 +36,7 @@ See [Mobile System Authentication](mobile-system-auth.md), [Mobile / Rust Core V
 
 **Supersedes:** the Rust `SystemProtectionProvider` / `SystemKeyStore` prototype and the earlier idea that Core should model a peer `system` protection kind. Those OS concerns now live exclusively in clients.
 
-See [Client / Rust Core Security Contract](client-core-security.md), [Wallet Protection Model](protection.md), and [Signing Material Reveal and Export](secret-export.md).
+See [Client / Rust Core Security Contract](../core/client-security.md), [Wallet Protection Model](../core/protection.md), and [Signing Material Reveal and Export](../core/secret-export.md).
 
 ## 2026-08-24 - Signing-material export is an explicit declassification boundary
 
@@ -48,7 +48,7 @@ See [Client / Rust Core Security Contract](client-core-security.md), [Wallet Pro
 
 **Client handling:** revealed plaintext must not be persisted, logged, sent to analytics, automatically copied to the clipboard, or retained after the export flow. Normal transaction signing must not reuse the export API.
 
-See [Signing Material Reveal and Export](secret-export.md) and [Client / Rust Core Security Contract](client-core-security.md).
+See [Signing Material Reveal and Export](../core/secret-export.md) and [Client / Rust Core Security Contract](../core/client-security.md).
 
 ## 2026-08-24 - One app passcode; system authentication authorizes signers
 
@@ -64,7 +64,7 @@ See [Signing Material Reveal and Export](secret-export.md) and [Client / Rust Co
 
 **Pre-release migration:** Fresnica has not had a public wallet release, so current internal test wallet files do not require compatibility migration code. After public release, every persisted-format change must ship with an explicit versioned, recoverable migration path.
 
-See [Client / Rust Core Security Contract](client-core-security.md) and [Wallet Protection Model](protection.md).
+See [Client / Rust Core Security Contract](../core/client-security.md) and [Wallet Protection Model](../core/protection.md).
 
 ## 2026-08-24 - Account identity is not permanently tied to G addresses
 
@@ -76,7 +76,7 @@ The Python reference continues to implement classic-account behavior only. It ma
 
 This keeps current wallet behavior stable while preventing the future Rust Core from encoding `account == G address == Ed25519 public key` as a universal invariant.
 
-See [Signer Architecture](signer.md).
+See [Signer Architecture](../core/signer.md).
 
 ## 2026-08-24 - Password is a protection provider, not a wallet model
 
@@ -86,7 +86,7 @@ The password envelope remains Scrypt + AES-256-GCM. Hardware/external signers re
 
 **Historical note:** an early Python/Rust prototype modeled system protection as another `ProtectionProvider`. The later Client/Core decisions supersede that product direction: OS authorization is client-owned and the canonical software-wallet envelope remains password-protected.
 
-See [Wallet Protection Model](protection.md).
+See [Wallet Protection Model](../core/protection.md).
 
 ## 2026-08-23 - History uses retention, not bounded catch-up state
 
@@ -103,4 +103,4 @@ See [Wallet Protection Model](protection.md).
 
 **Why 2,000:** it is large for ordinary wallet activity but still gives the default cache a clear storage bound. A numeric user-configurable limit was rejected as unnecessary UI complexity.
 
-See [history-cache.md](history-cache.md).
+See [history-cache.md](../platforms/terminal/history-cache.md).

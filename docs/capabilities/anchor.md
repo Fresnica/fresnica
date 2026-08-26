@@ -6,7 +6,7 @@ This document records the current Rust reference-client authentication boundary 
 
 ## Current state
 
-The shared Rust client service behind `anchor discover CODE:GISSUER` now discovers and validates:
+The shared Rust Anchor Capability implementation behind `anchor discover CODE:GISSUER` now discovers and validates:
 
 - SEP-1 `stellar.toml` from the issuer `home_domain`;
 - SEP-6 `TRANSFER_SERVER` and `/info` capability metadata;
@@ -42,7 +42,7 @@ SEP-10 and SEP-45 are parallel authorization mechanisms. SEP-45 does not replace
 
 The implementation preserves these boundaries:
 
-### Anchor service / protocol layer
+### Anchor Capability implementation / protocol layer
 
 Implemented in `fresnica-client`; owns protocol validation and transport semantics, including:
 
@@ -91,6 +91,6 @@ SEP-12 nested structured values combined with the optional `/customer/files` fil
 ## Current blockers / non-blockers
 
 - Classic SEP-10 verifier/session, SEP-24/SEP-6 initiation, transaction status lookup, and reviewed Classic withdrawal payment handoff are implemented in the Rust reference client.
-- SEP-12 customer status plus common scalar/binary customer updates are wired through the shared Rust client service; nested structured values plus the optional `/customer/files` workflow remain follow-up work.
+- SEP-12 customer status plus common scalar/binary customer updates are wired through the shared Rust Anchor Capability implementation; nested structured values plus the optional `/customer/files` workflow remain follow-up work.
 - SEP-45 metadata discovery is complete; SEP-45 execution still requires a dedicated contract-auth provider/verification path.
 - Ledger transport remains independent and must not be forced through a lossy XDR v28/v27 conversion merely to close a checklist item.
