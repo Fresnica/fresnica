@@ -171,6 +171,85 @@ pub struct OrderBookSnapshot {
     pub asks: Vec<OrderBookLevel>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DexTradeSide {
+    Buy,
+    Sell,
+}
+
+impl DexTradeSide {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Buy => "BUY",
+            Self::Sell => "SELL",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PairTrade {
+    pub trade_id: String,
+    pub ledger_close_time: Option<String>,
+    pub base_amount: String,
+    pub counter_amount: String,
+    pub price: String,
+    pub price_n: Option<i32>,
+    pub price_d: Option<i32>,
+    pub base_side: DexTradeSide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PairTradesSnapshot {
+    pub base: String,
+    pub counter: String,
+    pub trades: Vec<PairTrade>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FillSegment {
+    pub base_asset: String,
+    pub counter_asset: String,
+    pub side: DexTradeSide,
+    pub base_amount: String,
+    pub counter_amount: String,
+    pub price: String,
+    pub price_n: i32,
+    pub price_d: i32,
+    pub offer_id: Option<String>,
+    pub trade_count: usize,
+    pub first_time: Option<String>,
+    pub last_time: Option<String>,
+    pub first_trade_id: String,
+    pub last_trade_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountFillsSnapshot {
+    pub wallet: WalletRecord,
+    pub fills: Vec<FillSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TradeCandle {
+    pub timestamp: u64,
+    pub open: String,
+    pub high: String,
+    pub low: String,
+    pub close: String,
+    pub base_volume: String,
+    pub counter_volume: Option<String>,
+    pub trade_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CandleSnapshot {
+    pub base: String,
+    pub counter: String,
+    pub resolution_ms: u64,
+    pub candles: Vec<TradeCandle>,
+}
+
 impl OpenOffer {
     fn from_horizon(raw: Value) -> Result<Self, String> {
         let offer_id = integer(raw.get("id"))
@@ -213,7 +292,7 @@ impl OpenOffer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OpenOffersSnapshot {
     pub wallet: WalletRecord,
     pub offers: Vec<OpenOffer>,
@@ -263,6 +342,87 @@ impl FresnicaClient {
             .map(OpenOffer::from_horizon)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(OpenOffersSnapshot { wallet, offers })
+    }
+
+    pub fn pair_trades(
+        &self,
+        base_text: &str,
+        counter_text: &str,
+        limit: usize,
+    ) -> Result<PairTradesSnapshot, String> {
+        validate_page_limit(limit, "trades")?;
+        let base = OfferAsset::parse(base_text)?;
+        let counter = OfferAsset::parse(counter_text)?;
+        ensure_pair(&base, &counter)?;
+        let trades = self
+            .horizon()
+            .get_trades(&base.query("base"), &counter.query("counter"), limit)?
+            .into_iter()
+            .map(pair_trade_from_horizon)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(PairTradesSnapshot {
+            base: base.display(),
+            counter: counter.display(),
+            trades,
+        })
+    }
+
+    pub fn account_fills(
+        &self,
+        wallet_name: Option<&str>,
+        limit: usize,
+    ) -> Result<AccountFillsSnapshot, String> {
+        validate_page_limit(limit, "fills")?;
+        let wallet = self.resolve_wallet(wallet_name)?;
+        let records = self.horizon().get_account_trades(&wallet.address, limit)?;
+        let fills = compress_account_trades(&records, &wallet.address)?;
+        Ok(AccountFillsSnapshot { wallet, fills })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn candles(
+        &self,
+        base_text: &str,
+        counter_text: &str,
+        resolution_ms: u64,
+        start_time: Option<u64>,
+        end_time: Option<u64>,
+        offset: Option<u64>,
+        limit: usize,
+    ) -> Result<CandleSnapshot, String> {
+        validate_page_limit(limit, "candles")?;
+        validate_candle_resolution(resolution_ms)?;
+        if let (Some(start), Some(end)) = (start_time, end_time) {
+            if start > end {
+                return Err("candle start time must not be after end time".to_owned());
+            }
+        }
+        if let Some(value) = offset {
+            validate_candle_offset(value, resolution_ms)?;
+        }
+        let base = OfferAsset::parse(base_text)?;
+        let counter = OfferAsset::parse(counter_text)?;
+        ensure_pair(&base, &counter)?;
+        let candles = self
+            .horizon()
+            .get_trade_aggregations(
+                &base.query("base"),
+                &counter.query("counter"),
+                resolution_ms,
+                start_time,
+                end_time,
+                offset,
+                limit,
+            )?
+            .into_iter()
+            .map(candle_from_horizon)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CandleSnapshot {
+            base: base.display(),
+            counter: counter.display(),
+            resolution_ms,
+            candles,
+        })
     }
 
     pub fn prepare_offer(&self, request: &OfferRequest) -> Result<PreparedOffer, String> {
@@ -973,6 +1133,285 @@ fn format_scaled_7(value: i128) -> String {
     format!("{whole}.{fraction:07}")
 }
 
+fn validate_page_limit(limit: usize, label: &str) -> Result<(), String> {
+    if !(1..=200).contains(&limit) {
+        Err(format!("{label} limit must be from 1 to 200"))
+    } else {
+        Ok(())
+    }
+}
+
+fn pair_trade_from_horizon(raw: Value) -> Result<PairTrade, String> {
+    let trade_id = value_text(raw.get("id"))
+        .or_else(|| value_text(raw.get("paging_token")))
+        .ok_or_else(|| "Horizon returned malformed trade id".to_owned())?;
+    let base_amount = text(&raw, "base_amount")
+        .ok_or_else(|| "Horizon returned malformed trade base amount".to_owned())?
+        .to_owned();
+    let counter_amount = text(&raw, "counter_amount")
+        .ok_or_else(|| "Horizon returned malformed trade counter amount".to_owned())?
+        .to_owned();
+    let (price, price_n, price_d) = trade_price_parts(&raw)?;
+    Ok(PairTrade {
+        trade_id,
+        ledger_close_time: text(&raw, "ledger_close_time").map(str::to_owned),
+        base_amount,
+        counter_amount,
+        price,
+        price_n,
+        price_d,
+        base_side: if raw
+            .get("base_is_seller")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            DexTradeSide::Sell
+        } else {
+            DexTradeSide::Buy
+        },
+    })
+}
+
+fn trade_price_parts(raw: &Value) -> Result<(String, Option<i32>, Option<i32>), String> {
+    if let Some(price) = raw.get("price").and_then(Value::as_object) {
+        let n = integer(price.get("n")).and_then(|value| i32::try_from(value).ok());
+        let d = integer(price.get("d")).and_then(|value| i32::try_from(value).ok());
+        if let (Some(n), Some(d)) = (n, d) {
+            if n > 0 && d > 0 {
+                return Ok((format_price_ratio(n, d)?, Some(n), Some(d)));
+            }
+        }
+    }
+    let base = parse_trade_amount(raw, "base_amount")?;
+    let counter = parse_trade_amount(raw, "counter_amount")?;
+    if base <= 0 {
+        return Err("Horizon returned invalid zero trade base amount".to_owned());
+    }
+    let numerator = i128::from(counter)
+        .checked_mul(i128::from(STROOPS_PER_XLM))
+        .ok_or_else(|| "trade price overflow".to_owned())?;
+    let denominator = i128::from(base);
+    let price = if numerator
+        .checked_mul(2)
+        .ok_or_else(|| "trade price overflow".to_owned())?
+        < denominator
+    {
+        "<0.0000001".to_owned()
+    } else {
+        format_scaled_7(round_ratio(numerator, denominator)?)
+    };
+    Ok((price, None, None))
+}
+
+fn compress_account_trades(records: &[Value], address: &str) -> Result<Vec<FillSegment>, String> {
+    #[derive(Debug)]
+    struct WorkingFill {
+        base_asset: String,
+        counter_asset: String,
+        side: DexTradeSide,
+        base_amount: i64,
+        counter_amount: i64,
+        price_n: i32,
+        price_d: i32,
+        offer_id: Option<String>,
+        trade_count: usize,
+        first_time: Option<String>,
+        last_time: Option<String>,
+        first_trade_id: String,
+        last_trade_id: String,
+    }
+
+    impl WorkingFill {
+        fn key(&self) -> Option<(&str, &str, DexTradeSide, i32, i32, &str)> {
+            self.offer_id.as_deref().map(|offer_id| {
+                (
+                    self.base_asset.as_str(),
+                    self.counter_asset.as_str(),
+                    self.side,
+                    self.price_n,
+                    self.price_d,
+                    offer_id,
+                )
+            })
+        }
+
+        fn finish(self) -> Result<FillSegment, String> {
+            Ok(FillSegment {
+                base_asset: self.base_asset,
+                counter_asset: self.counter_asset,
+                side: self.side,
+                base_amount: format_stroops(self.base_amount),
+                counter_amount: format_stroops(self.counter_amount),
+                price: format_price_ratio(self.price_n, self.price_d)?,
+                price_n: self.price_n,
+                price_d: self.price_d,
+                offer_id: self.offer_id,
+                trade_count: self.trade_count,
+                first_time: self.first_time,
+                last_time: self.last_time,
+                first_trade_id: self.first_trade_id,
+                last_trade_id: self.last_trade_id,
+            })
+        }
+    }
+
+    fn segment(raw: &Value, address: &str) -> Result<WorkingFill, String> {
+        let price = raw
+            .get("price")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "Invalid Horizon trade record: missing price".to_owned())?;
+        let price_n = integer(price.get("n"))
+            .and_then(|value| i32::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "Invalid Horizon trade record: bad price numerator".to_owned())?;
+        let price_d = integer(price.get("d"))
+            .and_then(|value| i32::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "Invalid Horizon trade record: bad price denominator".to_owned())?;
+        let base_account = text(raw, "base_account");
+        let counter_account = text(raw, "counter_account");
+        let side = if base_account == Some(address) {
+            DexTradeSide::Sell
+        } else if counter_account == Some(address) {
+            DexTradeSide::Buy
+        } else if raw
+            .get("base_is_seller")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            DexTradeSide::Sell
+        } else {
+            DexTradeSide::Buy
+        };
+        let offer_id = if base_account == Some(address) {
+            value_text(raw.get("base_offer_id"))
+        } else if counter_account == Some(address) {
+            value_text(raw.get("counter_offer_id"))
+        } else {
+            None
+        };
+        let trade_id = value_text(raw.get("id"))
+            .or_else(|| value_text(raw.get("paging_token")))
+            .unwrap_or_default();
+        let time = text(raw, "ledger_close_time").map(str::to_owned);
+        Ok(WorkingFill {
+            base_asset: trade_asset(raw, "base")?,
+            counter_asset: trade_asset(raw, "counter")?,
+            side,
+            base_amount: parse_trade_amount(raw, "base_amount")?,
+            counter_amount: parse_trade_amount(raw, "counter_amount")?,
+            price_n,
+            price_d,
+            offer_id,
+            trade_count: 1,
+            first_time: time.clone(),
+            last_time: time,
+            first_trade_id: trade_id.clone(),
+            last_trade_id: trade_id,
+        })
+    }
+
+    let mut result: Vec<WorkingFill> = Vec::new();
+    for raw in records {
+        let current = segment(raw, address)?;
+        let can_merge = result
+            .last()
+            .and_then(WorkingFill::key)
+            .zip(current.key())
+            .is_some_and(|(left, right)| left == right);
+        if can_merge {
+            let previous = result.last_mut().expect("segment exists");
+            previous.base_amount = previous
+                .base_amount
+                .checked_add(current.base_amount)
+                .ok_or_else(|| "fill base amount overflow".to_owned())?;
+            previous.counter_amount = previous
+                .counter_amount
+                .checked_add(current.counter_amount)
+                .ok_or_else(|| "fill counter amount overflow".to_owned())?;
+            previous.trade_count += 1;
+            previous.last_time = current.last_time;
+            previous.last_trade_id = current.last_trade_id;
+        } else {
+            result.push(current);
+        }
+    }
+    result.into_iter().map(WorkingFill::finish).collect()
+}
+
+fn trade_asset(raw: &Value, prefix: &str) -> Result<String, String> {
+    if text(raw, &format!("{prefix}_asset_type")) == Some("native") {
+        return Ok("XLM".to_owned());
+    }
+    let code = text(raw, &format!("{prefix}_asset_code"))
+        .ok_or_else(|| "Invalid Horizon trade asset code".to_owned())?;
+    let issuer = text(raw, &format!("{prefix}_asset_issuer"))
+        .ok_or_else(|| "Invalid Horizon trade asset issuer".to_owned())?;
+    OfferAsset::parse(&format!("{code}:{issuer}")).map(|asset| asset.display())
+}
+
+fn parse_trade_amount(raw: &Value, key: &str) -> Result<i64, String> {
+    let value = text(raw, key).ok_or_else(|| format!("Invalid Horizon trade record: {key}"))?;
+    parse_stroops(value, false).map_err(|_| format!("Invalid Horizon trade record amount: {value}"))
+}
+
+fn validate_candle_resolution(value: u64) -> Result<(), String> {
+    match value {
+        60_000 | 300_000 | 900_000 | 3_600_000 | 86_400_000 | 604_800_000 => Ok(()),
+        _ => Err(format!("Unsupported trade aggregation resolution: {value}")),
+    }
+}
+
+fn validate_candle_offset(offset: u64, resolution: u64) -> Result<(), String> {
+    const HOUR_MS: u64 = 3_600_000;
+    if offset > resolution || offset >= 24 * HOUR_MS || offset % HOUR_MS != 0 {
+        Err(format!(
+            "Invalid candle offset {offset} for resolution {resolution}"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn candle_from_horizon(raw: Value) -> Result<TradeCandle, String> {
+    let timestamp = unsigned_integer(raw.get("timestamp"))
+        .ok_or_else(|| "Horizon returned invalid candle timestamp".to_owned())?;
+    let trade_count = unsigned_integer(raw.get("trade_count"))
+        .ok_or_else(|| "Horizon returned invalid candle trade count".to_owned())?;
+    Ok(TradeCandle {
+        timestamp,
+        open: required_text(&raw, "open", "candle open")?,
+        high: required_text(&raw, "high", "candle high")?,
+        low: required_text(&raw, "low", "candle low")?,
+        close: required_text(&raw, "close", "candle close")?,
+        base_volume: required_text(&raw, "base_volume", "candle base volume")?,
+        counter_volume: text(&raw, "counter_volume").map(str::to_owned),
+        trade_count,
+    })
+}
+
+fn required_text(raw: &Value, key: &str, label: &str) -> Result<String, String> {
+    text(raw, key)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("Horizon returned malformed {label}"))
+}
+
+fn unsigned_integer(value: Option<&Value>) -> Option<u64> {
+    match value? {
+        Value::Number(value) => value.as_u64(),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn value_text(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
 fn ensure_offer_owner(offer: &Value, record: &WalletRecord) -> Result<(), String> {
     let seller = text(offer, "seller")
         .ok_or_else(|| "Horizon returned malformed offer seller".to_owned())?;
@@ -1168,5 +1607,127 @@ mod tests {
                 "buying_asset_type=credit_alphanum4&buying_asset_code=USD&buying_asset_issuer={ISSUER}"
             )
         );
+    }
+
+    #[test]
+    fn pair_trade_preserves_exact_price_and_base_side() {
+        let raw = serde_json::json!({
+            "id": "17",
+            "ledger_close_time": "2026-08-26T00:00:00Z",
+            "base_amount": "7.1000000",
+            "counter_amount": "14.2000000",
+            "price": {"n": 2, "d": 1},
+            "base_is_seller": true
+        });
+        let trade = pair_trade_from_horizon(raw).unwrap();
+        assert_eq!(trade.trade_id, "17");
+        assert_eq!(trade.price, "2.0000000");
+        assert_eq!((trade.price_n, trade.price_d), (Some(2), Some(1)));
+        assert_eq!(trade.base_side, DexTradeSide::Sell);
+    }
+
+    #[test]
+    fn pair_trade_falls_back_to_amount_ratio_without_false_zero() {
+        let raw = serde_json::json!({
+            "id": "18",
+            "base_amount": "3.0000000",
+            "counter_amount": "0.0000001",
+            "base_is_seller": false
+        });
+        let trade = pair_trade_from_horizon(raw).unwrap();
+        assert_eq!(trade.price, "<0.0000001");
+        assert_eq!((trade.price_n, trade.price_d), (None, None));
+        assert_eq!(trade.base_side, DexTradeSide::Buy);
+    }
+
+    #[test]
+    fn account_fills_merge_only_consecutive_same_user_offer() {
+        let first = serde_json::json!({
+            "id":"1",
+            "paging_token":"1",
+            "ledger_close_time":"2026-01-01T00:00:00Z",
+            "base_asset_type":"native",
+            "counter_asset_type":"credit_alphanum4",
+            "counter_asset_code":"USD",
+            "counter_asset_issuer":ISSUER,
+            "base_amount":"1.0000000",
+            "counter_amount":"2.0000000",
+            "price":{"n":2,"d":1},
+            "base_account":ISSUER,
+            "counter_account":"GOTHER",
+            "base_offer_id":"7",
+            "counter_offer_id":"8",
+            "base_is_seller":true
+        });
+        let second = serde_json::json!({
+            "id":"2",
+            "paging_token":"2",
+            "ledger_close_time":"2026-01-01T00:00:01Z",
+            "base_asset_type":"native",
+            "counter_asset_type":"credit_alphanum4",
+            "counter_asset_code":"USD",
+            "counter_asset_issuer":ISSUER,
+            "base_amount":"3.0000000",
+            "counter_amount":"6.0000000",
+            "price":{"n":2,"d":1},
+            "base_account":ISSUER,
+            "counter_account":"GOTHER",
+            "base_offer_id":"7",
+            "counter_offer_id":"9",
+            "base_is_seller":true
+        });
+        let fills = compress_account_trades(&[first, second], ISSUER).unwrap();
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].base_amount, "4.0000000");
+        assert_eq!(fills[0].counter_amount, "8.0000000");
+        assert_eq!(fills[0].price, "2.0000000");
+        assert_eq!(fills[0].trade_count, 2);
+        assert_eq!(fills[0].offer_id.as_deref(), Some("7"));
+        assert_eq!(fills[0].side, DexTradeSide::Sell);
+        assert_eq!(fills[0].counter_asset, format!("USD:{ISSUER}"));
+    }
+
+    #[test]
+    fn missing_offer_ids_do_not_merge_fills() {
+        let trade = serde_json::json!({
+            "id":"1",
+            "ledger_close_time":"2026-01-01T00:00:00Z",
+            "base_asset_type":"native",
+            "counter_asset_type":"native",
+            "base_amount":"1.0000000",
+            "counter_amount":"1.0000000",
+            "price":{"n":1,"d":1},
+            "base_is_seller":true
+        });
+        let fills = compress_account_trades(&[trade.clone(), trade], ISSUER).unwrap();
+        assert_eq!(fills.len(), 2);
+    }
+
+    #[test]
+    fn candle_validation_matches_horizon_rules() {
+        assert!(validate_candle_resolution(3_600_000).is_ok());
+        assert!(validate_candle_resolution(7_200_000).is_err());
+        assert!(validate_candle_offset(0, 3_600_000).is_ok());
+        assert!(validate_candle_offset(3_600_000, 3_600_000).is_ok());
+        assert!(validate_candle_offset(1_000, 86_400_000).is_err());
+        assert!(validate_candle_offset(86_400_000, 604_800_000).is_err());
+    }
+
+    #[test]
+    fn candle_parses_numeric_timestamp_and_transport_neutral_fields() {
+        let candle = candle_from_horizon(serde_json::json!({
+            "timestamp": 1582156800000_u64,
+            "trade_count": "3",
+            "open":"1.0000000",
+            "high":"2.0000000",
+            "low":"0.5000000",
+            "close":"1.5000000",
+            "base_volume":"10.0000000",
+            "counter_volume":"12.0000000"
+        }))
+        .unwrap();
+        assert_eq!(candle.timestamp, 1_582_156_800_000);
+        assert_eq!(candle.trade_count, 3);
+        assert_eq!(candle.counter_volume.as_deref(), Some("12.0000000"));
     }
 }

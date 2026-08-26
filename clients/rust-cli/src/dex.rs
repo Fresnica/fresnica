@@ -8,8 +8,6 @@ use fresnica_client::FresnicaClient;
 const MAX_PAGE_LIMIT: usize = 200;
 
 pub fn command_dex(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
-    let storage = client.storage();
-    let network = client.network();
     let Some(command) = arguments.first().map(String::as_str) else {
         return Err(usage().to_owned());
     };
@@ -17,7 +15,7 @@ pub fn command_dex(client: &FresnicaClient, arguments: &[String]) -> Result<(), 
         "orderbook" => command_orderbook(client, &arguments[1..]),
         "offers" => command_offers(client, &arguments[1..]),
         "buy" | "sell" | "update" | "cancel" => write::command_dex_write(client, arguments),
-        "trades" | "fills" | "candles" => history::command_dex_history(storage, network, arguments),
+        "trades" | "fills" | "candles" => history::command_dex_history(client, arguments),
         _ => Err(usage().to_owned()),
     }
 }

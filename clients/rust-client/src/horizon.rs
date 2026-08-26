@@ -78,6 +78,63 @@ impl HorizonClient {
         )
     }
 
+    pub fn get_trades(
+        &self,
+        base_query: &str,
+        counter_query: &str,
+        limit: usize,
+    ) -> Result<Vec<Value>, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("trades limit must be from 1 to 200".to_owned());
+        }
+        let response = self.get_json(
+            &format!("/trades?{base_query}&{counter_query}&order=desc&limit={limit}"),
+            "Unable to load Stellar trades",
+        )?;
+        records(response, "trade")
+    }
+
+    pub fn get_account_trades(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("account trades limit must be from 1 to 200".to_owned());
+        }
+        let response = self.get_json(
+            &format!("/accounts/{address}/trades?order=desc&limit={limit}"),
+            &format!("Stellar account not found: {address}"),
+        )?;
+        records(response, "account trade")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn get_trade_aggregations(
+        &self,
+        base_query: &str,
+        counter_query: &str,
+        resolution: u64,
+        start_time: Option<u64>,
+        end_time: Option<u64>,
+        offset: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<Value>, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("trade aggregation limit must be from 1 to 200".to_owned());
+        }
+        let mut path =
+            format!("/trade_aggregations?{base_query}&{counter_query}&resolution={resolution}");
+        if let Some(value) = start_time {
+            path.push_str(&format!("&start_time={value}"));
+        }
+        if let Some(value) = end_time {
+            path.push_str(&format!("&end_time={value}"));
+        }
+        if let Some(value) = offset {
+            path.push_str(&format!("&offset={value}"));
+        }
+        path.push_str(&format!("&order=desc&limit={limit}"));
+        let response = self.get_json(&path, "Unable to load Stellar trade aggregations")?;
+        records(response, "trade aggregation")
+    }
+
     pub fn get_transaction(&self, transaction_hash: &str) -> Result<Option<Value>, String> {
         let url = format!("{}/transactions/{transaction_hash}", self.base_url);
         let mut response = match ureq::get(&url).call() {
@@ -173,6 +230,15 @@ impl HorizonClient {
             .read_json::<Value>()
             .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
     }
+}
+
+fn records(value: Value, label: &str) -> Result<Vec<Value>, String> {
+    value
+        .get("_embedded")
+        .and_then(|value| value.get("records"))
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| format!("Horizon returned malformed {label} data"))
 }
 
 pub fn balance_asset_label(balance: &Value) -> String {
@@ -489,6 +555,63 @@ mod tests {
             .unwrap();
         assert_eq!(order_book["bids"], serde_json::json!([]));
         assert_eq!(order_book["asks"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn trades_are_requested_newest_first_for_explicit_pair() {
+        let body = r#"{"_embedded":{"records":[{"id":"7"}]}}"#;
+        let base = mock_server(
+            "GET",
+            "/trades?base_asset_type=native&counter_asset_type=credit_alphanum4&counter_asset_code=USD&counter_asset_issuer=GISSUER&order=desc&limit=20",
+            200,
+            body,
+        );
+        let trades = HorizonClient::new(&base)
+            .get_trades(
+                "base_asset_type=native",
+                "counter_asset_type=credit_alphanum4&counter_asset_code=USD&counter_asset_issuer=GISSUER",
+                20,
+            )
+            .unwrap();
+        assert_eq!(trades[0]["id"], "7");
+    }
+
+    #[test]
+    fn account_trades_are_requested_newest_first() {
+        let body = r#"{"_embedded":{"records":[{"id":"8"}]}}"#;
+        let base = mock_server(
+            "GET",
+            "/accounts/GACCOUNT/trades?order=desc&limit=200",
+            200,
+            body,
+        );
+        let trades = HorizonClient::new(&base)
+            .get_account_trades("GACCOUNT", 200)
+            .unwrap();
+        assert_eq!(trades[0]["id"], "8");
+    }
+
+    #[test]
+    fn trade_aggregations_preserve_time_window_offset_and_limit() {
+        let body = r#"{"_embedded":{"records":[{"timestamp":1}]}}"#;
+        let base = mock_server(
+            "GET",
+            "/trade_aggregations?base_asset_type=native&counter_asset_type=credit_alphanum4&counter_asset_code=USD&counter_asset_issuer=GISSUER&resolution=3600000&start_time=1000&end_time=2000&offset=0&order=desc&limit=10",
+            200,
+            body,
+        );
+        let candles = HorizonClient::new(&base)
+            .get_trade_aggregations(
+                "base_asset_type=native",
+                "counter_asset_type=credit_alphanum4&counter_asset_code=USD&counter_asset_issuer=GISSUER",
+                3_600_000,
+                Some(1000),
+                Some(2000),
+                Some(0),
+                10,
+            )
+            .unwrap();
+        assert_eq!(candles[0]["timestamp"], 1);
     }
 
     #[test]

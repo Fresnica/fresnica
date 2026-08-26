@@ -11,8 +11,9 @@ mod service;
 
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{
-    OfferAction, OfferOperation, OfferRequest, OfferReview, OfferReviewDetails, OfferSide,
-    OpenOffer, OpenOffersSnapshot, OrderBookLevel, OrderBookSnapshot, PreparedOffer,
+    AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
+    OfferRequest, OfferReview, OfferReviewDetails, OfferSide, OpenOffer, OpenOffersSnapshot,
+    OrderBookLevel, OrderBookSnapshot, PairTrade, PairTradesSnapshot, PreparedOffer, TradeCandle,
 };
 pub use horizon::{
     balance_asset_label, operation_summary, HorizonClient, LedgerParameters, SubmissionError,
