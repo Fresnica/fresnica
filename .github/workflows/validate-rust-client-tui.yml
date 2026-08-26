@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply candidate commits
+      - name: Apply exact candidate commits
         shell: bash
         run: |
           cat .github/assistant/rust-client-tui.patch.gz.b64.part-* > /tmp/candidate.b64
@@ -27,19 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Format candidate
+      - name: Formatting
         run: |
-          cargo fmt --manifest-path clients/rust-client/Cargo.toml
-          cargo fmt --manifest-path clients/rust-cli/Cargo.toml
-          cargo fmt --manifest-path clients/rust-tui/Cargo.toml
-          git diff --check
-          git diff -- clients/rust-client clients/rust-cli clients/rust-tui > /tmp/rustfmt.patch
-      - name: Upload rustfmt patch
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-client-tui-rustfmt
-          path: /tmp/rustfmt.patch
-          if-no-files-found: error
+          cargo fmt --manifest-path clients/rust-client/Cargo.toml -- --check
+          cargo fmt --manifest-path clients/rust-cli/Cargo.toml -- --check
+          cargo fmt --manifest-path clients/rust-tui/Cargo.toml -- --check
+          git diff --check HEAD~5..HEAD
       - name: SDK boundary
         run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
       - name: Shared client tests
