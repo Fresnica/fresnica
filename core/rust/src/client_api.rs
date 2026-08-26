@@ -652,13 +652,15 @@ mod tests {
                 OTHER_PUBLIC,
                 1,
             )
-            .unwrap_err();
+            .err()
+            .expect("identity mismatch must fail");
         assert_eq!(error.code(), ClientApiErrorCode::IdentityMismatch);
 
         let secret = api.protect_secret(SECRET, "passcode", None).unwrap();
         let error = api
             .derive_mnemonic_signer(&secret.envelope, "passcode", PUBLIC, 1)
-            .unwrap_err();
+            .err()
+            .expect("secret-backed source must fail");
         assert_eq!(error.code(), ClientApiErrorCode::InvalidInput);
     }
 
