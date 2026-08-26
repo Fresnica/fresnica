@@ -1,0 +1,46 @@
+name: Apply Mobile SDK migration docs
+
+on:
+  push:
+    branches:
+      - docs/mobile-sdk-v0.1.0-handoff
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/mobile-sdk-v0.1.0-handoff
+          fetch-depth: 0
+
+      - name: Apply staged migration patch
+        run: |
+          set -euo pipefail
+          cat .ci/mobile-sdk-migration.patch.b64.part* > /tmp/mobile-sdk-migration.b64
+          test "$(wc -c < /tmp/mobile-sdk-migration.b64)" -eq 28748
+          test "$(sha256sum /tmp/mobile-sdk-migration.b64 | cut -d' ' -f1)" = "3767bef04bc5971504fb76a78b6109f4920a480c6d1d4d42ccb63fb7fbfa357a"
+          base64 -d /tmp/mobile-sdk-migration.b64 > /tmp/mobile-sdk-migration.patch.gz
+          gunzip -c /tmp/mobile-sdk-migration.patch.gz > /tmp/mobile-sdk-migration.patch
+          test "$(wc -c < /tmp/mobile-sdk-migration.patch)" -eq 70836
+          test "$(sha256sum /tmp/mobile-sdk-migration.patch | cut -d' ' -f1)" = "fae717d9c0d666d0908331530ebbc402d77e28a6cd7cc47e5ca5984a16fbe22e"
+          git apply --check /tmp/mobile-sdk-migration.patch
+          git apply /tmp/mobile-sdk-migration.patch
+          git diff --check
+          node sdk/compatibility/validate.mjs
+          npm test --prefix adapters/react-native
+
+      - name: Commit migration handoff
+        run: |
+          set -euo pipefail
+          rm -rf .ci
+          rm -f .github/workflows/apply-mobile-sdk-migration-docs.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Complete Mobile SDK migration handoff"
+          git push origin HEAD:docs/mobile-sdk-v0.1.0-handoff
