@@ -11,9 +11,7 @@ use crate::transaction_flow::{
     format_stroops, minimum_balance_stroops, network_client, parse_stroops, resolve_signing_wallet,
     sign_and_submit, STROOPS_PER_XLM,
 };
-use fresnica_client::{
-    WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
-};
+use fresnica_client::{WalletRecord, WalletStorage, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 
 const FRESNICA_TRUSTLINE_LIMIT: &str = "708269837873.6765";
 const INT32_MAX: i64 = i32::MAX as i64;
