@@ -86,7 +86,10 @@ def _project_transfer(review: TransactionReview) -> ReviewPresentation:
 
 def _project_offer(review: OfferReview) -> ReviewPresentation:
     warnings = (
-        (f"Creates trustline for {review.trustline_asset}",)
+        (
+            f"Creates trustline for {review.trustline_asset}"
+            + (f" with limit {review.trustline_limit}" if review.trustline_limit else ""),
+        )
         if review.trustline_asset
         else ()
     )

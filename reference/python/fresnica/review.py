@@ -33,6 +33,7 @@ class OfferReview:
     network: str
     offer_id: str | None = None
     trustline_asset: str | None = None
+    trustline_limit: str | None = None
 
 
 @dataclass(frozen=True)

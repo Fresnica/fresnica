@@ -15,6 +15,7 @@ from fresnica.offer_service import OfferService, offer_view_for_pair, open_offer
 from fresnica.submit_service import SubmitService
 from fresnica.transaction_builder_service import TransactionBuilderService
 from fresnica.transaction_service import TransactionService
+from fresnica.trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from fresnica.wallet import Wallet
 
 
@@ -173,6 +174,7 @@ def test_missing_receiving_trustline_requires_explicit_approval():
     assert kind == "buy"
     assert kwargs["trustline_asset"] == pair.base
     assert prepared.review.trustline_asset == f"XRP:{pair.base.issuer}"
+    assert prepared.review.trustline_limit == FRESNICA_TRUSTLINE_LIMIT_TEXT
     assert prepared.review.fee == "0.00002"
 
 

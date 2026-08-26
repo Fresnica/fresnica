@@ -1412,6 +1412,7 @@ impl App {
                 price,
                 total,
                 trustline_asset,
+                trustline_limit,
             } => {
                 lines.push(Line::from(format!("Side:      {}", side.label())));
                 lines.push(Line::from(format!("Pair:      {base} / {counter}")));
@@ -1419,8 +1420,12 @@ impl App {
                 lines.push(Line::from(format!("Price:     {price} {counter}/{base}")));
                 lines.push(Line::from(format!("Total:     {total} {counter}")));
                 if let Some(asset) = trustline_asset {
+                    let limit = trustline_limit
+                        .as_deref()
+                        .map(|value| format!("; limit {value}"))
+                        .unwrap_or_default();
                     lines.push(Line::from(format!(
-                        "Trustline: + {asset} (explicitly approved)"
+                        "Trustline: + {asset}{limit} (explicitly approved)"
                     )));
                 }
             }

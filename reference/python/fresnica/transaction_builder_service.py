@@ -148,6 +148,9 @@ class TransactionBuilderService:
             network=self.adapter.network.name,
             offer_id=str(offer_id) if offer_id else None,
             trustline_asset=_review_asset(trustline_asset) if trustline_asset else None,
+            trustline_limit=(
+                FRESNICA_TRUSTLINE_LIMIT_TEXT if trustline_asset is not None else None
+            ),
         )
         return PreparedTransaction(envelope=envelope, review=review)
 

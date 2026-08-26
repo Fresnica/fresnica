@@ -458,6 +458,11 @@ class OfferReviewDialog(ModalScreen[bool]):
         else:
             trustline = (
                 f"\nAlso create trustline: {self.review.trustline_asset}"
+                + (
+                    f"\nTrustline limit: {self.review.trustline_limit}"
+                    if self.review.trustline_limit
+                    else ""
+                )
                 if self.review.trustline_asset
                 else ""
             )

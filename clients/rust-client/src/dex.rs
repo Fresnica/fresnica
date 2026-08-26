@@ -115,6 +115,7 @@ pub enum OfferReviewDetails {
         price: String,
         total: String,
         trustline_asset: Option<String>,
+        trustline_limit: Option<String>,
     },
     Cancel {
         selling: String,
@@ -565,6 +566,7 @@ impl FresnicaClient {
                     price: format_stroops(price_stroops),
                     total: format_scaled_product(amount, price_stroops),
                     trustline_asset: adds_trustline.then(|| buying.display()),
+                    trustline_limit: adds_trustline.then(|| DEFAULT_TRUSTLINE_LIMIT.to_owned()),
                 },
             },
             wallet,
@@ -634,6 +636,7 @@ impl FresnicaClient {
                     price: format_stroops(price_stroops),
                     total: format_scaled_product(amount, price_stroops),
                     trustline_asset: None,
+                    trustline_limit: None,
                 },
             },
             wallet,

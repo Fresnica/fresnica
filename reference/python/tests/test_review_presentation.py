@@ -65,6 +65,7 @@ def test_buy_review_labels_total_as_max_spend_and_trustline_as_warning():
         fee="0.00002",
         network="mainnet",
         trustline_asset="XRP:GXRP",
+        trustline_limit="708269837873.6765",
     )
 
     presentation = project_review(review)
@@ -74,7 +75,7 @@ def test_buy_review_labels_total_as_max_spend_and_trustline_as_warning():
     assert fields["Pair"] == "XRP:GXRP / USDC:GUSDC"
     assert fields["Max spend"] == "32.5 USDC:GUSDC"
     assert "Min receive" not in fields
-    assert presentation.warnings == ("Creates trustline for XRP:GXRP",)
+    assert presentation.warnings == ("Creates trustline for XRP:GXRP with limit 708269837873.6765",)
 
 
 def test_sell_review_labels_total_as_min_receive():

@@ -74,6 +74,7 @@ def test_offer_review_uses_shared_risk_semantics():
             fee="0.00002",
             network="testnet",
             trustline_asset="XRP:GXRP",
+            trustline_limit="708269837873.6765",
         )
     )
 
