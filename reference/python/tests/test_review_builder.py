@@ -8,6 +8,7 @@ from fresnica.offer_service import OfferService
 from fresnica.submit_service import SubmitService
 from fresnica.transaction_builder_service import TransactionBuilderService
 from fresnica.transaction_service import TransactionService
+from fresnica.trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 from fresnica.wallet import Wallet
 
 
@@ -56,7 +57,7 @@ def test_payment_review_keeps_full_issued_asset_identity():
     assert prepared.review.asset == f"USDC:{issuer}"
 
 
-def test_trustline_review_distinguishes_default_maximum_from_remove_zero():
+def test_trustline_review_uses_fresnica_default_and_distinguishes_remove_zero():
     adapter = FakeAdapter()
     builder = TransactionBuilderService(adapter)
     wallet = Wallet.from_secret(Keypair.random().secret)
@@ -69,8 +70,8 @@ def test_trustline_review_distinguishes_default_maximum_from_remove_zero():
         base_fee_stroops=100,
         action="add",
     )
-    assert adapter.trustline["limit"] is None
-    assert added.review.limit == "Stellar maximum"
+    assert adapter.trustline["limit"] == FRESNICA_TRUSTLINE_LIMIT_TEXT
+    assert added.review.limit == FRESNICA_TRUSTLINE_LIMIT_TEXT
 
     removed = builder.build_trustline(
         wallet_name="main",

@@ -2,6 +2,8 @@
 
 import argparse
 
+from ..trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
+
 LANGUAGES = (
     "english",
     "chinese_simplified",
@@ -171,7 +173,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     trust_add = trust_sub.add_parser("add", help="Create a trustline")
     trust_add.add_argument("asset", help="Issued asset as CODE:GISSUER")
-    trust_add.add_argument("--limit", help="Optional trustline limit; defaults to Stellar maximum")
+    trust_add.add_argument(
+        "--limit",
+        help=f"Optional trustline limit; defaults to Fresnica canonical {FRESNICA_TRUSTLINE_LIMIT_TEXT}",
+    )
     trust_add.add_argument("--wallet", help="Wallet name; defaults to active wallet")
     trust_add.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
 

@@ -39,7 +39,7 @@
 - [ ] Align Rust SDEX create/update `OfferReview` with the exact encoded Stellar `Price { n, d }` when decimal input requires rational approximation; requested price alone is not sufficient review truth
 - [ ] Extend SDEX conformance vectors with exact, approximated and signed-int32-boundary decimal-price rationalization cases when the Rust reference gap is fixed
 - [ ] Expose the effective trustline limit in Rust/RefPython SDEX review whenever offer preparation adds a receiving trustline; the operation already uses the canonical Fresnica marker but current review only carries the asset
-- [ ] Clean legacy RefPython lower-level trustline builder/help/test wording that still says `Stellar maximum`; current `TrustlineService` already supplies the canonical Fresnica `708269837873.6765` marker
+- [x] Clean legacy RefPython lower-level trustline builder/help/test wording that still says `Stellar maximum`; current `TrustlineService` already supplies the canonical Fresnica `708269837873.6765` marker
 - [ ] Rework Rust/RefPython SDEX preflight around final ledger effect: exact integer-stroop liabilities/rounding, receiving capacity, issuer special cases, replacement liabilities on update, and fee/authorization handling on cancel
 - [ ] Add Balance/Payment receiving-capacity semantics in Rust/RefPython, including issued trustline limit/buying-liability headroom, native `INT64_MAX` headroom and issuer-own-asset special handling
 - [ ] Add Payment source/destination trustline full-authorization and destination-capacity preflight plus explicit SEP-29 `memo_required` protection to the Rust shared Payment path; keep issuer-special/orphaned-issuer behavior aligned with current protocol

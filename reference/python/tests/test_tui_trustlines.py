@@ -74,7 +74,13 @@ class FakeTrustlineService:
 
     def prepare_add(self, wallet_name, wallet, asset, limit=None):
         self.calls.append(("add", asset, limit))
-        return self._prepared(wallet_name, wallet, "add", asset, limit or "Stellar maximum")
+        return self._prepared(
+            wallet_name,
+            wallet,
+            "add",
+            asset,
+            limit or FRESNICA_TRUSTLINE_LIMIT_TEXT,
+        )
 
     def prepare_limit(self, wallet_name, wallet, asset, limit):
         self.calls.append(("limit", asset, limit))

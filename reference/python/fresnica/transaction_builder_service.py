@@ -6,6 +6,7 @@ from decimal import Decimal
 from .availability import STROOPS_PER_XLM
 from .models import Asset, OfferIntent, OfferView, OpenOffer
 from .review import OfferReview, TransactionReview, TrustlineReview
+from .trustline_policy import FRESNICA_TRUSTLINE_LIMIT_TEXT
 
 
 @dataclass
@@ -66,16 +67,18 @@ class TransactionBuilderService:
         action: str,
         limit: Decimal | None = None,
     ) -> PreparedTransaction:
-        operation_limit = _amount_text(limit) if limit is not None else None
+        operation_limit = (
+            _amount_text(limit)
+            if limit is not None
+            else FRESNICA_TRUSTLINE_LIMIT_TEXT if action == "add" else None
+        )
         envelope = self.adapter.build_change_trust(
             source=wallet.address(),
             asset=asset,
             limit=operation_limit,
             base_fee=base_fee_stroops,
         )
-        if action == "add" and operation_limit is None:
-            review_limit = "Stellar maximum"
-        elif action == "remove":
+        if action == "remove":
             review_limit = None
         else:
             review_limit = operation_limit
