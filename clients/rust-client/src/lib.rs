@@ -12,7 +12,7 @@ mod service;
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{
     OfferAction, OfferOperation, OfferRequest, OfferReview, OfferReviewDetails, OfferSide,
-    OpenOffer, OpenOffersSnapshot, PreparedOffer,
+    OpenOffer, OpenOffersSnapshot, OrderBookLevel, OrderBookSnapshot, PreparedOffer,
 };
 pub use horizon::{
     balance_asset_label, operation_summary, HorizonClient, LedgerParameters, SubmissionError,

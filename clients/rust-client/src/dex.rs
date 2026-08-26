@@ -155,6 +155,22 @@ pub struct OpenOffer {
     pub last_modified_time: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OrderBookLevel {
+    pub amount: String,
+    pub price: String,
+    pub price_n: i32,
+    pub price_d: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OrderBookSnapshot {
+    pub base: String,
+    pub counter: String,
+    pub bids: Vec<OrderBookLevel>,
+    pub asks: Vec<OrderBookLevel>,
+}
+
 impl OpenOffer {
     fn from_horizon(raw: Value) -> Result<Self, String> {
         let offer_id = integer(raw.get("id"))
@@ -204,6 +220,33 @@ pub struct OpenOffersSnapshot {
 }
 
 impl FresnicaClient {
+    pub fn order_book(
+        &self,
+        base_text: &str,
+        counter_text: &str,
+    ) -> Result<OrderBookSnapshot, String> {
+        let base = OfferAsset::parse(base_text)?;
+        let counter = OfferAsset::parse(counter_text)?;
+        ensure_pair(&base, &counter)?;
+        let raw = self
+            .horizon()
+            .get_order_book(&base.query("selling"), &counter.query("buying"))?;
+        let bids = order_book_rows(&raw, "bids")?
+            .iter()
+            .map(order_book_bid)
+            .collect::<Result<Vec<_>, _>>()?;
+        let asks = order_book_rows(&raw, "asks")?
+            .iter()
+            .map(order_book_ask)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(OrderBookSnapshot {
+            base: base.display(),
+            counter: counter.display(),
+            bids,
+            asks,
+        })
+    }
+
     pub fn open_offers(
         &self,
         wallet_name: Option<&str>,
@@ -541,6 +584,22 @@ impl OfferAsset {
         }
     }
 
+    fn query(&self, prefix: &str) -> String {
+        match self {
+            Self::Native => format!("{prefix}_asset_type=native"),
+            Self::Credit { code, issuer } => {
+                let asset_type = if code.len() <= 4 {
+                    "credit_alphanum4"
+                } else {
+                    "credit_alphanum12"
+                };
+                format!(
+                    "{prefix}_asset_type={asset_type}&{prefix}_asset_code={code}&{prefix}_asset_issuer={issuer}"
+                )
+            }
+        }
+    }
+
     fn is_native(&self) -> bool {
         matches!(self, Self::Native)
     }
@@ -844,6 +903,76 @@ fn horizon_price(offer: &Value) -> Result<Price, String> {
     Ok(Price { n, d })
 }
 
+fn order_book_rows<'a>(value: &'a Value, key: &str) -> Result<&'a [Value], String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .ok_or_else(|| format!("Horizon returned malformed order book {key}"))
+}
+
+fn order_book_bid(value: &Value) -> Result<OrderBookLevel, String> {
+    let amount = parse_stroops(text(value, "amount").unwrap_or(""), true)
+        .map_err(|_| "Horizon returned invalid order book amount".to_owned())?;
+    let price = horizon_price(value)?;
+    let numerator = i128::from(amount)
+        .checked_mul(i128::from(price.d))
+        .ok_or_else(|| "order book bid amount overflow".to_owned())?;
+    let base_stroops = round_ratio(numerator, i128::from(price.n))?;
+    Ok(OrderBookLevel {
+        amount: format_scaled_7(base_stroops),
+        price: format_price_ratio(price.n, price.d)?,
+        price_n: price.n,
+        price_d: price.d,
+    })
+}
+
+fn order_book_ask(value: &Value) -> Result<OrderBookLevel, String> {
+    let amount = parse_stroops(text(value, "amount").unwrap_or(""), true)
+        .map_err(|_| "Horizon returned invalid order book amount".to_owned())?;
+    let price = horizon_price(value)?;
+    Ok(OrderBookLevel {
+        amount: format_scaled_7(i128::from(amount)),
+        price: format_price_ratio(price.n, price.d)?,
+        price_n: price.n,
+        price_d: price.d,
+    })
+}
+
+fn format_price_ratio(n: i32, d: i32) -> Result<String, String> {
+    let numerator = i128::from(n)
+        .checked_mul(i128::from(STROOPS_PER_XLM))
+        .ok_or_else(|| "price display overflow".to_owned())?;
+    if numerator
+        .checked_mul(2)
+        .ok_or_else(|| "price display overflow".to_owned())?
+        < i128::from(d)
+    {
+        return Ok("<0.0000001".to_owned());
+    }
+    Ok(format_scaled_7(round_ratio(numerator, i128::from(d))?))
+}
+
+fn round_ratio(numerator: i128, denominator: i128) -> Result<i128, String> {
+    if numerator < 0 || denominator <= 0 {
+        return Err("invalid non-negative decimal ratio".to_owned());
+    }
+    let quotient = numerator / denominator;
+    let remainder = numerator % denominator;
+    Ok(if remainder.saturating_mul(2) >= denominator {
+        quotient + 1
+    } else {
+        quotient
+    })
+}
+
+fn format_scaled_7(value: i128) -> String {
+    let scale = i128::from(STROOPS_PER_XLM);
+    let whole = value / scale;
+    let fraction = value % scale;
+    format!("{whole}.{fraction:07}")
+}
+
 fn ensure_offer_owner(offer: &Value, record: &WalletRecord) -> Result<(), String> {
     let seller = text(offer, "seller")
         .ok_or_else(|| "Horizon returned malformed offer seller".to_owned())?;
@@ -997,5 +1126,47 @@ mod tests {
         assert_eq!(encoded["selling"], "XLM");
         assert_eq!(encoded["buying"], format!("USD:{ISSUER}"));
         assert!(encoded.get("_links").is_none());
+    }
+
+    #[test]
+    fn order_book_bid_normalizes_horizon_counter_amount_to_base() {
+        let row = serde_json::json!({
+            "amount": "14.2000000",
+            "price": "2.0000000",
+            "price_r": {"n": 2, "d": 1}
+        });
+        let level = order_book_bid(&row).unwrap();
+        assert_eq!(level.amount, "7.1000000");
+        assert_eq!(level.price, "2.0000000");
+        assert_eq!((level.price_n, level.price_d), (2, 1));
+    }
+
+    #[test]
+    fn order_book_ask_keeps_base_amount_and_exact_price_ratio() {
+        let row = serde_json::json!({
+            "amount": "7.2000000",
+            "price": "2.1000000",
+            "price_r": {"n": 21, "d": 10}
+        });
+        let level = order_book_ask(&row).unwrap();
+        assert_eq!(level.amount, "7.2000000");
+        assert_eq!(level.price, "2.1000000");
+        assert_eq!((level.price_n, level.price_d), (21, 10));
+    }
+
+    #[test]
+    fn order_book_tiny_nonzero_price_does_not_render_as_zero() {
+        assert_eq!(format_price_ratio(1, 30_000_000).unwrap(), "<0.0000001");
+    }
+
+    #[test]
+    fn order_book_query_preserves_full_asset_identity() {
+        let asset = OfferAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        assert_eq!(
+            asset.query("buying"),
+            format!(
+                "buying_asset_type=credit_alphanum4&buying_asset_code=USD&buying_asset_issuer={ISSUER}"
+            )
+        );
     }
 }

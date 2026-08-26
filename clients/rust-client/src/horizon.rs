@@ -71,6 +71,13 @@ impl HorizonClient {
             .ok_or_else(|| "Horizon returned malformed offer data".to_owned())
     }
 
+    pub fn get_order_book(&self, selling_query: &str, buying_query: &str) -> Result<Value, String> {
+        self.get_json(
+            &format!("/order_book?{selling_query}&{buying_query}"),
+            "Unable to load Stellar order book",
+        )
+    }
+
     pub fn get_transaction(&self, transaction_hash: &str) -> Result<Option<Value>, String> {
         let url = format!("{}/transactions/{transaction_hash}", self.base_url);
         let mut response = match ureq::get(&url).call() {
@@ -463,6 +470,25 @@ mod tests {
             .unwrap();
         assert_eq!(offers.len(), 1);
         assert_eq!(offers[0]["id"], "42");
+    }
+
+    #[test]
+    fn order_book_uses_explicit_selling_and_buying_asset_queries() {
+        let body = r#"{"bids":[],"asks":[]}"#;
+        let base = mock_server(
+            "GET",
+            "/order_book?selling_asset_type=native&buying_asset_type=credit_alphanum4&buying_asset_code=USD&buying_asset_issuer=GISSUER",
+            200,
+            body,
+        );
+        let order_book = HorizonClient::new(&base)
+            .get_order_book(
+                "selling_asset_type=native",
+                "buying_asset_type=credit_alphanum4&buying_asset_code=USD&buying_asset_issuer=GISSUER",
+            )
+            .unwrap();
+        assert_eq!(order_book["bids"], serde_json::json!([]));
+        assert_eq!(order_book["asks"], serde_json::json!([]));
     }
 
     #[test]
