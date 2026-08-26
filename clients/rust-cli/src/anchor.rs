@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::io::Read;
+use std::path::Path;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,7 +22,11 @@ use crate::transaction_flow::{
     has_valid_transaction_signature, network_client, network_passphrase, parse_transaction_xdr,
     resolve_local_signing_wallet, resolve_signing_wallet, sign_transaction_xdr_with_wallet,
 };
-use fresnica_client::{FresnicaClient, PaymentMemo, WalletRecord, WalletStorage};
+use fresnica_client::{
+    get_anchor_customer, put_anchor_customer, AnchorCustomerFile, AnchorCustomerQuery,
+    AnchorCustomerSnapshot, AnchorCustomerUpdate, FresnicaClient, PaymentMemo, WalletRecord,
+    WalletStorage,
+};
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
 
@@ -138,6 +144,7 @@ pub fn command_anchor(client: &FresnicaClient, arguments: &[String]) -> Result<(
             &arguments[1..],
         ),
         "status" => command_status(client, &arguments[1..]),
+        "customer" => command_customer(storage, network, &arguments[1..]),
         _ => Err(usage().to_owned()),
     }
 }
@@ -261,6 +268,315 @@ fn command_auth(
     println!("Address:       {}", record.address);
     println!("Token:         verified in memory, then discarded");
     drop(token);
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct AnchorCustomerInput {
+    #[serde(default)]
+    fields: BTreeMap<String, JsonValue>,
+    #[serde(default)]
+    files: BTreeMap<String, AnchorCustomerInputFile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AnchorCustomerInputFile {
+    Path(String),
+    Detail {
+        path: String,
+        #[serde(default)]
+        content_type: Option<String>,
+    },
+}
+
+fn command_customer(
+    storage: &WalletStorage,
+    network: &str,
+    arguments: &[String],
+) -> Result<(), String> {
+    if arguments.is_empty() {
+        return Err(usage().to_owned());
+    }
+    let asset = IssuedAsset::parse(&arguments[0])?;
+    let mut wallet = None;
+    let mut customer_id = None;
+    let mut transaction_id = None;
+    let mut customer_type = None;
+    let mut lang = None;
+    let mut input = None;
+    let mut json = false;
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--wallet" => {
+                index += 1;
+                wallet = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--wallet requires a wallet name".to_owned())?
+                        .as_str(),
+                );
+                index += 1;
+            }
+            "--id" => {
+                index += 1;
+                customer_id = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--id requires a customer id".to_owned())?
+                        .to_owned(),
+                );
+                index += 1;
+            }
+            "--transaction" => {
+                index += 1;
+                transaction_id = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| {
+                            "--transaction requires an anchor transaction id".to_owned()
+                        })?
+                        .to_owned(),
+                );
+                index += 1;
+            }
+            "--type" => {
+                index += 1;
+                customer_type = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--type requires a customer type".to_owned())?
+                        .to_owned(),
+                );
+                index += 1;
+            }
+            "--lang" => {
+                index += 1;
+                lang = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--lang requires a language code".to_owned())?
+                        .to_owned(),
+                );
+                index += 1;
+            }
+            "--input" => {
+                index += 1;
+                input = Some(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--input requires a JSON path or - for stdin".to_owned())?
+                        .to_owned(),
+                );
+                index += 1;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            _ => return Err(usage().to_owned()),
+        }
+    }
+    if input.is_some() && lang.is_some() {
+        return Err("--lang is only valid for SEP-12 customer status lookup".to_owned());
+    }
+
+    let (home_domain, capabilities) = resolve_anchor(network, &asset)?;
+    let server = capabilities
+        .kyc_url
+        .as_deref()
+        .or(capabilities.sep6_url.as_deref())
+        .ok_or_else(|| {
+            format!(
+                "{} does not advertise KYC_SERVER or TRANSFER_SERVER for SEP-12",
+                capabilities.domain
+            )
+        })?;
+    let record = resolve_anchor_wallet(storage, network, wallet)?;
+    let token = authenticate_anchor_sep10(&record, network, &home_domain, &capabilities)?;
+
+    if let Some(input) = input.as_deref() {
+        let customer_input = read_anchor_customer_input(input)?;
+        let update = build_anchor_customer_update(
+            customer_id,
+            transaction_id,
+            customer_type,
+            customer_input,
+        )?;
+        let result = put_anchor_customer(server, token.as_str(), &update)?;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "asset": asset.display(),
+                    "network": network,
+                    "anchor": capabilities.domain,
+                    "wallet": record.name,
+                    "customer": result,
+                }))
+                .map_err(|error| format!("unable to encode SEP-12 customer result: {error}"))?
+            );
+        } else {
+            println!(
+                "Anchor customer updated · {} [{}]",
+                asset.display(),
+                network
+            );
+            println!("Anchor:      {}", capabilities.domain);
+            println!("Wallet:      {}", record.name);
+            println!("Customer:    {}", result.id);
+            println!("Next:        query customer status with --id {}", result.id);
+        }
+        return Ok(());
+    }
+
+    let query = AnchorCustomerQuery {
+        id: customer_id,
+        customer_type,
+        transaction_id,
+        lang,
+    };
+    let snapshot = get_anchor_customer(server, token.as_str(), &query)?;
+    render_anchor_customer(
+        &asset,
+        &record,
+        network,
+        &capabilities.domain,
+        &snapshot,
+        json,
+    )
+}
+
+fn read_anchor_customer_input(source: &str) -> Result<AnchorCustomerInput, String> {
+    let text = if source == "-" {
+        let mut text = String::new();
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .map_err(|error| format!("unable to read SEP-12 JSON from stdin: {error}"))?;
+        text
+    } else {
+        std::fs::read_to_string(source)
+            .map_err(|error| format!("unable to read SEP-12 input {source}: {error}"))?
+    };
+    serde_json::from_str(&text).map_err(|error| format!("invalid SEP-12 input JSON: {error}"))
+}
+
+fn build_anchor_customer_update(
+    id: Option<String>,
+    transaction_id: Option<String>,
+    customer_type: Option<String>,
+    input: AnchorCustomerInput,
+) -> Result<AnchorCustomerUpdate, String> {
+    let mut fields = BTreeMap::new();
+    for (name, value) in input.fields {
+        let value = match value {
+            JsonValue::String(value) => value,
+            JsonValue::Number(value) => value.to_string(),
+            _ => {
+                return Err(format!(
+                    "SEP-12 field {name} must be a string or number in the Rust CLI input"
+                ))
+            }
+        };
+        fields.insert(name, value);
+    }
+
+    let mut files = Vec::with_capacity(input.files.len());
+    for (name, file) in input.files {
+        let (path, content_type) = match file {
+            AnchorCustomerInputFile::Path(path) => (path, None),
+            AnchorCustomerInputFile::Detail { path, content_type } => (path, content_type),
+        };
+        let bytes = std::fs::read(&path)
+            .map_err(|error| format!("unable to read SEP-12 file {path}: {error}"))?;
+        let file_name = Path::new(&path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("SEP-12 file path has no usable file name: {path}"))?;
+        files.push(AnchorCustomerFile {
+            name,
+            file_name: file_name.to_owned(),
+            content_type,
+            bytes,
+        });
+    }
+
+    Ok(AnchorCustomerUpdate {
+        id,
+        customer_type,
+        transaction_id,
+        fields,
+        files,
+    })
+}
+
+fn render_anchor_customer(
+    asset: &IssuedAsset,
+    record: &WalletRecord,
+    network: &str,
+    domain: &str,
+    snapshot: &AnchorCustomerSnapshot,
+    json: bool,
+) -> Result<(), String> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "asset": asset.display(),
+                "network": network,
+                "anchor": domain,
+                "wallet": record.name,
+                "customer": snapshot,
+            }))
+            .map_err(|error| format!("unable to encode SEP-12 customer status: {error}"))?
+        );
+        return Ok(());
+    }
+
+    println!("Anchor customer · {} [{}]", asset.display(), network);
+    println!("Anchor:      {domain}");
+    println!("Wallet:      {}", record.name);
+    println!("Status:      {}", snapshot.status.label());
+    if let Some(id) = snapshot.id.as_deref() {
+        println!("Customer:    {id}");
+    }
+    if let Some(message) = snapshot.message.as_deref() {
+        println!("Message:     {message}");
+    }
+    if !snapshot.required_fields.is_empty() {
+        println!("Required:");
+        for field in &snapshot.required_fields {
+            let kind = field.field_type.as_deref().unwrap_or("unknown");
+            let required = if field.optional {
+                "optional"
+            } else {
+                "required"
+            };
+            let mut detail = format!("  {} [{} · {}]", field.name, kind, required);
+            if !field.choices.is_empty() {
+                detail.push_str(&format!(" choices={}", field.choices.join("|")));
+            }
+            println!("{detail}");
+            if let Some(description) = field.description.as_deref() {
+                println!("    {description}");
+            }
+        }
+    }
+    if !snapshot.provided_fields.is_empty() {
+        println!("Provided:");
+        for field in &snapshot.provided_fields {
+            let status = field
+                .status
+                .map(|value| value.label())
+                .unwrap_or("RECEIVED");
+            println!("  {} [{}]", field.name, status);
+            if let Some(error) = field.error.as_deref() {
+                println!("    {error}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -808,6 +1124,11 @@ fn render_anchor_transaction_status(
         )
     {
         println!("Next action: withdrawal payment is ready; rerun with --pay to review it.");
+    }
+    if transaction_text(transaction, "status") == Some("pending_customer_info_update") {
+        println!(
+            "Next action: anchor requires customer information; use `anchor customer` for SEP-12 status/update."
+        );
     }
     Ok(())
 }
@@ -1778,7 +2099,8 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor deposit CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor withdraw CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor status CODE:GISSUER ID [--wallet NAME] [--protocol sep24|sep6] [--pay] [-y] [--json]"
+    "usage:\n  fresnica [--network mainnet|testnet] anchor discover CODE:GISSUER [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor auth CODE:GISSUER [--wallet NAME]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor deposit CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor withdraw CODE:GISSUER [--wallet NAME] [--field NAME=VALUE]... [--json]\n  fresnica [--home PATH] [--network mainnet|testnet] anchor status CODE:GISSUER ID [--wallet NAME] [--protocol sep24|sep6] [--pay] [-y] [--json]
+  fresnica [--home PATH] [--network mainnet|testnet] anchor customer CODE:GISSUER [--wallet NAME] [--id CUSTOMER_ID] [--transaction ID --type TYPE] [--type TYPE] [--lang en] [--input PATH|-] [--json]"
 }
 
 #[cfg(test)]
@@ -2524,6 +2846,61 @@ issuer = "{ISSUER}"
             &asset(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn sep12_customer_input_accepts_scalar_fields_and_binary_files() {
+        let path =
+            std::env::temp_dir().join(format!("fresnica-sep12-{}-id.jpg", std::process::id()));
+        std::fs::write(&path, [1_u8, 2, 3]).unwrap();
+        let input = AnchorCustomerInput {
+            fields: BTreeMap::from([
+                ("first_name".to_owned(), JsonValue::String("Ada".to_owned())),
+                ("annual_income".to_owned(), serde_json::json!(42)),
+            ]),
+            files: BTreeMap::from([(
+                "photo_id_front".to_owned(),
+                AnchorCustomerInputFile::Detail {
+                    path: path.to_string_lossy().into_owned(),
+                    content_type: Some("image/jpeg".to_owned()),
+                },
+            )]),
+        };
+        let update = build_anchor_customer_update(
+            Some("customer-1".to_owned()),
+            None,
+            Some("sep6".to_owned()),
+            input,
+        )
+        .unwrap();
+        assert_eq!(
+            update.fields.get("first_name").map(String::as_str),
+            Some("Ada")
+        );
+        assert_eq!(
+            update.fields.get("annual_income").map(String::as_str),
+            Some("42")
+        );
+        assert_eq!(update.files.len(), 1);
+        assert_eq!(update.files[0].name, "photo_id_front");
+        assert_eq!(update.files[0].content_type.as_deref(), Some("image/jpeg"));
+        assert_eq!(update.files[0].bytes, vec![1, 2, 3]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sep12_customer_input_rejects_nested_values() {
+        let input = AnchorCustomerInput {
+            fields: BTreeMap::from([(
+                "organization".to_owned(),
+                serde_json::json!({"name": "Example"}),
+            )]),
+            files: BTreeMap::new(),
+        };
+        assert_eq!(
+            build_anchor_customer_update(None, None, None, input).unwrap_err(),
+            "SEP-12 field organization must be a string or number in the Rust CLI input"
+        );
     }
 
     #[test]

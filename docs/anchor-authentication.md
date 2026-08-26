@@ -80,11 +80,13 @@ The Rust reference client treats status lookup and payment as separate actions:
 - the payment destination must be a Classic `G...` account, the amount is revalidated by the existing payment path, and the memo is converted to its real XDR memo type before envelope construction;
 - signing and submission still go through the Fresnica SDK/Core path and the existing pending-transaction safety gate.
 
-The next anchor gap is customer-information handling (SEP-12 / `pending_customer_info_update`) and richer status lifecycle integration. SEP-45 remains a separate contract-account path because its Soroban authorization-entry verification/signing semantics differ from Classic SEP-10 transaction signing.
+The Rust reference client now has the first SEP-12 customer-information handoff for `pending_customer_info_update` and related KYC states. `anchor customer CODE:GISSUER` authenticates with a fresh in-memory SEP-10 token, prefers `KYC_SERVER` and falls back to `TRANSFER_SERVER`, returns typed customer/required/provided-field state, and can submit scalar SEP-9 values plus binary multipart fields. Sensitive customer values are read from `--input PATH` or `--input -` (stdin), not command-line `--field` arguments, so KYC data is not deliberately copied into shell history or the process list.
+
+SEP-12 nested structured values combined with the optional `/customer/files` file-id workflow remain a follow-up for anchors that require that less-common shape. SEP-45 remains a separate contract-account path because its Soroban authorization-entry verification/signing semantics differ from Classic SEP-10 transaction signing.
 
 ## Current blockers / non-blockers
 
 - Classic SEP-10 verifier/session, SEP-24/SEP-6 initiation, transaction status lookup, and reviewed Classic withdrawal payment handoff are implemented in the Rust reference client.
-- SEP-12 customer-information updates are not yet wired into the Rust reference client.
+- SEP-12 customer status plus common scalar/binary customer updates are wired through the shared Rust client service; nested structured values plus the optional `/customer/files` workflow remain follow-up work.
 - SEP-45 metadata discovery is complete; SEP-45 execution still requires a dedicated contract-auth provider/verification path.
 - Ledger transport remains independent and must not be forced through a lossy XDR v28/v27 conversion merely to close a checklist item.

@@ -263,7 +263,7 @@ Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Wi
 
 The Rust CLI is substantially implemented and remains the reference native command client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths consume `fresnica-sdk`; CLI/TUI presentation code no longer imports Core directly. The remaining direct Core use is contained inside the shared Rust client layer for low-level transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
-The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking and an explicit reviewed withdrawal-payment handoff. SEP-45 contract-account execution and SEP-12 customer-information handoff remain separate follow-up work.
+The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking, an explicit reviewed withdrawal-payment handoff, and a shared SEP-12 customer status/common-update handoff. SEP-45 contract-account execution remains separate; uncommon SEP-12 nested-structure + `/customer/files` workflows remain follow-up work when required by a concrete anchor.
 
 A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, account/balance/history services, UI-free transaction orchestration, pending-transaction protection, payment/trustline prepare-review-submit semantics, SDEX offer create/update/cancel preparation/submission, and typed open-offer reads. Shared service DTOs should remain transport-neutral; the SDEX `OpenOffer` surface intentionally exposes normalized wallet semantics rather than Horizon raw JSON. It does **not** become a new crypto authority: protected signer semantics and routine signing still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
@@ -339,7 +339,8 @@ Current reference behavior:
 - SEP-10 uses official Stellar signing/verification semantics;
 - memo text/id/hash/return-hash is handled through the reviewed transfer path;
 - KYC-required responses are surfaced;
-- full generic SEP-12 collection is not yet implemented.
+- shared SEP-12 customer status and common scalar/binary update handoff are implemented without placing customer values in CLI arguments;
+- nested structured SEP-12 values combined with optional `/customer/files` file-id upload remain follow-up work.
 
 Policy going forward:
 
@@ -398,7 +399,7 @@ The infrastructure handoff is now split cleanly between SDK maintenance and prod
 1. **Mobile can start independently**: follow `mobile-sdk-usage.md`, pin `native-sdk-v0.2.1`, compile/store the RN adapter binaries once, pass the compatibility check and prove `FresnicaCore.parseAccount` on Android/iOS.
 2. **Mobile owns product/application migration**: absorb #81-#84 Account/Signer/Recovery-Source/Realm/provisioning/passcode/export behavior in `fresnica-mobile`; use one device System Auth Domain and the v0.2 `deriveMnemonicSigner` contract without moving crypto or WalletUnlockKey policy into JavaScript.
 3. **Fresnica keeps SDK evolution additive/released**: Core/SDK/native changes continue here and reach Mobile only through reviewed release/version contracts; normal Mobile builds never compile Rust/UniFFI.
-4. **Wallet standards continue below product UI**: SEP-12 customer-information handoff is the next unblocked Anchor gap; SEP-45 remains the contract-account auth path.
+4. **Wallet standards continue below product UI**: the first shared SEP-12 customer-information handoff is implemented; validate it against concrete anchors and add nested `/customer/files` support only when required. SEP-45 remains the contract-account auth path.
 5. **Smart account / passkey**: keep the real Testnet conformance vector; implement platform-native Mobile provider integration when the Mobile product reaches that feature.
 6. **Hardware signer**: retain the external-signer prepare/apply boundary and wait for a compatible Ledger transport/XDR path instead of forcing conversion.
 7. **Reference/other clients**: keep Rust CLI current; Desktop/Web reuse the same stable SDK architecture.

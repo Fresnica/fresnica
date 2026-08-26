@@ -1,3 +1,4 @@
+pub mod anchor;
 pub mod contacts;
 pub mod dex;
 pub mod horizon;
@@ -9,6 +10,11 @@ pub mod wallet;
 
 mod service;
 
+pub use anchor::{
+    get_anchor_customer, put_anchor_customer, AnchorCustomerField, AnchorCustomerFieldStatus,
+    AnchorCustomerFile, AnchorCustomerQuery, AnchorCustomerSnapshot, AnchorCustomerStatus,
+    AnchorCustomerUpdate, AnchorCustomerUpdateResult,
+};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,

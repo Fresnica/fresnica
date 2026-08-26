@@ -233,7 +233,7 @@ The provider-neutral Core prepare/apply boundary is already sufficient for hardw
 
 Fresnica should follow Stellar ecosystem standards and official SDK behavior rather than inventing competing wallet-specific protocol semantics.
 
-Current/reference anchor coverage includes SEP-1, SEP-10, SEP-6 and SEP-24. The Rust reference client now mirrors the Python SEP-1 + SEP-6/SEP-24 capability-discovery path (`anchor discover CODE:GISSUER`); authenticated transfer execution remains in the Python reference until the Rust path grows an explicit SEP-10/SEP-45 authorization design. SEP-12/KYC remains a future explicit workflow rather than something to fake or silently bypass.
+Current/reference anchor coverage includes SEP-1, SEP-10, SEP-6, SEP-24 and the common SEP-12 customer status/update handoff. The Rust reference client now mirrors the Python SEP-1 + SEP-6/SEP-24 capability-discovery path (`anchor discover CODE:GISSUER`); authenticated transfer execution remains in the Python reference until the Rust path grows an explicit SEP-10/SEP-45 authorization design. SEP-12/KYC now has an explicit common customer status/update workflow; uncommon nested-value plus `/customer/files` handling remains intentionally deferred rather than faked or silently bypassed.
 
 Future SEP adoption should be driven by wallet/product requirements and reviewed as protocol behavior below the UI layer.
 
@@ -295,7 +295,7 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 1. **Start independent Mobile integration now** from `mobile-sdk-usage.md`: pin `native-sdk-v0.2.1` / Native Binding API 2 and an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms. Establish one app passcode and optionally initialize one device System Auth Domain; later signers register with passcode verification but no repeat biometric prompt.
 2. **Move Mobile application ownership out of this repository**: Realm schema/migrations, Account/Signer persistence, watch-only/import/generate/passcode/reveal UX and product state belong in `fresnica-mobile`; preserve the #81-#84 invariants from `mobile-app-migration-pr81-pr84.md`.
 3. **Keep the SDK boundary stable**: new Core/SDK capability work may continue independently, but Mobile should upgrade through pinned Native SDK releases and `NATIVE_BINDING_API_VERSION`, not by compiling Rust/Core in normal app builds.
-4. Continue reusable wallet/SEP work (next anchor gap: SEP-12 customer-information handoff) below product UI.
+4. Continue reusable wallet/SEP work below product UI: validate the new common SEP-12 handoff against concrete anchors; add nested `/customer/files` handling only when required, while SEP-45 remains separate.
 5. Keep the real smart-account Testnet vector as provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile product integration reaches contract-account signing.
 6. Keep hardware/external signer transport gated by the reviewed Ledger/XDR compatibility constraints rather than forcing lossy conversion.
 7. Keep Rust CLI as the reference native engineering client; Desktop/Web product work follows the same stable SDK boundaries rather than creating new Core architectures.
