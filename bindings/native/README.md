@@ -19,7 +19,7 @@ This is the authoritative native binding surface for new Mobile/native consumers
 ## Rules
 
 - `NATIVE_BINDING_API_VERSION` versions the native FFI surface independently from `SDK_API_VERSION` and the Core client API.
-- Account and signer identity remain separate.
+- Account, signer, and recovery-source semantics remain separate; recovery-source grouping stays application-owned.
 - Protected envelopes remain opaque.
 - Routine `WalletUnlockKey` material is native-only and must not be surfaced by framework adapters to JavaScript/Dart.
 - Reveal/Export requires a fresh application passcode.
@@ -34,7 +34,7 @@ Kotlin package: `com.fresnica.sdk`
 
 Swift module: `FresnicaSDK`
 
-The exported object is `FresnicaSdkApi`, exposing the same eleven semantic operations as the Rust SDK contract.
+The exported object is `FresnicaSdkApi`, exposing the reviewed Rust SDK semantic operations, including `deriveMnemonicSigner` for deriving another explicit HD index from an authenticated mnemonic-backed protected source.
 
 Run:
 
@@ -60,7 +60,9 @@ The generalized native packages now own the reusable platform security helpers t
 - Android: `com.fresnica.sdk.security.WalletUnlockKeyStore` and `FresnicaSignerAuthorization`;
 - Apple: `FresnicaWalletUnlockKeyStore` and `FresnicaSignerAuthorization`.
 
-These are not framework adapters. They implement the platform-side credential release/signing boundary while the framework adapter only drives platform UI/lifecycle glue. Android biometric UI still authenticates the exact `Cipher` returned by the authorization helper; Apple Keychain access performs the LocalAuthentication-gated release.
+These are not framework adapters. They implement the platform-side credential release/signing boundary while the framework adapter only drives platform UI/lifecycle glue.
+
+Native SDK v0.2 uses one device/app-level **System Auth Protection Domain** rather than one biometric enrollment per signer. Domain initialization performs one authenticated private-key challenge. Later signer registration derives a verified per-signer `WalletUnlockKey` from the Fresnica passcode and wraps it with the already-created domain public key, so adding a signer does not trigger another biometric prompt. Routine signing authenticates the domain private-key unwrap. Android drives the exact `Cipher` through `BiometricPrompt`; Apple uses the auth-bound `SecKey`/`LAContext` path. System auth remains lower privilege than the Fresnica passcode and cannot authorize Reveal / Export.
 
 ## Apple compiled module
 

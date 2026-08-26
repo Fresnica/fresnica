@@ -33,11 +33,11 @@ Required marker shape:
 ```json
 {
   "kind": "fresnica-native-sdk-release",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "channel": "preview",
-  "native_binding_api_version": 1,
-  "sdk_api_version": 2,
-  "core_client_api_version": 2,
+  "native_binding_api_version": 2,
+  "sdk_api_version": 3,
+  "core_client_api_version": 3,
   "android": {
     "min_sdk": 26,
     "abis": ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"],
@@ -78,7 +78,7 @@ SHA256SUMS
 
 The release workflow uses the same `build-android.sh` + AAR validation path as Native SDK platform packaging.
 
-The GitHub release artifact is a raw AAR, not a Maven publication, so Gradle cannot discover transitive dependencies from a POM. A direct local-file consumer must also provide the dependencies recorded in the release manifest. For the current 0.1.x baseline:
+The GitHub release artifact is a raw AAR, not a Maven publication, so Gradle cannot discover transitive dependencies from a POM. A direct local-file consumer must also provide the dependencies recorded in the release manifest. For the current 0.2.x baseline:
 
 ```gradle
 dependencies {
@@ -129,4 +129,4 @@ The release manifest starts from the reviewed marker and adds immutable build id
 
 This keeps expensive Android/Xcode packaging off ordinary `main` pushes while preserving a reproducible release path.
 
-The old `mobile-sdk-v0.1.0` release is a frozen legacy compatibility artifact. Its release workflow is preserved in Git history/tagged source rather than kept as an active publisher on `main`. The generalized product line begins with `native-sdk-v0.1.0` and uses the independent `native-sdk-v*` tag namespace.
+The old `mobile-sdk-v0.1.0` release is a frozen legacy compatibility artifact. Its release workflow is preserved in Git history/tagged source rather than kept as an active publisher on `main`. The generalized product line began with `native-sdk-v0.1.0` and uses the independent `native-sdk-v*` tag namespace. The current Mobile security/HD baseline is `native-sdk-v0.2.1` (Native package 0.2.1 / Native Binding API 2 / SDK API 3 / Core Client API 3). `native-sdk-v0.2.0` established the new UX/security contract but is superseded by v0.2.1, which fixes device-domain commit/cleanup failure semantics and carries the aligned Mobile handoff documentation.

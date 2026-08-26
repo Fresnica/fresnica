@@ -180,9 +180,9 @@ Every generated adapter binary set should have a machine-readable manifest. At m
 {
   "framework": "react-native",
   "frameworkVersion": "0.87.0",
-  "fresnicaNativeSdkVersion": "0.2.0",
-  "nativeBindingApiVersion": 1,
-  "adapterSourceVersion": "mobile-sdk-v0.2.0"
+  "fresnicaNativeSdkVersion": "0.2.1",
+  "nativeBindingApiVersion": 2,
+  "adapterSourceVersion": "0.2.0"
 }
 ```
 
@@ -243,7 +243,7 @@ Consumer application
   = pinned Native SDK + generated adapter binaries + compatibility manifest
 ```
 
-The first generalized release is marker-gated as `native-sdk-v0.1.0`. Its package version is intentionally still 0.1.0; the migration is a packaging/ownership correction, not an artificial semantic API break. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION`.
+The first generalized release was `native-sdk-v0.1.0`. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.0. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
 
 `bindings/mobile` stays only as migration/reference material until the independent Mobile repository has absorbed the #81-#84 donor behavior and equivalent tests.
 
@@ -252,10 +252,11 @@ The first generalized release is marker-gated as `native-sdk-v0.1.0`. Its packag
 The independent `fresnica-mobile` project should use this document as its integration starting point:
 
 1. choose and pin its React Native version;
-2. pin a Fresnica Native SDK release and `NATIVE_BINDING_API_VERSION`;
+2. pin `native-sdk-v0.2.1` / Native Binding API 2 and matching adapter source 0.2.0;
 3. generate its RN adapter binaries once from the matching canonical adapter source;
 4. store the adapter binaries and manifest under Mobile ownership;
 5. run a native/framework smoke test such as `parseAccount`;
-6. only then absorb the application-side lifecycle/persistence flows described in `docs/mobile-app-migration-pr81-pr84.md`.
+6. establish the one app passcode and optional one-time device System Auth Domain;
+7. only then absorb the application-side lifecycle/persistence flows described in `docs/mobile-app-migration-pr81-pr84.md`.
 
 The Mobile project must not make Rust/Core/UniFFI or adapter-source compilation part of ordinary application builds.

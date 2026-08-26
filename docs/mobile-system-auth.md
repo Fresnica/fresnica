@@ -1,199 +1,231 @@
 # Mobile System Authentication / WalletUnlockKey Contract
 
-Status: **accepted pre-release native security direction**.
+Status: **accepted Native SDK v0.2 security contract**.
 
-This document defines how Fresnica mobile stores and releases the per-signer 32-byte `WalletUnlockKey` produced by Rust Core.
+This document defines the Fresnica Mobile system-authentication model for local protected software signers.
 
-It refines the higher-level rules in `mobile-core-contract.md` and deliberately replaces Xaman's wallet-secret Vault behavior for routine Fresnica signing.
-
-## Principle
-
-System authentication must authorize access to the **actual WalletUnlockKey cryptographic operation**.
-
-A separate successful Face ID / Touch ID / Android biometric probe followed by an unrelated key read is not sufficient.
+The authority order is:
 
 ```text
-Core derive_unlock_key
-        |
-32-byte WalletUnlockKey
-        |
-native user-auth-bound storage
-        |
-biometric-gated cryptographic operation
-        |
-32-byte WalletUnlockKey in native memory only
-        |
-UniFFI sign_transaction_xdr
-        |
-zero/drop temporary unlock-key bytes
+Fresnica app passcode > device system authentication
 ```
 
-The unlock key MUST NOT cross into React Native / JavaScript during routine signing.
+System authentication is a device-local authorization convenience for routine signing. It is not the Fresnica passcode, not a recovery credential, and not sufficient for Reveal / Export or passcode rotation.
 
-## Enrollment
+## Core invariants
 
-Enrollment is an explicit convenience-security action after the user has proved the Fresnica app passcode.
+1. Each protected software signer keeps its own canonical Core envelope, random salt/nonce and 32-byte `WalletUnlockKey`.
+2. A device installation has at most one Fresnica **System Auth Protection Domain**.
+3. The protection domain owns one user-auth-bound private wrapping key and a public wrapping key.
+4. New signer registration uses the public wrapping key and therefore does **not** require another biometric prompt.
+5. Routine signing uses the auth-bound private key; the private-key operation is what triggers Face ID / Touch ID / Android strong biometric authentication.
+6. `WalletUnlockKey` stays in native memory and never crosses into React Native / JavaScript.
+7. No global Vault Master Key is introduced. Sharing the OS wrapping domain does not merge the independent Core signer envelopes or unlock keys.
+
+Conceptually:
 
 ```text
-app passcode
-   |
-native -> Rust derive_unlock_key(envelope, passcode, expected_signer_public_key)
-   |
-verified 32-byte WalletUnlockKey
-   |
-platform secure storage enrollment
+                       one device System Auth Domain
+                                  |
+                     auth-bound private wrapping key
+                     public wrapping key
+                         /        |        \
+                        /         |         \
+              wrapped key A  wrapped key B  wrapped key C
+                    |            |            |
+              UnlockKey A   UnlockKey B   UnlockKey C
+                    |            |            |
+              envelope A    envelope B    envelope C
 ```
 
-The platform record is bound to a signer identity, not an account address. In the normal master-key case those values are equal; additional/multisig signers may differ from the account identity.
+## First-time initialization
 
-The client should persist ordinary public enrollment metadata with the signer record, for example whether system auth was enrolled and which local signer it belongs to. The secure-storage item itself is authoritative at use time.
+The user first establishes the Fresnica app passcode through normal wallet provisioning. System auth is optional and initialized once per device installation:
 
-## Routine signing
+```text
+Mobile -> canUseSystemAuth()
+Mobile -> initializeSystemAuth(reason)
+                 |
+                 v
+native creates pending auth-bound device private key
+                 |
+Face ID / Touch ID / Android strong biometric
+                 |
+authenticated private-key challenge succeeds
+                 |
+commit System Auth Protection Domain
+```
+
+The biometric prompt proves that the newly created private key is actually protected by the configured platform policy before the domain becomes active.
+
+This operation is device-level. It is not repeated for every signer.
+
+## Registering a signer after the domain exists
+
+A new/imported/derived protected software signer is registered after Mobile has persisted its signer envelope and the user has proved the Fresnica passcode:
+
+```text
+protected envelope
++ Fresnica app passcode
++ expected signer public key
+        |
+        v
+Native SDK / Core derives and verifies WalletUnlockKey
+        |
+        v
+native uses domain PUBLIC key to wrap 32-byte WalletUnlockKey
+        |
+        v
+store signer -> wrapped-key record
+```
+
+No Face ID / fingerprint prompt occurs here. Public-key wrapping does not require access to the auth-bound private key.
+
+The wrapped-key record is bound to the signer identity, not the account address. `Account != Signer`; one signer may be referenced by more than one account.
+
+If no system-auth domain exists, wallet creation/import still succeeds. The user can sign with the Fresnica passcode and may initialize system auth later.
+
+## Routine signing with system auth
 
 ```text
 React Native requests a reviewed sign action
         |
-native module resolves account + signer
+native resolves signer + protected envelope
         |
-native opens system-auth WalletUnlockKey record
+load wrapped WalletUnlockKey for signer
         |
-platform prompt authenticates actual key access
+platform prompt authorizes PRIVATE-key unwrap
         |
-native obtains 32 bytes
+32-byte WalletUnlockKey exists in native memory only
         |
-Fresnica Native SDK `FresnicaSdkApi.signTransactionXdr(...)`
+Native SDK signs canonical envelope/XDR for expected signer + network
         |
-native clears/drops 32-byte temporary buffer
+zero/drop temporary unlock-key bytes
         |
 signed XDR -> React Native
 ```
 
-React Native may receive the signed XDR. It does not receive `WalletUnlockKey`, mnemonic, or `S...` material.
+System auth authorizes use of that signer for the reviewed action. React Native may receive signed XDR; it does not receive `WalletUnlockKey`, mnemonic, `S...`, platform private keys, or biometric crypto objects.
 
-## App-passcode fallback
+## Passcode signing fallback
 
-System authentication is optional convenience, not the recovery root.
+System auth is optional convenience, not the recovery root.
 
-If biometric enrollment is unavailable, invalidated, cancelled, or removed, the user can enter the Fresnica app passcode. Native code calls Core to derive a fresh verified unlock key and can either:
+When system auth is unavailable, invalidated, cancelled or intentionally bypassed, Mobile may ask for the Fresnica app passcode and call the native high-level passcode signing path:
 
-- use it once for signing and immediately drop it; or
-- explicitly re-enroll system authentication.
+```text
+signWithPasscode(
+  signer,
+  envelope,
+  app_passcode,
+  transaction_xdr,
+  network_passphrase,
+) -> signed_xdr
+```
 
-A platform-auth failure must not silently fall back to exposing secret material.
+The passcode path derives a fresh verified unlock key, signs, and drops temporary key material. It does not require a system-auth domain.
+
+A system-auth failure must never silently expose secret material or be treated as proof of the Fresnica passcode.
+
+## Privilege boundary
+
+System auth MAY authorize routine signing.
+
+System auth MUST NOT by itself authorize:
+
+- Reveal / Export of mnemonic or `S...` material;
+- changing the Fresnica app passcode;
+- turning a lost passcode into a new recovery credential;
+- bypassing Core signer-identity checks;
+- provisioning a new signer without proving the Fresnica passcode when signer registration is requested.
+
+Reveal / Export continues to require a fresh Fresnica app passcode. A user who can still sign with Face ID but has forgotten the Fresnica passcode has **not** regained the recovery/declassification authority of that passcode.
 
 ## Passcode rotation
 
-`reprotect` normally creates a new envelope salt and therefore a different `WalletUnlockKey`.
+`reprotect` normally creates a new envelope salt, so every affected software signer receives a new `WalletUnlockKey`.
 
-After successful passcode rotation:
+Global passcode rotation is Mobile-coordinated and atomic at the persistence boundary:
 
-1. old system-auth unlock-key records are stale;
-2. the client must invalidate/delete them;
-3. re-enrollment derives the new unlock key from the new envelope and new app passcode.
+```text
+1. Snapshot every protected software signer.
+2. Core.reprotect(old envelope, old passcode, new passcode, signer) for EVERY signer.
+3. If any reprotect fails: write nothing.
+4. Stage all returned envelopes and identities.
+5. In one Realm/database transaction, re-check snapshots and replace all envelopes.
+6. Commit.
+7. Mark every pre-rotation signer registration stale/unavailable for the new envelope set.
+8. For each committed new envelope, derive the new verified WalletUnlockKey with the new passcode.
+9. Wrap/register it with the EXISTING device System Auth Domain public key.
+```
 
-For a global app-passcode rotation across several protected signers, Mobile still owns staging/atomic persistence of the new envelopes. Secure-storage re-enrollment occurs only after the new envelope set is committed.
+Steps 1-6 are the atomic security boundary. No wallet may be left silently split between old and new app passcodes.
 
-## Android
+Step 7 is a Mobile orchestration invariant: an old wrapped key must not be presented as usable after its envelope changed, even if OS cleanup of the old record still needs retry. Step 9 does not require another biometric prompt because the protection-domain public key performs wrapping. Registration failure after the database commit is retryable; the affected signer remains system-auth unavailable and falls back to passcode signing, but the persisted envelopes must not roll back to the old passcode.
 
-Implementation: `bindings/native/platform/android/src/main/kotlin/com/fresnica/sdk/security/WalletUnlockKeyStore.kt`.
+If the system-auth domain itself was invalidated or deleted, Mobile may ask the user to initialize a new domain once, then register all signers into it after passcode verification.
 
-The first Fresnica Android policy is **strong biometric, auth-per-use** with app-passcode fallback.
+## Android implementation
 
-Each enrollment creates a new per-signer AndroidKeyStore AES-256-GCM key:
+Implementation:
 
-- `PURPOSE_ENCRYPT | PURPOSE_DECRYPT`;
-- GCM / no padding;
-- randomized encryption required;
+- `bindings/native/platform/android/src/main/java/com/fresnica/sdk/security/WalletUnlockKeyStore.java`
+- `bindings/native/platform/android/src/main/kotlin/com/fresnica/sdk/security/FresnicaSignerAuthorization.kt`
+
+The v0.2 Android domain uses one AndroidKeyStore RSA-2048 key pair:
+
+- private key: `PURPOSE_DECRYPT`;
+- RSA OAEP SHA-256 wrapping;
 - `setUserAuthenticationRequired(true)`;
-- authentication required for every operation;
+- authentication required for every private-key operation;
 - strong biometric authentication;
-- key invalidated by biometric enrollment changes;
-- StrongBox requested on supported devices, with normal AndroidKeyStore/TEE fallback.
+- invalidated by biometric-enrollment changes;
+- StrongBox requested where supported, with AndroidKeyStore/TEE fallback.
 
-Only AES-GCM IV + ciphertext + opaque Keystore alias are kept in app-private SharedPreferences. The AES key remains non-exportable in AndroidKeyStore.
+Domain initialization performs an authenticated challenge decrypt before committing the domain.
 
-### Android enrollment transaction
+Later signer registration encrypts the 32-byte `WalletUnlockKey` with the public key and stores only domain alias + ciphertext in app-private preferences. It does not invoke the private key and therefore does not prompt for biometrics.
 
-Enrollment uses a fresh pending Keystore alias instead of deleting the current enrollment first:
+Routine signing calls `beginUnlock`, authenticates the returned `BiometricPrompt.CryptoObject(Cipher)`, then `finishUnlock` obtains exactly 32 bytes for immediate Native SDK signing.
 
-```text
-beginEnrollment
-  -> create fresh auth-bound AES key
-  -> return initialized ENCRYPT Cipher
+## Apple implementation
 
-BiometricPrompt.authenticate(CryptoObject(cipher))
+Implementation:
 
-finishEnrollment
-  -> cipher.doFinal(WalletUnlockKey)
-  -> commit IV/ciphertext/new alias
-  -> only then delete previous alias
-```
+- `bindings/native/platform/apple/FresnicaWalletUnlockKeyStore.swift`
+- `bindings/native/platform/apple/FresnicaSignerAuthorization.swift`
 
-If authentication is cancelled or persistence fails, the new pending alias is deleted and the previous enrollment remains intact.
-
-### Android unlock
-
-```text
-beginUnlock
-  -> load IV/ciphertext + non-exportable AES key
-  -> return initialized DECRYPT Cipher
-
-BiometricPrompt.authenticate(CryptoObject(cipher))
-
-finishUnlock
-  -> cipher.doFinal(ciphertext)
-  -> verify exactly 32 bytes
-  -> caller passes bytes directly to generated Fresnica Core API
-```
-
-This is intentionally different from Xaman's current biometric `SecurityProvider`, which proves a separate biometric key can be used but does not protect the wallet credential being released.
-
-The existing Xaman StrongBox/AndroidKeyStore fallback patterns are useful infrastructure, but the old Vault crypto and cleartext-to-React-Native path are not Fresnica signer authority.
-
-## Apple
-
-Implementation: `bindings/native/platform/apple/FresnicaWalletUnlockKeyStore.swift`.
-
-Each signer unlock key is stored as a Keychain generic-password data item with:
+The v0.2 Apple domain uses one P-256 private key protected by Keychain/Security access control:
 
 - `kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly`;
-- `SecAccessControlCreateFlags.biometryCurrentSet`;
-- no synchronization/migration to another device.
+- `biometryCurrentSet`;
+- `privateKeyUsage`;
+- no synchronization or migration to another device.
 
-`biometryCurrentSet` means an enrolled unlock-key record becomes unusable when Touch ID fingerprints are added/removed or Face ID is re-enrolled. Fresnica then uses app-passcode recovery/re-enrollment rather than accepting the changed biometric set automatically.
+Per-signer `WalletUnlockKey` values are wrapped with the public key using ECIES and stored as ciphertext records. Public-key wrapping does not require Face ID/Touch ID.
 
-Reading the Keychain item uses a fresh `LAContext` attached through `kSecUseAuthenticationContext`. The Keychain access itself causes the system authentication that releases the 32-byte value.
+Routine unwrap uses the protected private key with a fresh `LAContext`; the private-key operation triggers the system authentication that releases the 32-byte key into native memory for immediate signing.
 
-This is intentionally stronger than using Xaman's existing biometric module only as a separate authentication probe.
+Changing the enrolled biometric set invalidates the domain private key. Fresnica then falls back to the app passcode and may initialize a replacement domain once.
 
-## Xaman code that may be retained
+## React Native high-level API
 
-Useful platform infrastructure includes:
-
-- React Native module/lifecycle patterns;
-- biometric availability/error UX;
-- Keychain/AndroidKeyStore plumbing;
-- StrongBox fallback concepts;
-- Realm storage-encryption-key management;
-- platform queues and background/snapshot lifecycle behavior.
-
-The following Xaman responsibilities must not remain authoritative for Fresnica software signers:
-
-- encrypting/decrypting mnemonic or private-key cleartext in the native Vault;
-- returning routine wallet secret cleartext to React Native;
-- using a global app passcode as the normal native decrypt-all-wallets signing credential;
-- treating a separate biometric-probe success as equivalent to release of the actual signer credential.
-
-## Native module API direction
-
-The later React Native adapter should expose high-level operations rather than raw secure-storage primitives.
-
-Native-only operations conceptually include:
+The framework adapter exposes high-level operations rather than raw secure-storage primitives:
 
 ```text
-enrollSystemAuth(signer, envelope, app_passcode)
-removeSystemAuth(signer)
-hasSystemAuth(signer)
+canUseSystemAuth()
+hasSystemAuthDomain()
+initializeSystemAuth(reason)
+
+registerSignerSystemAuth(
+  envelope,
+  app_passcode,
+  expected_signer_public_key,
+)
+
+hasSignerSystemAuth(expected_signer_public_key)
+removeSignerSystemAuth(expected_signer_public_key)
+removeSystemAuthDomain()
 
 signWithSystemAuth(
   signer,
@@ -212,6 +244,18 @@ signWithPasscode(
 ) -> signed_xdr
 ```
 
-Neither sign operation returns `WalletUnlockKey` to JavaScript.
+Neither signing path returns `WalletUnlockKey` to JavaScript.
 
-Secret import/generation/reveal remain separate exceptional paths governed by `mobile-core-contract.md` and `secret-export.md`.
+## Xaman-derived Mobile rule
+
+Fresnica may retain Xaman's proven platform/UI patterns such as biometric availability UX, Keychain/AndroidKeyStore plumbing, StrongBox fallback concepts, Realm lifecycle, queues and background/snapshot handling.
+
+It must not retain Xaman wallet-secret authority that:
+
+- decrypts mnemonic/private-key cleartext into React Native for routine signing;
+- treats a global PIN/password as a native decrypt-all-wallets vault credential;
+- treats a separate biometric probe as equivalent to authorization of the actual signing credential.
+
+The final rule is:
+
+> **Passcode establishes and changes signer protection; system auth authorizes device-local routine signer use.**

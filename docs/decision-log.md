@@ -2,6 +2,24 @@
 
 This file records design decisions that materially change Fresnica behavior or boundaries. Git history remains the detailed implementation record.
 
+## 2026-08-26 - One device System Auth Domain; Passcode remains higher authority; mnemonic HD derivation stays inside Core
+
+**Decision:** Mobile initializes system authentication once per device/application installation, not once per signer. The domain owns one auth-bound private wrapping key and a public wrapping key. Each protected software signer continues to have its own Core envelope, salt and `WalletUnlockKey`; the domain only wraps those independent unlock keys. No global Vault Master Key is introduced.
+
+**Initialization:** `initializeSystemAuth` proves the domain private key is genuinely protected by the platform policy through one authenticated challenge.
+
+**Later signers:** after the user proves the Fresnica app passcode, Core derives/verifies that signer's `WalletUnlockKey` and native code wraps it with the existing domain public key. `registerSignerSystemAuth` therefore does not trigger another biometric prompt. Routine `signWithSystemAuth` requires private-key unwrap and is the use-time biometric/system-auth boundary.
+
+**Authority:** `Passcode > System Auth`. System auth may authorize routine signing but cannot authorize Reveal/Export, passcode change, or replacement of the recovery root. Face ID/fingerprint success is not proof of the Fresnica passcode.
+
+**Passcode rotation:** Mobile stages Core `reprotect` for every protected software signer, writes nothing if any stage fails, atomically commits the complete new envelope set, then derives/registers the new verified unlock keys into the existing device domain. Post-commit wrapped-key registration does not require another biometric prompt and is retryable.
+
+**HD mnemonic accounts:** the first mnemonic signer normally uses index 0. `derive_mnemonic_signer` authenticates an existing mnemonic-backed protected source and derives an explicit later index inside Core, returning a new protected signer envelope without returning the mnemonic to Mobile/JavaScript. A secret-backed source is rejected. Mobile may group related signers under a Recovery Source for backup/UX purposes; **Account != Signer != Recovery Source**.
+
+**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). The final Mobile handoff baseline is v0.2.1; it keeps the same API constants and adapter source while correcting device-domain failure/cleanup atomicity and aligning the handoff documentation.
+
+See [Mobile System Authentication](mobile-system-auth.md), [Mobile / Rust Core Vault Contract](mobile-core-contract.md), [Wallet Protection Model](protection.md), and [Mobile SDK Usage](mobile-sdk-usage.md).
+
 ## 2026-08-24 - OS authorization belongs to clients; Core accepts WalletUnlockKey
 
 **Decision:** Rust Core does not implement, abstract, or store operating-system authentication state. TUI/CLI, desktop, mobile, and future clients own Keychain/Keystore/platform credentials, biometrics, Windows Hello, PAM, session policy, and other OS-specific authorization behavior.

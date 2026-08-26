@@ -10,10 +10,10 @@ Because Fresnica has not had a public wallet release yet, this phase does **not*
 
 1. Users set one Fresnica app passcode for ordinary local software signers.
 2. Every protected software signer remains cryptographically independent through its own random salt and nonce.
-3. Account identity and signing capability are separate. A watch-only account is an account with no locally available signer.
+3. Account identity, signing capability, and recovery source are separate concepts. A watch-only account is an account with no locally available signer.
 4. Rust Core is authoritative for Stellar identity parsing, wallet recovery-material validation, cryptography, derivation, unlock-key semantics, signer identity checks, signing, and re-protection.
 5. Mobile is authoritative for account/signer persistence, Keychain / Keystore use, biometrics, application lock state, network state, and platform lifecycle.
-6. System authentication is client-side signer authorization, not a Core protection provider and not a second signer encryption format.
+6. System authentication is one device/app-level authorization domain, not a Core protection provider, not a second signer encryption format, and not a replacement for the Fresnica passcode.
 7. Normal software-signer signing crosses the Mobile/Core boundary with a standard `WalletUnlockKey`, not a passcode or private key.
 8. Reveal / Export crosses the boundary with a fresh app passcode and is intentionally unavailable through `WalletUnlockKey`.
 9. Plaintext private signing material should cross the React Native / JavaScript boundary only for explicit user-requested Reveal / Export or unavoidable initial import.
@@ -43,9 +43,13 @@ SignerRecord
 
 AccountSignerReference
   account_id -> signer_id
+
+RecoverySourceRecord / grouping metadata (Mobile-owned)
+  identifies a shared mnemonic recovery source for UX/backup/HD grouping
+  does not replace any protected signer envelope
 ```
 
-The first implementation may store this more compactly, but the semantics MUST remain separate.
+The first implementation may store this more compactly, but the semantics MUST remain separate: **Account != Signer != Recovery Source**. Recovery-source grouping is Mobile metadata; Core still protects each software signer independently.
 
 For a simple software wallet, account address and signer public key are the same `G...`. Stellar additional signers and multisig mean this equality is not a general rule.
 
@@ -130,11 +134,13 @@ It decrypts the same canonical password-protected signer envelope. It does not c
 
 Face ID, Touch ID, Android biometric authentication, device passcode, or an equivalent platform authentication mechanism owned by Mobile/native platform code.
 
-Biometric data is never encryption-key material and Rust Core does not invoke biometric APIs.
+Fresnica Mobile initializes one device-level **System Auth Protection Domain**. The domain has an auth-bound private wrapping key and a public wrapping key. New per-signer `WalletUnlockKey` values are wrapped with the public key after passcode verification, so adding another signer does not require another biometric prompt. Routine signing requires the protected private-key operation and therefore invokes system authentication.
+
+Biometric data is never encryption-key material and Rust Core does not invoke biometric APIs. System auth is lower privilege than the Fresnica app passcode and cannot authorize Reveal / Export or passcode change.
 
 ### Signer authorization
 
-The client-side decision that a particular signer may be invoked now. For a local software signer, successful system authorization may release that signer's protected `WalletUnlockKey`. For hardware/external/future signers, it may authorize provider invocation without exposing local private material.
+The client-side decision that a particular signer may be invoked now. For a local software signer, successful system authorization may unwrap that signer's protected `WalletUnlockKey` through the shared device protection domain. For hardware/external/future signers, it may authorize provider invocation without exposing local private material.
 
 ## 5. Authoritative ownership boundary
 
@@ -192,7 +198,7 @@ Requirements:
 - Core MUST own KDF and cipher parameters.
 - Mobile MUST NOT implement an alternate signer cipher.
 - Mobile MUST NOT create a second biometric-specific signer ciphertext.
-- A passcode change or re-encryption with a new salt changes the signer unlock key. Mobile MUST invalidate the old system-protected unlock-key record and enroll the new verified key.
+- A passcode change or re-encryption with a new salt changes the signer unlock key. After the new envelopes are atomically committed, Mobile MUST replace each stale wrapped unlock-key record by registering the newly verified key into the existing device System Auth Protection Domain. This public-key wrapping step does not require another biometric prompt.
 
 ## 7. Create and import
 
@@ -245,31 +251,53 @@ Core -> Mobile
 
 Mobile persists only public metadata and the opaque protected envelope. The generated mnemonic is shown only in the explicit backup/confirmation flow.
 
-## 8. System-auth enrollment
+### Derive another signer from an existing mnemonic source
+
+The default HD index is `0`. Mobile may explicitly request another index without asking the user to re-enter or Reveal the mnemonic:
+
+```text
+Mobile -> Core derive_mnemonic_signer
+  source protected mnemonic-backed envelope
+  app passcode
+  expected source signer public key
+  index N
+
+Core
+  authenticate/decrypt source envelope internally
+  verify source signer identity
+  derive the same mnemonic at index N
+  create a fresh protected signer envelope
+  keep mnemonic inside Core
+
+Core -> Mobile
+  signer_public_key
+  protected envelope
+```
+
+A secret-key-backed source is rejected. The new signer remains cryptographically independent because its returned envelope receives fresh protection parameters. Mobile may group the resulting signers under one recovery-source identifier for backup/HD UX, but that grouping is not a replacement for the signer envelopes.
+
+## 8. System-auth domain and signer registration
 
 The credential representation is not an open implementation choice. The standard software-signer credential at the Client/Core boundary is `WalletUnlockKey`.
 
+System auth has two distinct operations:
+
+1. **Initialize the device protection domain once**. This creates an auth-bound platform private wrapping key and proves its biometric/system-auth policy with one authenticated challenge.
+2. **Register each signer**. After the user proves the Fresnica app passcode, Core derives and verifies that signer's 32-byte `WalletUnlockKey`; native code wraps it with the already-existing domain public key. Signer registration does not require another biometric prompt.
+
 ```text
-user enters Fresnica app passcode
-        |
-        v
-Rust Core derive_verified_unlock_key
-  - derive Scrypt key from canonical envelope
-  - decrypt same envelope
-  - reconstruct signer
-  - verify expected signer public key
-        |
-        v
-WalletUnlockKey (32 bytes)
-        |
-        v
-Mobile native layer protects/stores it
-using Keychain / Keystore + platform policy
+initializeSystemAuth(reason)
+  -> one device-level system-auth prompt
+  -> commit System Auth Protection Domain
+
+registerSignerSystemAuth(envelope, app_passcode, signer)
+  -> Core derives/verifies WalletUnlockKey
+  -> domain public key wraps it
+  -> persist signer -> wrapped-key record
+  -> no biometric prompt
 ```
 
-Core does not know how Mobile protects the resulting key.
-
-Mobile MUST bind its stored record to the intended signer identity and current canonical envelope/version so stale keys can be invalidated safely.
+Core does not know how Mobile protects the resulting key. Mobile MUST bind each wrapped record to the intended signer identity and current domain, and it MUST treat a missing/invalid domain as a passcode-signing fallback rather than a recovery failure.
 
 ## 9. Routine signing
 
@@ -319,14 +347,17 @@ Plaintext recovery material remains inside Core.
 
 Because Fresnica presents one app passcode across ordinary software signers, a global passcode change is a Mobile-coordinated batch:
 
-1. re-protect every affected signer with Core;
-2. verify each returned envelope / signer identity;
-3. stage all new envelopes;
-4. commit the database update atomically or recoverably;
-5. delete/invalidate old Keychain/Keystore `WalletUnlockKey` records;
-6. re-enroll system-auth keys as needed.
+1. snapshot every affected protected signer;
+2. call Core `reprotect` for **every** signer using old + new passcodes;
+3. verify every returned signer identity and stage every new envelope;
+4. if any call fails, write nothing;
+5. in one Realm/database transaction, re-check the snapshots and replace all envelopes;
+6. commit the envelope set atomically;
+7. mark every previous signer system-auth registration stale for the new envelope generation;
+8. derive each new verified `WalletUnlockKey` from the committed envelope + new passcode;
+9. register/replace each wrapped key using the **existing System Auth Protection Domain public key**.
 
-Failure of one signer MUST NOT leave a silently mixed old/new app-passcode state.
+Steps 1-6 are the atomic protection transition. Failure of one signer MUST NOT leave a silently mixed old/new app-passcode state. Step 7 is application orchestration: an old wrapped key cannot be treated as current merely because an OS record still exists. Step 9 requires no biometric prompt and may be retried after commit; a temporary registration failure leaves that signer system-auth unavailable and falls back to passcode signing rather than rolling envelopes back. If the domain itself was invalidated, Mobile initializes a replacement domain once and then registers all signers.
 
 ## 11. Reveal / Export
 
@@ -388,8 +419,9 @@ Realm / file / app database
 
 OS secure storage
     -> Realm/database encryption key
-    -> per-signer WalletUnlockKey records
-    -> native authentication keys / policy
+    -> one device System Auth Protection Domain private key
+    -> per-signer wrapped WalletUnlockKey records
+    -> native authentication policy
 ```
 
 The Core envelope is already authenticated ciphertext. Additional platform storage encryption is defense in depth and does not become the canonical signer format.
@@ -411,6 +443,10 @@ protect_mnemonic(..., expected_signer_public_key?)
 
 generate_mnemonic(...)
     -> ProtectedSoftwareSigner + one-time mnemonic
+
+derive_mnemonic_signer(
+    source_envelope, passcode, expected_source_signer_public_key, index
+) -> ProtectedSoftwareSigner
 
 reprotect(envelope, old_passcode, new_passcode, expected_signer_public_key)
     -> ProtectedSoftwareSigner
@@ -471,7 +507,7 @@ Xaman interaction patterns that Fresnica should preserve semantically include:
 Fresnica deliberately changes the underlying implementation:
 
 - account identity and signer records are separate;
-- biometrics release a per-signer `WalletUnlockKey` rather than a globally stored wallet passcode;
+- one device System Auth Protection Domain unwraps per-signer `WalletUnlockKey` values for routine signing; new signer registration uses the domain public key and does not repeat biometric enrollment;
 - passcode rotation uses Core `reprotect`, not Mobile plaintext Vault operations;
 - external signers use Core-prepared/verified signing requests rather than Core owning device secrets.
 

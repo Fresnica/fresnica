@@ -35,7 +35,7 @@ external-signature verification
 
 Core MUST NOT know whether authorization came from Face ID, Touch ID, Windows Hello, Android biometrics, a desktop keyring, PAM, or another OS facility.
 
-## 2. Account identity and signer capability are separate
+## 2. Account identity, signer capability, and recovery source are separate
 
 A wallet account is the chain identity the user observes. A signer is one capability that may authorize transactions for an account.
 
@@ -59,6 +59,8 @@ For a simple software wallet, the account and signer public keys are normally th
 A `C...` contract address is an account/contract identity, not an Ed25519 signer public key. Supplying an `S...` key or mnemonic does not by itself prove ownership of a contract address. Contract/passkey authorization is a separate future capability.
 
 Core owns Stellar address parsing and canonical identity classification. Clients may pre-check for UI purposes but MUST NOT reproduce authoritative `G...` / `C...` semantics.
+
+A mnemonic may be a shared recovery source for several signer identities at different explicit HD indices. Recovery-source grouping is a client/application concept; it does not merge AccountRecord and SignerRecord semantics or replace any protected signer envelope. **Account != Signer != Recovery Source.**
 
 ## 3. Watch-only upgrade and downgrade
 
@@ -102,6 +104,8 @@ Creating/importing a signer accepts an optional `expected_signer_public_key`:
 - present: Core must verify the derived signer identity before returning the protected signer.
 
 This supports watch-only upgrade without making Mobile/CLI/Swift/JNI duplicate identity checks.
+
+For mnemonic-backed material, Core/SDK also exposes `derive_mnemonic_signer(source_envelope, passcode, expected_source_signer_public_key, index)`. It authenticates and verifies an existing mnemonic-backed protected source, derives the explicit requested index internally, and returns a new protected signer without returning the mnemonic to the client. Secret-backed sources are rejected.
 
 ## 5. Two software-signer credentials
 
@@ -148,7 +152,9 @@ Client stores/protects key using OS-specific mechanism
 
 Core does not store the key for the client and does not invoke any OS API.
 
-The client MUST bind its stored unlock-key record to the intended signer identity and current canonical envelope/version so stale records can be invalidated safely.
+The client MUST treat every OS-protected unlock key as scoped to the intended signer identity and the exact canonical envelope/version that produced it. That envelope binding may live in native-record metadata or client persistence, but after an envelope is replaced the previous registration MUST be considered stale until a newly verified key is registered.
+
+The exact OS protection topology remains client-specific. Fresnica Mobile v0.2 refines this into one device System Auth Protection Domain: initialize the auth-bound private key once, then wrap later per-signer unlock keys with the domain public key after passcode verification. That refinement does not change the Core `WalletUnlockKey` contract.
 
 ## 7. Routine signing
 
@@ -194,9 +200,9 @@ reprotect(
 
 Core decrypts internally, reconstructs and verifies the signer identity, then encrypts the same recovery material using fresh protection parameters. Plaintext signing material is never returned to the client.
 
-A new envelope normally has a new salt/nonce and therefore a new `WalletUnlockKey`. Clients MUST invalidate the previous system-auth unlock-key record and enroll the new verified key.
+A new envelope normally has a new salt/nonce and therefore a new `WalletUnlockKey`. Clients MUST replace any OS-protected copy of the previous key with the new verified key.
 
-Changing one global Fresnica app passcode across multiple local signers remains client orchestration: call Core re-protection for each signer, stage the resulting envelopes, verify them, then atomically commit or roll back the client-side batch.
+Changing one global Fresnica app passcode across multiple local signers remains client orchestration: call Core re-protection for each signer, stage the resulting envelopes, verify them, then atomically commit or roll back the client-side batch. Fresnica Mobile performs its wrapped-key replacement only after that commit; its existing device-domain public key can wrap the new unlock keys without another biometric prompt.
 
 ## 9. Reveal / Export
 

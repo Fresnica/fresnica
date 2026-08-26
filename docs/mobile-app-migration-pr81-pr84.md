@@ -24,7 +24,7 @@ The files described below are donor/reference implementation for the Mobile appl
 
 These are architecture/security contracts, not implementation details:
 
-1. **Account is not Signer.** An AccountRecord represents on-chain identity; SignerRecord represents an available signing capability. The relationship is not necessarily one-to-one.
+1. **Account != Signer != Recovery Source.** An AccountRecord represents on-chain identity; SignerRecord represents an available signing capability; a Recovery Source is Mobile-owned grouping metadata for shared mnemonic backup/HD UX. None is a synonym for another.
 2. **Watch-only is derived state.** A watch-only account is an account with no local signer reference. Do not persist a second `watchOnly`/`walletType` truth that can drift.
 3. **Classic account identity and signer identity may differ.** Delegated/additional/multisig signers are valid. Do not globally assume `account.address == signerPublicKey`.
 4. **Direct master-key watch-only upgrade is identity-checked by Core.** Pass `expectedSignerPublicKey = account.address` when attaching a secret/mnemonic intended to become that account's master signer. Do not duplicate the cryptographic check in JavaScript.
@@ -32,7 +32,7 @@ These are architecture/security contracts, not implementation details:
 6. **Protected signer envelopes are opaque.** Mobile persists `envelopeJson`; it does not parse or mutate its cryptographic fields.
 7. **Routine signing remains native-only.** `WalletUnlockKey`, biometric Cipher/session objects and raw `signTransactionXdr` do not enter JavaScript.
 8. **Reveal/Export requires a fresh app passcode.** System authentication / stored WalletUnlockKey is not an export credential.
-9. **Passcode rotation is staged then atomic.** Re-protect every protected signer first, commit all new envelopes in one persistence transaction, then invalidate/re-enroll system authentication.
+9. **Passcode rotation is staged then atomic.** Re-protect every protected signer first, commit all new envelopes in one persistence transaction, then replace wrapped unlock-key records in the existing device System Auth Domain. This post-commit registration does not require another biometric prompt.
 10. **Plaintext mnemonic/secret is exceptional and ephemeral.** Initial import, one-time mnemonic generation/backup display and explicit Reveal/Export are the only intended crossings. Never persist them to Realm, Redux/navigation state, logs, analytics or crash reports.
 
 ## PR #81 - Account / Signer lifecycle coordinator
@@ -88,6 +88,7 @@ Use the current Realm code as a **schema and transaction reference**, especially
 AccountRecord
 SignerRecord
 AccountSignerReference
+RecoverySourceRecord / grouping metadata (when useful)
 ```
 
 The Mobile project owns the actual Realm instance, schema version, migration functions, compaction policy, encryption-at-rest choice and app startup/open/close lifecycle.
@@ -114,11 +115,12 @@ The sequence is:
 3. If any Core call fails: write nothing.
 4. In one Realm transaction, re-check snapshots and replace every envelope.
 5. Commit.
-6. Remove stale native system-auth enrollment / WalletUnlockKey records.
-7. Offer re-enrollment for signers that previously had system auth.
+6. Mark all previous signer system-auth registrations stale for the new envelope generation.
+7. Derive each new verified WalletUnlockKey from the committed envelope + new passcode.
+8. If a System Auth Domain exists, register/replace every signer wrapped key with that domain public key. No biometric prompt is required.
 ```
 
-A cleanup failure in step 6 is recorded for retry. It never rolls the database back to old envelopes.
+A registration failure in step 8 is recorded for retry. It never rolls the database back to old envelopes; that signer remains system-auth unavailable and temporarily falls back to passcode signing. Mobile must not treat an old OS record as current after its envelope changed. If the domain itself is invalidated, initialize one replacement domain once, then register all signers.
 
 ### Do not migrate to the Mobile app
 
@@ -140,7 +142,7 @@ Absorb the coordinator semantics for:
 - generate mnemonic through native/Core;
 - create AccountRecord + protected SignerRecord + reference in one transaction;
 - derive the new account identity from Core/native output rather than reproducing StrKey/derivation logic in JavaScript;
-- keep system-auth enrollment as an explicit post-persistence action.
+- keep system-auth signer registration as an explicit post-persistence action. `initializeSystemAuth` is device-level and happens once; later `registerSignerSystemAuth` verifies the passcode and does not prompt for biometrics.
 
 ### Atomic persistence invariant
 
@@ -159,6 +161,10 @@ Record collision or transaction failure must leave none of the three records par
 ### Generated mnemonic handling
 
 The generated mnemonic is returned only for the one-time backup/confirmation flow. The Mobile project must not persist it. The durable artifact is the protected signer envelope.
+
+### HD multi-account behavior
+
+The normal first mnemonic-backed signer uses `index = 0`. If the user adds another address from the same recovery source, do not Reveal or ask for the mnemonic again. Use Native SDK `deriveMnemonicSigner(sourceEnvelope, appPasscode, expectedSourceSignerPublicKey, index)` and persist the returned signer/account graph atomically. Core authenticates the source and derives the requested index internally. Mobile may attach both signers to the same Recovery Source grouping for backup UX.
 
 ## PR #84 - Explicit signer Reveal / Export
 
@@ -191,7 +197,7 @@ Do not add a "Face ID export" shortcut using the stored WalletUnlockKey. System 
 The independent Mobile application should consume or generate these through the Fresnica SDK integration contract:
 
 - `core/rust` - cryptographic/signing authority behind released native binaries;
-- `bindings/mobile/src` - FFI-neutral `MobileCoreApi` behind the native binding contract;
+- `bindings/native/src` - generalized UniFFI Native SDK binding over `fresnica-sdk`;
 - compiled Android Native SDK binary with Rust libraries/native signing implementation;
 - compiled Apple Native SDK binary with native signing implementation;
 - canonical React Native adapter source and adapter-build recipe/tooling;
@@ -207,12 +213,12 @@ The canonical RN adapter source remains Fresnica-owned, but Mobile compiles it *
 
 1. Choose/pin the Mobile React Native version and Fresnica Native SDK/Binding API.
 2. Follow `docs/mobile-framework-adapter-contract.md` to compile the RN adapter once, store its binaries/manifest and prove `parseAccount` from React Native.
-3. Define the host Realm schema/migration around Account / Signer / Reference.
-4. Absorb #81 watch-only create, attach and downgrade semantics.
-5. Absorb #83 create/import/generate provisioning.
-6. Connect native system-auth enrollment/signing to persisted signer records.
-7. Absorb #82 global passcode rotation into Settings/security UX.
-8. Absorb #84 explicit Reveal/Export UX.
+3. Define the host Realm schema/migration around Account / Signer / Reference plus optional Recovery Source grouping.
+4. Establish the Fresnica app passcode; optionally initialize the device System Auth Domain once.
+5. Absorb #81 watch-only create, attach and downgrade semantics.
+6. Absorb #83 create/import/generate provisioning and v0.2 `deriveMnemonicSigner` HD-add-account behavior. Register new signers into an existing System Auth Domain after persistence/passcode verification, without another biometric prompt.
+7. Absorb #82 global passcode rotation into Settings/security UX using all-signer staged `reprotect` + one atomic commit + post-commit wrapped-key replacement.
+8. Absorb #84 explicit Reveal/Export UX; system auth alone never authorizes it.
 9. Add ledger-side signer/threshold resolution so `hasLocalSigner` can be combined with actual on-chain authorization.
 
 ## Completion criteria before deleting donor TypeScript from `fresnica`
@@ -222,11 +228,11 @@ The donor `bindings/mobile/react-native/src/*.ts` application orchestration may 
 - the pinned Native SDK + generated adapter binary integration is reproducible from the recorded manifest;
 - normal Mobile builds do not compile Rust/Core/UniFFI or adapter source;
 - watch-only create/upgrade/downgrade;
-- Account != Signer preservation;
+- Account != Signer != Recovery Source preservation;
 - shared signer detach safety;
 - atomic create/import/generate persistence;
 - atomic all-signer passcode rotation;
-- post-commit native enrollment invalidation/re-enrollment;
+- one-time device System Auth Domain initialization plus no-biometric signer registration and post-rotation wrapped-key replacement;
 - fresh-passcode-only Reveal/Export;
 - no secret/mnemonic/WalletUnlockKey persisted in application state.
 

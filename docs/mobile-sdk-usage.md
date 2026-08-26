@@ -1,25 +1,25 @@
 # Fresnica Mobile SDK 使用指南
 
-Status: **Mobile integration baseline — Native SDK v0.1.0**.
+Status: **Mobile integration baseline — Native SDK v0.2.1**.
 
 本文件是独立 `fresnica-mobile` 项目的开工入口。Mobile 不应复制或重新编译 Fresnica Rust Core；它消费已发布的 Native SDK，并在自己的 React Native/toolchain 环境中一次性编译 canonical React Native adapter。
 
 ## 1. 固定版本基线
 
-首个 generalized Native SDK 基线：
+当前 generalized Native SDK / Mobile security 基线：
 
-- Native SDK release/tag: `native-sdk-v0.1.0`
-- Release target commit: `c25e162a6d982c7b98658ac857630bbe59256a14`
-- Native SDK package: `0.1.0`
-- Native Binding API: `1`
-- Universal SDK API: `2`
-- Core Client API: `2`
-- React Native adapter source: `0.1.0`
+- Native SDK release/tag: `native-sdk-v0.2.1`
+- Release target commit: recorded in the release manifest (`git_commit`)
+- Native SDK package: `0.2.1`
+- Native Binding API: `2`
+- Universal SDK API: `3`
+- Core Client API: `3`
+- React Native adapter source: `0.2.0`
 - Android: `minSdk 26`, `armeabi-v7a`, `x86`, `x86_64`, `arm64-v8a`
 - Apple: iOS `13.4+`, macOS `12.0+`
 - React Native real-consumer validation baseline: RN `0.87` with CocoaPods on macOS/Xcode
 
-New Mobile work MUST NOT use the legacy `mobile-sdk-v0.1.0` artifact. That package is frozen compatibility history. `bindings/mobile` remains donor/reference material only until the independent Mobile project has absorbed the #81-#84 lifecycle behavior.
+New Mobile work MUST NOT use the legacy `mobile-sdk-v0.1.0` artifact or the superseded generalized `native-sdk-v0.1.0` baseline. Those are frozen compatibility history. `bindings/mobile` remains donor/reference material only until the independent Mobile project has absorbed the #81-#84 lifecycle behavior.
 
 Pre-1.0 consumers should pin exact SDK and React Native versions. Do not use floating SDK versions or React Native semver ranges for the adapter build.
 
@@ -56,15 +56,15 @@ Fresnica owns cryptography, signer identity checks, protected-envelope semantics
 Release page:
 
 ```text
-https://github.com/manran/fresnica/releases/tag/native-sdk-v0.1.0
+https://github.com/manran/fresnica/releases/tag/native-sdk-v0.2.1
 ```
 
 Consumer-facing files are:
 
 ```text
-fresnica-native-sdk-0.1.0.aar
-FresnicaSDK-0.1.0-apple.zip
-fresnica-native-sdk-0.1.0-manifest.json
+fresnica-native-sdk-0.2.1.aar
+FresnicaSDK-0.2.1-apple.zip
+fresnica-native-sdk-0.2.1-manifest.json
 SHA256SUMS
 ```
 
@@ -75,7 +75,7 @@ Recommended Mobile-owned layout:
 ```text
 vendor/fresnica/
   native/
-    fresnica-native-sdk-0.1.0.aar
+    fresnica-native-sdk-0.2.1.aar
     FresnicaSDK.xcframework
     FresnicaSDKFFI.xcframework
   adapter/
@@ -106,7 +106,7 @@ Values such as `^0.87.0`, `~0.87.0`, `latest` or workspace ranges are rejected b
 Copy:
 
 ```text
-fresnica-native-sdk-0.1.0.aar
+fresnica-native-sdk-0.2.1.aar
 ```
 
 into the Mobile-controlled native artifact location.
@@ -115,7 +115,7 @@ Because the GitHub release is a raw AAR rather than a Maven publication, the And
 
 ```gradle
 dependencies {
-    implementation files("path/to/fresnica-native-sdk-0.1.0.aar")
+    implementation files("path/to/fresnica-native-sdk-0.2.1.aar")
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
     implementation "net.java.dev.jna:jna:5.12.1@aar"
     implementation "androidx.annotation:annotation:1.8.2"
@@ -137,7 +137,7 @@ The Native SDK AAR itself contains:
 Extract:
 
 ```text
-FresnicaSDK-0.1.0-apple.zip
+FresnicaSDK-0.2.1-apple.zip
 ```
 
 which contains:
@@ -166,7 +166,7 @@ node adapters/react-native/tooling/fresnica-adapter.mjs \
   build react-native \
   --platform android \
   --project /path/to/fresnica-mobile \
-  --native-android-aar /path/to/fresnica-native-sdk-0.1.0.aar \
+  --native-android-aar /path/to/fresnica-native-sdk-0.2.1.aar \
   --out /path/to/fresnica-mobile/vendor/fresnica/adapter/react-native
 ```
 
@@ -310,14 +310,18 @@ The canonical adapter exposes:
 - `protectSecret`
 - `protectMnemonic`
 - `generateMnemonic`
+- `deriveMnemonicSigner`
 - `reprotect`
 - `reveal`
 - `prepareEd25519Signing`
 - `applyEd25519Signature`
-- `canEnrollSystemAuth`
-- `hasSystemAuth`
-- `removeSystemAuth`
-- `enrollSystemAuth`
+- `canUseSystemAuth`
+- `hasSystemAuthDomain`
+- `initializeSystemAuth`
+- `registerSignerSystemAuth`
+- `hasSignerSystemAuth`
+- `removeSignerSystemAuth`
+- `removeSystemAuthDomain`
 - `signWithSystemAuth`
 - `signWithPasscode`
 
@@ -328,6 +332,49 @@ It intentionally does **not** expose routine low-level operations such as:
 - raw `signTransactionXdr`
 
 `WalletUnlockKey`, Android biometric `Cipher` objects and equivalent native authorization state remain native-only.
+
+### System Auth 的产品流程
+
+System auth is one device/app-level protection domain, not one biometric enrollment per wallet. Recommended UX:
+
+```text
+First onboarding
+  set Fresnica app passcode
+  -> optionally initializeSystemAuth(reason)      # one system-auth prompt
+
+Create/import/derive another local signer
+  verify Fresnica app passcode
+  -> persist signer envelope
+  -> registerSignerSystemAuth(...)                # no biometric prompt
+
+Routine signing
+  -> signWithSystemAuth(...)                      # biometric/system-auth prompt
+  or signWithPasscode(...)                        # passcode fallback
+```
+
+Privilege rule:
+
+```text
+Fresnica Passcode > System Auth
+```
+
+System auth may authorize routine signing. It cannot Reveal/Export mnemonic or `S...`, change the Fresnica passcode, or become a recovery root.
+
+### 同一助记词派生多个地址
+
+`generateMnemonic` / `protectMnemonic` retain an explicit derivation index; the normal first account uses `index = 0`. To add a later account from the same mnemonic-backed signer source, Mobile calls:
+
+```text
+deriveMnemonicSigner(
+  sourceEnvelope,
+  appPasscode,
+  expectedSourceSignerPublicKey,
+  index,
+)
+  -> { signerPublicKey, envelopeJson }
+```
+
+Core authenticates the source envelope and derives the new index internally. The mnemonic does not cross back into JavaScript. Each returned signer gets a fresh independent protected envelope; Mobile may group them under one Recovery Source for backup/UX purposes.
 
 ## 12. Error contract
 
@@ -362,11 +409,14 @@ SignerRecord
 
 AccountSignerReference
   account <-> signer relationship
+
+RecoverySourceRecord / grouping metadata (Mobile-owned)
+  shared mnemonic backup / HD grouping when applicable
 ```
 
 Mandatory invariants:
 
-1. Account is not Signer; the relationship is not necessarily one-to-one.
+1. **Account != Signer != Recovery Source**; the relationships are not necessarily one-to-one.
 2. Watch-only is derived from absence of an applicable local signer reference.
 3. A Classic account may use a signer public key different from the account master key.
 4. Direct master-key watch-only upgrade must use Core identity verification (`expectedSignerPublicKey`).
@@ -375,20 +425,22 @@ Mandatory invariants:
 7. Secret/mnemonic/`WalletUnlockKey` must never be persisted in Realm, Redux/navigation state, logs, analytics or crash reports.
 8. Routine signing remains native-only.
 9. Reveal/Export always requires a fresh Fresnica app passcode.
-10. Global passcode rotation stages every re-protected signer first, then commits atomically, then invalidates/re-enrolls system auth.
+10. Global passcode rotation stages every re-protected signer first, commits all envelopes atomically, marks previous system-auth registrations stale for the new envelope generation, then replaces wrapped unlock-key records in the existing System Auth Domain; this post-commit registration does not require another biometric prompt.
 
 ## 14. Mobile 推荐迁移顺序
 
 After the smoke test succeeds:
 
-1. Define the Mobile-owned Realm schema/migrations for Account / Signer / Reference.
-2. Absorb watch-only create, attach and downgrade semantics from `docs/mobile-app-migration-pr81-pr84.md`.
-3. Absorb secret/mnemonic import and mnemonic generation provisioning.
-4. Connect SDK-owned system-auth signing to the persisted signer records.
-5. Add global app-passcode rotation.
-6. Add explicit Reveal / Export UX.
-7. Add network/Horizon ledger signer/threshold resolution so `hasLocalSigner` is not confused with actual on-chain authorization.
-8. Continue product screens/navigation/portfolio/history/SDEX/SEP flows independently from Core architecture.
+1. Define the Mobile-owned Realm schema/migrations for Account / Signer / Reference plus optional Recovery Source grouping metadata.
+2. Establish one Fresnica app passcode during onboarding.
+3. If the user enables system auth, call `initializeSystemAuth(reason)` once for the installation.
+4. Absorb watch-only create, attach and downgrade semantics from `docs/mobile-app-migration-pr81-pr84.md`.
+5. Absorb secret/mnemonic import and mnemonic generation provisioning; after a signer is persisted, call `registerSignerSystemAuth(...)` when a System Auth Domain exists. Registration verifies the passcode but does not prompt for biometrics.
+6. For another address from the same mnemonic, call `deriveMnemonicSigner(sourceEnvelope, appPasscode, expectedSourceSignerPublicKey, index)` instead of revealing/re-entering the mnemonic. Default first-account index is `0`; Mobile may explicitly choose later indices.
+7. Add global app-passcode rotation using all-signer staged `reprotect`, one atomic persistence commit, then re-register all new unlock keys into the existing System Auth Domain.
+8. Add explicit Reveal / Export UX; Face ID / fingerprint alone is never sufficient.
+9. Add network/Horizon ledger signer/threshold resolution so `hasLocalSigner` is not confused with actual on-chain authorization.
+10. Continue product screens/navigation/portfolio/history/SDEX/SEP flows independently from Core architecture.
 
 Do not copy the donor TypeScript class names blindly. Preserve the behavior and security invariants while integrating with the actual Mobile project structure.
 
@@ -421,7 +473,7 @@ Mobile should upgrade by pinning a newer Native SDK release and rebuilding the f
 Mobile integration baseline is considered established when its CI proves:
 
 - exact React Native version is pinned;
-- `native-sdk-v0.1.0` artifacts are checksum-verified and stored/pinned;
+- `native-sdk-v0.2.1` artifacts are checksum-verified and stored/pinned;
 - Android adapter binary is built once and stored;
 - Apple adapter binary is built once and stored;
 - `adapter-manifest.json` passes compatibility checking;

@@ -8,14 +8,15 @@ This is the compact continuation document for Fresnica. It records the current a
 
 - Repository: `manran/fresnica`
 - Default branch: `main`
-- Verified Mobile/SDK release baseline: `c25e162a6d982c7b98658ac857630bbe59256a14` (PR #107), the target commit of `native-sdk-v0.1.0`.
+- Verified Mobile/SDK architecture baseline: PR #109 / `0de8be490ba2e136324ddfbc737d2eadace5e12a`; final consumable baseline is `native-sdk-v0.2.1`, whose exact target commit is recorded in its release manifest.
 - PR #90 introduced the platform-neutral `fresnica-sdk` semantic contract.
 - PR #91 converted the Mobile v0.1.0 UniFFI facade into a compatibility wrapper over `fresnica-sdk`.
 - PR #92 introduced the generalized `fresnica-native-sdk` UniFFI layer plus framework-neutral Android AAR and Apple package/XCFramework generation.
 - Subsequent SDK/platform validation completed the WASM package, smart-account Testnet conformance vector, Apple/macOS Native SDK validation and the React Native 0.87 Apple consumer gate.
 - Rust CLI Phase-5 work subsequently added verified SEP-10 sessions, SEP-24/SEP-6 transfer initiation, transaction status and reviewed withdrawal-payment handoff while keeping signing on the SDK/Core path.
-- PR #107 published the first generalized `native-sdk-v0.1.0` prerelease after Android raw-AAR consumer and Apple iOS/macOS direct-consumer gates passed.
-- `mobile-sdk-v0.1.0` is frozen historical compatibility material; new Mobile/native consumers use `native-sdk-v0.1.0` + the canonical React Native adapter.
+- PR #107 published the first generalized `native-sdk-v0.1.0` prerelease. PR #109 finalized the Mobile security/HD contract and published `native-sdk-v0.2.0`; v0.2.1 is the corrective handoff release with transactional domain cleanup fixes and synchronized Mobile documentation after the full 13-workflow PR matrix, Android raw-AAR standalone consumer, Apple iOS/macOS Native SDK, and Android/Apple native-signing gates all passed.
+- The published v0.2 release target is exactly `0de8be490ba2e136324ddfbc737d2eadace5e12a`; independently downloaded Android/Apple workflow artifacts matched the GitHub Release SHA-256 metadata (`7fbb0b9d...e5ee78d` AAR, `672255f5...8c3824` Apple zip).
+- `native-sdk-v0.2.1` is the Mobile baseline: Native Binding API 2 / Universal SDK API 3 / Core Client API 3 / RN adapter source 0.2.0. `mobile-sdk-v0.1.0` and `native-sdk-v0.1.0` remain historical compatibility material.
 
 Do not treat a SHA in this handoff as the permanent head. Verify `main` and current CI before writing.
 
@@ -192,6 +193,10 @@ Client/platform code owns:
 
 Security invariants:
 
+- **Passcode > System Auth**: system authentication may authorize routine signing but cannot substitute for the Fresnica passcode, Reveal/Export, passcode rotation, or recovery authority;
+- **Account != Signer != Recovery Source**; mnemonic recovery-source grouping is Mobile-owned UX metadata while each signer retains an independent Core envelope;
+- Mobile initializes at most one device System Auth Protection Domain; later signers are passcode-verified and wrapped with the domain public key without another biometric prompt;
+- a mnemonic-backed protected source may derive another explicit index through Core/SDK `deriveMnemonicSigner` without returning the mnemonic to JavaScript;
 - routine protected-software signing remains native-only;
 - `WalletUnlockKey` does not enter JavaScript/Dart;
 - raw low-level `signTransactionXdr` is not exposed to normal framework code;
@@ -231,12 +236,13 @@ PR #81-#84 application-side TypeScript remains migration/reference material unti
 The Mobile onboarding order is now executable and documented in `mobile-sdk-usage.md`:
 
 1. pin an exact React Native version;
-2. pin `native-sdk-v0.1.0` / Native Binding API 1;
+2. pin `native-sdk-v0.2.1` / Native Binding API 2 / matching RN adapter source 0.2.0;
 3. checksum-verify the Android/Apple release artifacts;
-4. compile the canonical RN adapter once in the Mobile environment;
-5. store adapter binaries + compatibility manifest;
-6. prove `FresnicaCore.parseAccount` from React Native on Android and iOS;
-7. then absorb Account/Signer/Realm/provisioning/passcode/export application flows.
+4. compile the canonical RN adapter once in the Mobile environment and store adapter binaries + compatibility manifest;
+5. prove `FresnicaCore.parseAccount` from React Native on Android and iOS;
+6. establish one Fresnica app passcode and optionally call `initializeSystemAuth` once for the device;
+7. create/import/derive signers with passcode verification and, when the domain exists, call `registerSignerSystemAuth` without another biometric prompt;
+8. absorb Account/Signer/Recovery-Source/Realm/passcode/export application flows.
 
 ## Desktop Direction
 
@@ -379,8 +385,8 @@ Real-browser validation exposed upstream `smart-account-kit` 0.6.2 requesting We
 
 The infrastructure handoff is now split cleanly between SDK maintenance and product work:
 
-1. **Mobile can start independently**: follow `mobile-sdk-usage.md`, pin `native-sdk-v0.1.0`, compile/store the RN adapter binaries once, pass the compatibility check and prove `FresnicaCore.parseAccount` on Android/iOS.
-2. **Mobile owns product/application migration**: absorb #81-#84 Account/Signer/Realm/provisioning/passcode/export behavior in `fresnica-mobile` without moving crypto or WalletUnlockKey policy into JavaScript.
+1. **Mobile can start independently**: follow `mobile-sdk-usage.md`, pin `native-sdk-v0.2.1`, compile/store the RN adapter binaries once, pass the compatibility check and prove `FresnicaCore.parseAccount` on Android/iOS.
+2. **Mobile owns product/application migration**: absorb #81-#84 Account/Signer/Recovery-Source/Realm/provisioning/passcode/export behavior in `fresnica-mobile`; use one device System Auth Domain and the v0.2 `deriveMnemonicSigner` contract without moving crypto or WalletUnlockKey policy into JavaScript.
 3. **Fresnica keeps SDK evolution additive/released**: Core/SDK/native changes continue here and reach Mobile only through reviewed release/version contracts; normal Mobile builds never compile Rust/UniFFI.
 4. **Wallet standards continue below product UI**: SEP-12 customer-information handoff is the next unblocked Anchor gap; SEP-45 remains the contract-account auth path.
 5. **Smart account / passkey**: keep the real Testnet conformance vector; implement platform-native Mobile provider integration when the Mobile product reaches that feature.
@@ -394,6 +400,6 @@ The infrastructure handoff is now split cleanly between SDK maintenance and prod
 3. Read `mobile-sdk-usage.md` to start the independent Mobile project; read `mobile-framework-adapter-contract.md` before changing Native SDK or RN packaging.
 4. Read `mobile-app-migration-pr81-pr84.md` before starting the independent Mobile application.
 5. Read `client-core-security.md` and `mobile-core-contract.md` before changing signer/passcode/system-auth boundaries.
-6. Preserve Account != Signer, `C...` identity semantics, native-only routine signing and fresh-passcode-only Reveal/Export.
-7. Treat `mobile-sdk-v0.1.0` as frozen history; new Mobile work pins `native-sdk-v0.1.0` and its generated RN adapter binaries.
+6. Preserve Account != Signer != Recovery Source, `Passcode > System Auth`, `C...` identity semantics, native-only routine signing and fresh-passcode-only Reveal/Export.
+7. Treat `mobile-sdk-v0.1.0` and `native-sdk-v0.1.0` as frozen history; new Mobile work pins `native-sdk-v0.2.1` and its generated RN adapter binaries.
 8. Do not start product-specific Desktop/Web framework code until the universal SDK contract has a stable shape.
