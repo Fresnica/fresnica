@@ -221,18 +221,13 @@ The generalized Native SDK release contract is defined in `docs/sdk/native-relea
 
 The reusable wallet foundation is substantially implemented in the Rust reference clients. The current goal is to stabilize the cross-platform Application Capability contracts and let product-specific Application Flows evolve independently.
 
-Priority areas:
+Current standards work:
 
-- account / signer / watch-only lifecycle
-- balance and portfolio behavior
-- send/payment and transaction review
-- assets/trustlines
-- history/activity
-- SDEX offers/markets
-- contacts/address resolution
-- network configuration
-- hardware/external signer transport
-- anchor workflows
+- keep the five common architecture/security/platform contracts authoritative and small;
+- maintain per-capability semantic contracts under `docs/capabilities/`;
+- keep mature Account, Signer, Balance, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination semantics Normative;
+- keep Wallet, History, Contacts, Application Security, Dapp, External Signer and Network/Gateway Defined until multiple product implementations reveal stronger common contracts;
+- let Mobile/Web/Desktop implementations propose specification upgrades from concrete behavior instead of copying Rust internals.
 
 The provider-neutral Core prepare/apply boundary is already sufficient for hardware wallets. Ledger is the first provider candidate, but its implementation is deliberately gated: Fresnica currently uses `stellar-xdr 28.0.0` while the current reviewed Stellar CLI workspace provides `stellar-ledger 27.1.0` on `stellar-xdr 27.0.0`, and Ledger has not yet published a Stellar-specific DMK signer kit. Do not add a lossy XDR-version conversion or move HID/BLE/WebHID into Core merely to close the checklist; see `docs/capabilities/external-signer.md`.
 
@@ -250,11 +245,11 @@ Future SEP adoption should be driven by wallet/product requirements and reviewed
 
 The Rust CLI is already the primary lightweight native validation client. Keep it working as SDK/Core contracts evolve. Its SDK-boundary guard, Rust unit suite, release build and Python compatibility suite were all revalidated on GitHub Actions on 2026-08-25 after PR #95.
 
-### Rust TUI - STARTED
+### Rust TUI - FUNCTIONAL REFERENCE CLIENT
 
 The shared Rust application-client boundary is now explicit in `clients/rust-client` (`fresnica-client`). The Rust CLI consumes that layer for wallet storage/lifecycle, contacts, Horizon transport, account/balance/history reads, UI-free transaction orchestration and payment prepare/review/submit semantics. This keeps application orchestration reusable without moving persistence/network policy into the universal SDK or making the client layer a crypto authority.
 
-The first `clients/rust-tui` slice consumes the same client layer and provides:
+The current `clients/rust-tui` reference client consumes the same client layer and provides:
 
 - wallet identity/capability header;
 - network-scoped session wallet switching;
@@ -300,25 +295,21 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. **Start independent Mobile integration now** from `docs/platforms/mobile/sdk-usage.md`: pin `native-sdk-v0.2.1` / Native Binding API 2 and an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms. Establish one app passcode and optionally initialize one device System Auth Domain; later signers register with passcode verification but no repeat biometric prompt.
-2. **Move Mobile application ownership out of this repository**: Realm schema/migrations, Account/Signer persistence, watch-only/import/generate/passcode/reveal UX and product state belong in `fresnica-mobile`; preserve the #81-#84 invariants from `docs/platforms/mobile/app-migration-pr81-pr84.md`.
-3. **Keep the SDK boundary stable**: new Core/SDK capability work may continue independently, but Mobile should upgrade through pinned Native SDK releases and `NATIVE_BINDING_API_VERSION`, not by compiling Rust/Core in normal app builds.
-4. Continue reusable wallet/SEP work below product UI: validate the shared Anchor Capability implementation and common SEP-12 handoff against concrete anchors before adding anchor-specific branches; add nested `/customer/files` only when required, while SEP-45 remains separate.
-5. Keep the real smart-account Testnet vector as provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile product integration reaches contract-account signing.
-6. Keep hardware/external signer transport gated by the reviewed Ledger/XDR compatibility constraints rather than forcing lossy conversion.
-7. Keep Rust CLI as the reference native engineering client; Desktop/Web product work follows the same stable SDK boundaries rather than creating new Core architectures.
+1. **Finish documentation/contract stabilization**: keep `docs/README.md`, the five common contracts and `docs/capabilities/` as the authoritative cross-project vocabulary; remove remaining stale implementation-status claims rather than duplicating contracts in platform/state documents.
+2. **Land and validate the current Rust reference batch**: after the documentation batch is pushed, run real Rust tests/release builds for the Anchor Capability extraction that follows the already-validated SEP-12 batch.
+3. **Let independent Mobile integration proceed from the contracts**: Mobile Features implement Application Flows and may implement Capabilities with Stellar JS SDK + Native SDK + Mobile-owned repositories; do not require `fresnica-client` or mirror Rust module structure.
+4. **Upgrade Defined capabilities only from concrete product evidence**: Dapp/session transport, History normalization, Contacts, Application Security, Wallet aggregate and Network/Gateway contracts should mature from real Mobile/Web/Desktop behavior.
+5. **Keep SEP/hardware extensions demand-driven**: validate Anchor behavior against concrete anchors before nested `/customer/files`; keep SEP-45 separate; keep Ledger transport gated by exact XDR/provider compatibility.
+6. **Preserve provider conformance baselines**: smart-account/passkey remains provider/Testnet reference material until a product needs a cross-platform capability contract.
 
-## Non-negotiable Architecture Rules
+## Architecture / Security Rules
 
-- Account != Signer != Recovery Source; the relationships are not necessarily one-to-one.
-- `C...` account identity is not an Ed25519 public key.
-- Core/SDK owns cryptographic signer semantics; clients own persistence, network state and product orchestration.
-- Framework adapters are mechanical integration glue, not security authorities.
-- Routine application builds must not rebuild Rust/Core or framework adapter source.
-- Plaintext secret/mnemonic exposure remains exceptional and explicit.
-- `WalletUnlockKey` and equivalent native authorization material must not cross into JavaScript/Dart merely for convenience.
-- System auth is lower privilege than the Fresnica app passcode: it may authorize routine signing, but not Reveal/Export, passcode change, or recovery-root replacement.
-- Global passcode rotation stages `reprotect` for every protected software signer, atomically commits the complete envelope set, then replaces wrapped unlock-key records in the existing System Auth Domain.
-- UniFFI's internal C-compatible layer is not a stable Fresnica public C ABI.
-- Full Stellar asset identity and network scoping remain authoritative.
-- Stellar protocol/SEP behavior should reuse official primitives and standards wherever practical.
+Do not duplicate permanent architecture/security rules in the roadmap. The authoritative contracts are:
+
+- [`architecture.md`](architecture.md);
+- [`application-flows.md`](application-flows.md);
+- [`application-capabilities.md`](application-capabilities.md);
+- [`core-security-boundary.md`](core-security-boundary.md);
+- [`platform-implementation.md`](platform-implementation.md).
+
+Roadmap changes must conform to those documents. If a stable rule changes, update the relevant contract first and then adjust roadmap state.

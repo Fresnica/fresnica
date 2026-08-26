@@ -36,7 +36,7 @@ Rust is already a first-class direct-consumer surface through `sdk/rust`.
 Use cases include:
 
 - `clients/rust-cli`;
-- a future Rust TUI;
+- `clients/rust-tui`;
 - native Rust desktop applications;
 - engineering/conformance clients.
 

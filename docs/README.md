@@ -1,18 +1,18 @@
 # Fresnica Documentation
 
-This directory is organized around shared contracts first and implementation detail second.
+This directory is organized around **shared contracts first, implementation detail second**.
 
 ## Start here
 
-All Fresnica products should begin with these five documents, in order:
+Every Fresnica product should begin with these five common documents, in order:
 
-1. [Architecture](architecture.md) - the shared layering and canonical vocabulary.
+1. [Architecture](architecture.md) - shared layering and canonical vocabulary.
 2. [Application Flows](application-flows.md) - product intent, sequencing and UI/UX ownership.
-3. [Application Capabilities](application-capabilities.md) - cross-platform wallet semantics.
-4. [Core Security Boundary](core-security-boundary.md) - security invariants that implementations must not redefine.
-5. [Platform Implementation](platform-implementation.md) - how each runtime may implement the contracts independently.
+3. [Application Capabilities](application-capabilities.md) - cross-platform wallet semantics, maturity and governance.
+4. [Core Security Boundary](core-security-boundary.md) - security invariants implementations must not redefine.
+5. [Platform Implementation](platform-implementation.md) - how runtimes may implement the contracts independently.
 
-The compact model is:
+Compact model:
 
 ```text
 Application Flow
@@ -31,94 +31,77 @@ crypto/security authority chain mechanisms       durable state      OS/runtime m
 
 > **Flows are product-specific. Capabilities are semantically shared. Fresnica Core is authoritative for cryptographic meaning.**
 
-## Common contracts
+## Detailed references
 
-- [Architecture](architecture.md)
-- [Application Flows](application-flows.md)
-- [Application Capabilities](application-capabilities.md)
-- [Core Security Boundary](core-security-boundary.md)
-- [Platform Implementation](platform-implementation.md)
+### Application Capabilities
 
-## Capability references
+See [`capabilities/README.md`](capabilities/README.md) for the capability matrix and detailed contracts.
 
-Detailed notes that support individual capabilities live in [`capabilities/`](capabilities/):
+Normative contracts currently include Account, Signer, Balance / Availability, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination. Defined capabilities deliberately leave more implementation freedom while their cross-platform semantics mature.
 
-- [Anchor](capabilities/anchor.md)
-- [External / hardware signer](capabilities/external-signer.md)
-- [Network configuration](capabilities/network.md)
-- [Passkey / smart account](capabilities/passkey-smart-account.md)
+### Fresnica Core
 
-These references may contain implementation status and provider-specific detail. The canonical capability names and maturity levels remain in [Application Capabilities](application-capabilities.md).
+See [`core/README.md`](core/README.md) for Core client/security/signer/protection/reveal details.
 
-## Core references
+The short cross-platform authority remains [Core Security Boundary](core-security-boundary.md).
 
-Detailed Core/security contracts live in [`core/`](core/):
+### Platforms
 
-- [Core client protocol](core/client-protocol.md)
-- [Client/Core security details](core/client-security.md)
-- [Signer architecture](core/signer.md)
-- [Software signer protection](core/protection.md)
-- [Reveal / export](core/secret-export.md)
+See [`platforms/README.md`](platforms/README.md):
 
-The short cross-platform security authority is [Core Security Boundary](core-security-boundary.md).
+- [Mobile](platforms/mobile/README.md)
+- [Desktop](platforms/desktop/README.md)
+- [Web](platforms/web/README.md)
+- [Terminal engineering clients](platforms/terminal/README.md)
 
-## Platform references
+Platform references describe implementation choices, packaging and UX integration. They do not redefine shared Capability semantics.
 
-Platform documents describe implementation choices, packaging and UX integration. They do not redefine shared Capability semantics.
+### SDK
 
-### Mobile
+See [`sdk/README.md`](sdk/README.md) for Native/Universal SDK packaging and release references.
 
-Start with the five common contracts above, then read:
+### Development / validation
 
-- [Mobile / Native SDK bindings](platforms/mobile/bindings.md)
-- [Mobile SDK usage](platforms/mobile/sdk-usage.md)
-- [Framework adapter](platforms/mobile/framework-adapter.md)
-- [System authentication](platforms/mobile/system-auth.md)
-- [Security vault mapping](platforms/mobile/security-vault-contract.md)
-- [Application migration reference](platforms/mobile/app-migration-pr81-pr84.md)
-- [React Native upgrade playbook](platforms/mobile/react-native-upgrade-playbook.md)
+See [`development/README.md`](development/README.md) for local setup, Testnet workflows and validation guides.
 
-The independent `fresnica-mobile` project's Feature-first architecture is a Mobile implementation of **Application Flows**. A Mobile `Feature` may implement one or more Flows and consumes Application Capabilities through Mobile-owned implementations/ports.
+### Decisions / archive
 
-### Desktop
+- [`decisions/README.md`](decisions/README.md) - historical architecture decisions.
+- [`archive/README.md`](archive/README.md) - legacy terminology/history only.
 
-- [Desktop SDK contract](platforms/desktop/sdk-contract.md)
-
-### Web
-
-- [Web / WASM security boundary](platforms/web/wasm-security.md)
-
-### Terminal engineering clients
-
-- [CLI/TUI entrypoints](platforms/terminal/entrypoints.md)
-- [CLI send flow](platforms/terminal/cli-send-flow.md)
-- [TUI flow](platforms/terminal/tui-flow.md)
-- [Terminal system authorization](platforms/terminal/system-auth.md)
-- [Terminal UI architecture](platforms/terminal/ui-architecture.md)
-- [Terminal runtime](platforms/terminal/runtime.md)
-- [Terminal wallet storage](platforms/terminal/storage.md)
-- [Terminal history cache](platforms/terminal/history-cache.md)
-
-## SDK and development
-
-- [Native SDK release contract](sdk/native-release.md)
-- [Local development](development/local-development.md)
-- [Testnet CLI](development/testnet-cli.md)
-- [Testnet SDEX](development/testnet-sdex.md)
-- [Testnet validation checklist](development/testnet-validation-checklist.md)
-- [Testnet workflow](development/testnet-workflow.md)
-
-## Project state and decisions
+## Project state
 
 - [Roadmap](roadmap.md)
 - [Tasks](tasks.md)
 - [Current handoff](handoff.md)
-- [Architecture decision log](decisions/architecture.md)
 
-`roadmap.md`, `tasks.md` and `handoff.md` describe current project state. They are not permanent architecture contracts and may age faster than the five common documents.
+These are state/continuation documents, not permanent architecture contracts. They may age faster than the five common documents.
 
-## Legacy terminology
+## Mobile handoff
 
-Historical documents/code may still use `Service` for what is now called an **Application Capability**, or use Mobile `Core` for an application capability layer. Do not copy those names into new cross-project architecture.
+For a Fresnica Mobile developer, the recommended reading sequence is:
 
-The legacy terminology note is retained at [`archive/services.md`](archive/services.md).
+```text
+this README
+  -> five common contracts
+  -> platforms/mobile/README.md
+  -> independent fresnica-mobile Feature-first design
+```
+
+The mapping is:
+
+```text
+Mobile Feature
+    implements
+Application Flow
+    consumes
+Application Capabilities
+```
+
+Mobile may implement Capabilities with Stellar JS SDK + Fresnica Native SDK + Mobile-owned repositories/code. It is not required to link the Rust `fresnica-client` implementation.
+
+## Terminology rule
+
+Historical code/documents may still use `Service` for what is now an **Application Capability**, or use Mobile `Core` for an application capability layer.
+
+Do not use those as new cross-project architecture terms. `Core` is reserved for Fresnica Rust Core/security authority.

@@ -1,42 +1,54 @@
-# Network / Gateway Capability Reference
+# Network / Gateway Capability
 
-The cross-platform Capability is **Network / Gateway** and is currently `Defined` rather than fully normative.
+Maturity: **Defined**
+
+## Purpose
+
+Network / Gateway is the shared capability name for accessing Stellar network state, submitting transactions and transporting Stellar ecosystem protocols.
+
+It is Defined rather than Normative because Horizon/RPC/Portfolio/provider strategy is still evolving and may differ by product.
 
 ## Identity rule
 
-Network selection is a runtime/product choice, but chain-derived wallet state is always network-scoped.
-
-The same Stellar address string may exist on more than one network, therefore an application must not treat the bare address as a globally unique durable account context.
-
-Conceptually:
+Chain-derived wallet state is always network-scoped:
 
 ```text
 Account context = Stellar network + account identity
 ```
 
-Balances, liabilities, history, offers, transactions, anchor discovery/session state and caches must not leak across network boundaries.
+The same Stellar address string may exist on more than one network. Implementations must not leak balances, liabilities, history, offers, transactions, pending-write guards, anchor discovery/session state or caches across network boundaries.
 
-## Configuration
+## Stable responsibilities
 
-A platform may expose network configuration in the form appropriate to its runtime, for example:
+Other Capabilities should be able to request semantic network operations such as:
 
-```toml
-[network]
-default = "testnet"
-```
+- load current account/ledger state;
+- test account existence;
+- fetch operations/offers/trades/market data;
+- obtain current fee/reserve parameters;
+- submit an exact signed transaction;
+- query transaction status;
+- perform protocol HTTP transport required by Anchor or other capabilities.
 
-or an application preference/environment/profile.
+The result should be normalized before ordinary Flows depend on transport-specific response shapes.
 
-Typical product networks include mainnet and testnet. Custom endpoints or future networks are implementation policy unless promoted into a stronger shared contract.
+## Implementation freedom
 
-## Implementation boundary
+The shared contract does not mandate:
 
-The Capability requires access to Stellar network state and submission/protocol transport, but it does not mandate:
-
-- Horizon vs RPC vs Portfolio API;
+- Horizon vs RPC vs Portfolio APIs;
 - one HTTP client;
-- one retry strategy;
+- one retry/backoff policy;
 - one cache layout;
+- one proxy/provider;
 - one endpoint configuration format.
 
-Those are platform mechanisms. Stable semantic results used by other Capabilities should be normalized before they reach Application Flows.
+Typical products support mainnet and testnet. Custom endpoints/networks remain product policy unless promoted into a stronger shared contract.
+
+## Submission semantics
+
+Network transport must preserve the Transaction Capability distinction between deterministic rejection and uncertain submission. A timeout/connection failure after sending bytes is not automatically proof that the transaction was rejected.
+
+## Evolution
+
+Promote narrower gateway semantics to Normative only when multiple platform implementations need to rely on the same result model. Do not standardize a Horizon client wrapper merely because the Rust reference currently uses one.

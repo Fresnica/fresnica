@@ -1,5 +1,7 @@
 # Local development
 
+This guide primarily covers the retained Python reference client plus selected repository-wide validation entry points. Rust/Native SDK platform validation is documented in the relevant platform/SDK references.
+
 ## Install
 
 ```bash
@@ -151,9 +153,10 @@ uv run fresnica --network mainnet dex trades XLM USDC:GISSUER... --limit 20
 uv run fresnica --network mainnet dex candles XLM USDC:GISSUER... --resolution 1h --limit 24
 ```
 
-Market cache records preserve raw Horizon JSON and also index offer direction,
-trade amounts/timestamps, and OHLC/volume fields. SDEX write operations are not
-part of this milestone.
+The Python reference market cache preserves raw Horizon JSON and also indexes offer direction,
+trade amounts/timestamps, and OHLC/volume fields. Rust CLI/TUI now also expose shared SDEX write
+and market semantics through the Rust reference Capability implementation; this section describes
+the Python reference commands only.
 
 Run the test suite with:
 

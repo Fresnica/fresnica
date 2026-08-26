@@ -1,0 +1,46 @@
+# Dapp Interaction Capability
+
+Maturity: **Defined**
+
+## Purpose
+
+Dapp Interaction is the shared capability name for receiving, reviewing, authorizing and responding to an external application's wallet request.
+
+The capability deliberately standardizes **the name, purpose and security boundary first**, not one transport API.
+
+## Current semantic boundary
+
+A Dapp implementation may support requests involving:
+
+- account identity/connection;
+- transaction review/signing;
+- transaction submission;
+- other wallet authorization operations explicitly supported by Fresnica.
+
+Every request must reuse existing Account, Transaction, Signer and Signing Coordination semantics. Dapp transport must not create an alternate signing/security model.
+
+## Platform-specific mechanisms
+
+Examples include:
+
+- Mobile WalletConnect-style transport;
+- deep links;
+- in-app browser bridges;
+- Web extension/browser bridges;
+- Desktop IPC/browser integration.
+
+Transport/session discovery, framework lifecycle and UI are platform-owned.
+
+## Security requirements
+
+A Dapp request must not:
+
+- receive raw private software signer material;
+- bypass transaction review/confirmation policy;
+- sign arbitrary bytes through the Stellar transaction-signing path;
+- treat a remote application's claimed account/signer identity as trusted without local validation;
+- bypass the stronger Reveal/Export boundary.
+
+## Promotion criteria
+
+When real Mobile/Web/Desktop implementations reveal a stable cross-platform request/review/result/session model, propose those semantics for promotion to `Normative`. Until then, do not freeze WalletConnect or any other single transport as the universal Fresnica Dapp API.

@@ -9,6 +9,12 @@
 - [x] Core security boundary (`docs/core-security-boundary.md`)
 - [x] Platform implementation contract (`docs/platform-implementation.md`)
 - [x] Documentation index and directory reorganization (`docs/README.md`)
+- [x] Per-directory documentation entry points for Capabilities/Core/Platforms/SDK/Development
+- [x] Detailed Capability contracts/reference pages under `docs/capabilities/`
+- [x] Shared cross-capability domain primitives for network/account/signer/asset/amount/price semantics
+- [x] Capability maturity audit: keep premature Wallet/History/Contacts semantics Defined rather than freezing terminal implementation shapes
+- [x] Compact `docs/handoff.md` so stable architecture rules live only in the common contracts
+- [x] Move Python reference product documentation out of the root project README
 - [x] Preserve `fresnica-client` as Rust reference Capability implementation without requiring other platforms to link it
 
 ## Runtime

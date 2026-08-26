@@ -1,96 +1,179 @@
-# Anchor Authentication Boundary
+# Anchor Capability
+
+Maturity: **Normative** for the Classic common path described below.
 
 Updated: 2026-08-26
 
-This document records the current Rust reference-client authentication boundary for Stellar anchors.
+## Purpose
 
-## Current state
+The Anchor Capability defines wallet-facing Stellar anchor/SEP semantics below product UI.
 
-The shared Rust Anchor Capability implementation behind `anchor discover CODE:GISSUER` now discovers and validates:
+Application Flows own deposit/withdraw/KYC presentation. The Capability owns protocol discovery, authentication meaning, protocol selection, normalized transfer/status/customer semantics and the safe handoff to ordinary transaction/payment capabilities.
 
-- SEP-1 `stellar.toml` from the issuer `home_domain`;
-- SEP-6 `TRANSFER_SERVER` and `/info` capability metadata;
-- SEP-24 `TRANSFER_SERVER_SEP0024` and `/info` capability metadata;
-- SEP-10 `WEB_AUTH_ENDPOINT` plus a Classic `G...` `SIGNING_KEY`;
-- SEP-45 `WEB_AUTH_FOR_CONTRACTS_ENDPOINT`, Contract `C...` `WEB_AUTH_CONTRACT_ID`, and `SIGNING_KEY`;
-- whether authenticated SEP-6/SEP-24 use has at least one complete SEP-10 or SEP-45 metadata path.
+## Asset and network identity
 
-The shared Rust client now owns the Classic-account SEP-10/SEP-6/SEP-24 protocol path, while the CLI supplies presentation and signing authorization:
+Anchor operations are scoped by:
 
-- `anchor auth CODE:GISSUER [--wallet NAME]` requests and verifies a challenge before signing it through the Fresnica SDK/Core boundary, exchanges it for a JWT, and immediately discards that JWT after the diagnostic command completes;
-- `anchor deposit|withdraw CODE:GISSUER ...` prefers a usable SEP-24 flow and falls back to SEP-6;
-- SEP-24 interactive requests use `multipart/form-data`, require the anchor's transaction `id`, and use a fresh in-memory SEP-10 token;
-- `anchor status CODE:GISSUER ID ...` queries the protocol `/transaction` endpoint; when SEP-24 and SEP-6 are both plausible the caller must provide `--protocol` rather than letting Fresnica guess;
-- SEP-24 status always authenticates; SEP-6 status follows `/info.transaction.authentication_required`;
-- `anchor status ... --pay` is an explicit write transition only when the transaction is a withdrawal in `pending_user_transfer_start`; it consumes `withdraw_anchor_account`, `amount_in`, and `withdraw_memo[_type]`, then hands the payment to the existing reviewed transaction path;
-- withdrawal memos support the protocol-defined `text`, `id`, and base64 `hash` forms without flattening them to text;
-- JWT values are held only in zeroizing in-memory strings and are never printed, persisted, logged, or passed through CLI arguments.
-- SEP-10 is a two-phase shared API: challenge preparation verifies the server transaction before any signer prompt, exposes the verified XDR read-only for SDK/Core signing, and token exchange rejects transaction substitution, missing server signatures, or missing client signatures before HTTP exchange.
+```text
+Stellar network + full issued-asset identity (CODE:GISSUER)
+```
 
-Transfer execution currently supports Classic `G...` / SEP-10 only. SEP-45 metadata is discovered but contract-account authentication execution is intentionally still separate.
+Code-only asset identity is not sufficient.
 
-## Authentication model
+Discovery/session/customer/transaction state must not leak across network or anchor boundaries.
 
-Account identity selects the authentication family:
+## Current normative Classic scope
 
-- Classic `G...` account: SEP-10.
-- Contract `C...` account: SEP-45.
+The shared Classic `G...` account path covers:
 
-SEP-10 and SEP-45 are parallel authorization mechanisms. SEP-45 does not replace SEP-10.
+- SEP-1 discovery;
+- SEP-10 challenge authentication;
+- SEP-24 interactive deposit/withdraw;
+- SEP-6 deposit/withdraw fallback;
+- anchor transaction status;
+- reviewed withdrawal-payment handoff;
+- common SEP-12 customer status and scalar/binary customer update handoff.
 
-## Layer ownership
+SEP-45 contract-account execution is deliberately outside this Classic normative path until its Soroban authorization semantics are specified separately.
 
-The implementation preserves these boundaries:
+## SEP-1 discovery
 
-### Anchor Capability implementation / protocol layer
+A conforming implementation should discover and validate applicable anchor metadata from the asset issuer's `home_domain`, including the endpoints needed for supported flows such as:
 
-Implemented in `fresnica-client`; owns protocol validation and transport semantics, including:
+- `TRANSFER_SERVER`;
+- `TRANSFER_SERVER_SEP0024`;
+- `WEB_AUTH_ENDPOINT`;
+- `KYC_SERVER` where present;
+- Classic `SIGNING_KEY`;
+- contract-auth metadata when only reporting capability availability.
 
-- requesting an authentication challenge;
-- validating challenge structure, target account, domain and time constraints;
-- classifying complete SEP-10 versus SEP-45 capability paths while keeping Classic and contract execution separate;
-- exposing only the already-verified challenge XDR to the signing layer;
-- binding token exchange to that original transaction body and valid server/client signatures;
-- exchanging a verified signed challenge for an authorization token;
-- SEP-6/SEP-24 initiation, protocol selection and transaction-status transport;
-- keeping the token/session scoped to the anchor and network.
+Discovery must distinguish "metadata exists" from "a complete executable authentication path exists".
 
-### Rust Core
+## Transfer protocol selection
 
-Owns low-level cryptographic/XDR authority, including:
+For the current product policy:
 
-- transaction XDR parsing and hashing;
-- Ed25519 signature verification;
-- signer identity verification;
-- transaction signature application.
+1. prefer a usable SEP-24 flow when available;
+2. fall back to SEP-6 when usable;
+3. do not invent a Fresnica-specific transfer protocol when neither SEP path is valid.
 
-Core must not absorb HTTP anchor transport or SEP-specific product flow.
+When status lookup is ambiguous between protocols, the implementation must not silently guess if protocol identity affects endpoint/authentication semantics.
 
-### Fresnica SDK
+## Classic SEP-10 authentication
 
-Owns the safe application-facing signing boundary. After a challenge has been verified, protected software signing must go through the SDK/Core signing path; the CLI must not derive or manipulate private keys itself.
+SEP-10 authentication is a two-phase integrity boundary:
 
-### CLI / product UI
+```text
+request challenge
+  -> verify server-provided challenge completely
+  -> expose verified challenge read-only to signing layer
+  -> sign exact verified challenge through Fresnica SDK/Core
+  -> verify signed result is still the same challenge
+  -> exchange for token
+```
 
-Owns only command/UX orchestration and user authorization prompts. It must not sign arbitrary server-provided XDR before protocol verification.
+A conforming implementation must reject before token exchange when:
 
-## Transaction status and payment boundary
+- the challenge targets the wrong account/domain;
+- structural/time/server-signature validation fails;
+- the signed transaction body is substituted;
+- the required server signature is missing/invalid;
+- the client signature is missing/invalid.
 
-The Rust reference client treats status lookup and payment as separate actions:
+A product must never ask a protected signer to sign arbitrary server-provided XDR before SEP-10 verification.
 
-- status lookup is read-only by default and returns the anchor's full transaction object in `--json` mode;
-- `--pay` cannot be combined with `--json` and never bypasses the normal transaction review; `-y/--yes` has the same explicit confirmation-bypass semantics as the existing `send` command;
-- Fresnica refuses to pay unless the anchor transaction is a withdrawal whose status is exactly `pending_user_transfer_start`;
-- the payment destination must be a Classic `G...` account, the amount is revalidated by the existing payment path, and the memo is converted to its real XDR memo type before envelope construction;
-- signing and submission still go through the Fresnica SDK/Core path and the existing pending-transaction safety gate.
+Authorization tokens are session material, not wallet truth. They must not be logged, printed as normal output, persisted as ordinary wallet state or passed through command-line arguments.
 
-The Rust reference client now has the first SEP-12 customer-information handoff for `pending_customer_info_update` and related KYC states. `anchor customer CODE:GISSUER` authenticates with a fresh in-memory SEP-10 token, prefers `KYC_SERVER` and falls back to `TRANSFER_SERVER`, returns typed customer/required/provided-field state, and can submit scalar SEP-9 values plus binary multipart fields. Sensitive customer values are read from `--input PATH` or `--input -` (stdin), not command-line `--field` arguments, so KYC data is not deliberately copied into shell history or the process list.
+## SEP-24
 
-SEP-12 nested structured values combined with the optional `/customer/files` file-id workflow remain a follow-up for anchors that require that less-common shape. SEP-45 remains a separate contract-account path because its Soroban authorization-entry verification/signing semantics differ from Classic SEP-10 transaction signing.
+The common semantic result of SEP-24 initiation includes the anchor transaction identity and interactive flow information required by the product.
 
-## Current blockers / non-blockers
+The interactive webview/browser UX is Flow/platform-owned.
 
-- Classic SEP-10 verifier/session, SEP-24/SEP-6 initiation, transaction status lookup, and reviewed Classic withdrawal payment handoff are implemented in the Rust reference client.
-- SEP-12 customer status plus common scalar/binary customer updates are wired through the shared Rust Anchor Capability implementation; nested structured values plus the optional `/customer/files` workflow remain follow-up work.
-- SEP-45 metadata discovery is complete; SEP-45 execution still requires a dedicated contract-auth provider/verification path.
-- Ledger transport remains independent and must not be forced through a lossy XDR v28/v27 conversion merely to close a checklist item.
+SEP-24 status/authentication behavior must follow the SEP rather than UI assumptions.
+
+## SEP-6
+
+SEP-6 initiation/status must respect the anchor's advertised `/info` authentication requirements and field semantics.
+
+SEP-6 transport fields are protocol mechanics; product screens may collect equivalent information in a platform-appropriate way.
+
+## Transaction status
+
+Status lookup is read-only by default.
+
+The Capability should preserve the anchor transaction identity, kind, status and protocol fields needed by product Flows. A platform may retain the raw protocol object for diagnostics, but ordinary UI should consume normalized semantic state rather than branch on arbitrary JSON strings where a stable state is defined.
+
+## Withdrawal payment handoff
+
+An anchor status response does not itself authorize a blockchain payment.
+
+When a withdrawal reaches the protocol state requiring user transfer, the Anchor Capability derives the required payment intent and hands it to the ordinary Payment/Transaction path.
+
+The product must still present the real payment review and obtain normal signing authorization.
+
+Current Classic handoff preserves:
+
+- withdrawal destination account;
+- `amount_in`;
+- protocol memo type/value;
+- text, unsigned ID and 32-byte hash memo semantics.
+
+Anchor code must not flatten a non-text memo into text or bypass Payment preflight/signing rules.
+
+## SEP-12 customer information
+
+Common SEP-12 support includes:
+
+- authenticated customer status lookup;
+- customer ID/type/transaction context where applicable;
+- required/provided field state;
+- scalar SEP-9 value updates;
+- binary multipart field uploads.
+
+Sensitive customer values are private application input and must not be deliberately placed into logs, analytics or process-visible command arguments.
+
+Binary fields are protocol payloads, not durable wallet identity.
+
+Nested structured customer values plus the optional `/customer/files` file-ID workflow remain outside the current common contract until a concrete anchor requires them.
+
+## Errors
+
+Flows should be able to distinguish at least:
+
+- discovery/capability unavailable;
+- authentication required/unsupported account auth family;
+- invalid authentication challenge;
+- user/signing authorization failure;
+- protocol/request validation failure;
+- KYC/customer information required;
+- transfer pending/processing/rejected/complete state;
+- network/anchor transport failure.
+
+Do not expose JWTs or submitted KYC values merely to make an error string more descriptive.
+
+## Security ownership
+
+### Anchor Capability implementation
+
+Owns SEP protocol validation and transport semantics.
+
+### Fresnica SDK/Core
+
+Owns transaction/XDR hashing, Ed25519 signing/verification, signer identity verification and protected software signing.
+
+### Application Flow
+
+Owns forms, KYC screens, browser/webview behavior, confirmation and product-facing status presentation.
+
+## Reference implementation status
+
+The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
+
+Current deferred areas:
+
+- SEP-45 contract-account authentication execution;
+- uncommon nested SEP-12 + `/customer/files` workflow;
+- concrete-anchor compatibility fixes discovered through real integration.
+
+These are demand-driven extensions, not reasons to weaken the existing Classic contract.
