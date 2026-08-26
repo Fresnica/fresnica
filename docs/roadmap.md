@@ -226,8 +226,9 @@ Current standards work:
 - keep the five common architecture/security/platform contracts authoritative and small;
 - maintain per-capability semantic contracts under `docs/capabilities/`;
 - keep mature Account, Signer, Balance, Payment, Transaction, Trustline, SDEX, Anchor and Signing Coordination semantics Normative;
-- keep Wallet, History, Contacts, Application Security, Dapp, External Signer and Network/Gateway Defined until multiple product implementations reveal stronger common contracts;
-- let Mobile/Web/Desktop implementations propose specification upgrades from concrete behavior instead of copying Rust internals.
+- keep Wallet, History, Contacts, Application Security, Dapp, External Signer and Network/Gateway Defined until stronger cross-platform implementation/protocol evidence justifies promotion;
+- extract proven behavior from RefPython/Rust/native implementations as Reference Semantics instead of leaving it implicit in code;
+- let Mobile/Web/Desktop implementations propose specification upgrades through evidence-backed documentation PRs instead of copying Rust internals.
 
 The provider-neutral Core prepare/apply boundary is already sufficient for hardware wallets. Ledger is the first provider candidate, but its implementation is deliberately gated: Fresnica currently uses `stellar-xdr 28.0.0` while the current reviewed Stellar CLI workspace provides `stellar-ledger 27.1.0` on `stellar-xdr 27.0.0`, and Ledger has not yet published a Stellar-specific DMK signer kit. Do not add a lossy XDR-version conversion or move HID/BLE/WebHID into Core merely to close the checklist; see `docs/capabilities/external-signer.md`.
 

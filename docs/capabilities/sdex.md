@@ -61,8 +61,13 @@ The BUY/SELL distinction is semantic and must not be erased by casually invertin
 
 - amounts and user prices use exact decimal semantics, not binary floating point;
 - exact Stellar offer/order-book price ratios should be retained as integer `n/d` when available;
-- user-facing seven-decimal projection follows the Fresnica conformance vectors;
-- a positive price smaller than seven-decimal display precision must not be rendered semantically as zero; current display convention is `<0.0000001`.
+- user-facing seven-decimal numeric projection follows the Fresnica conformance vectors where such projection is used;
+- a positive nonzero amount/price must not be represented to the user as semantic zero merely because the chosen display precision is too coarse.
+
+
+## Reference presentation convention (non-normative)
+
+The current terminal UI renders a positive price below seven-decimal display precision as `<0.0000001` rather than `0.0000000`. Other platforms may use scientific notation, additional precision or another clear representation. The shared requirement is to avoid false-zero meaning, not to copy this string.
 
 ## Offer create/update/cancel
 

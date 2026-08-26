@@ -18,6 +18,8 @@ Account context = Stellar network + account identity
 
 The same Stellar address string may exist on more than one network. Implementations must not leak balances, liabilities, history, offers, transactions, pending-write guards, anchor discovery/session state or caches across network boundaries.
 
+The exact network passphrase is security-significant because it participates in Stellar transaction hashing/signing. A product-visible network name is an alias/configuration label; it must resolve to the correct cryptographic network context.
+
 ## Stable responsibilities
 
 Other Capabilities should be able to request semantic network operations such as:
@@ -32,6 +34,52 @@ Other Capabilities should be able to request semantic network operations such as
 
 The result should be normalized before ordinary Flows depend on transport-specific response shapes.
 
+## Reference Semantics: Python and Rust implementations
+
+Current reference implementations provide useful evidence for the shared network boundary:
+
+- [`reference/python/fresnica/network.py`](../../reference/python/fresnica/network.py)
+- [`reference/python/tests/test_cli_network.py`](../../reference/python/tests/test_cli_network.py)
+- [`clients/rust-client/src/transaction.rs`](../../clients/rust-client/src/transaction.rs)
+- [`clients/rust-client/src/service.rs`](../../clients/rust-client/src/service.rs)
+- [`clients/rust-client/src/anchor_protocol.rs`](../../clients/rust-client/src/anchor_protocol.rs)
+
+### 1. Network identity and provider endpoint are separate concerns
+
+The Python reference stores a network profile containing both the Stellar network passphrase and a Horizon endpoint. The Rust reference similarly resolves known network names to passphrase/provider configuration.
+
+The candidate common semantic is the separation itself:
+
+```text
+semantic / cryptographic network identity
+        !=
+current provider endpoint
+```
+
+A product may replace Horizon with RPC or another provider without changing which Stellar network a transaction belongs to.
+
+### 2. Durable and cached state is network-scoped
+
+Reference tests deliberately reject wallet/network mismatches and keep caches separated by network. This is already a strong cross-capability invariant and should remain true regardless of provider implementation.
+
+### 3. Network context is checked at security-sensitive protocol boundaries
+
+The Rust Anchor SEP-10 implementation verifies that server-declared network context, when present, matches the local network configuration before accepting the challenge flow. Transaction hashing/signing likewise uses the selected network passphrase.
+
+This reinforces that network choice is not merely a display setting.
+
+### 4. Submission transport does not decide final transaction truth by timeout alone
+
+A timeout or connection failure after submission may leave final chain outcome uncertain. The Transaction Capability owns the semantic distinction between deterministic rejection and uncertain submission; Network/Gateway must preserve enough information for reconciliation rather than collapsing both into one generic failure.
+
+## Candidate semantics for promotion
+
+1. Separate cryptographic network identity from provider endpoint selection.
+2. Scope all chain-derived durable/cache state by network + domain identity.
+3. Reject known network mismatches before signing/protocol actions continue.
+4. Normalize provider-specific transport results before Flows consume them.
+5. Preserve uncertain-submission semantics for later transaction reconciliation.
+
 ## Implementation freedom
 
 The shared contract does not mandate:
@@ -41,14 +89,12 @@ The shared contract does not mandate:
 - one retry/backoff policy;
 - one cache layout;
 - one proxy/provider;
-- one endpoint configuration format.
+- one endpoint configuration format;
+- literal `mainnet` / `testnet` names as the only possible profile identifiers;
+- the current public Horizon URLs.
 
 Typical products support mainnet and testnet. Custom endpoints/networks remain product policy unless promoted into a stronger shared contract.
 
-## Submission semantics
+## Promotion criteria
 
-Network transport must preserve the Transaction Capability distinction between deterministic rejection and uncertain submission. A timeout/connection failure after sending bytes is not automatically proof that the transaction was rejected.
-
-## Evolution
-
-Promote narrower gateway semantics to Normative only when multiple platform implementations need to rely on the same result model. Do not standardize a Horizon client wrapper merely because the Rust reference currently uses one.
+Promote narrower gateway semantics to Normative only when multiple platform implementations need to rely on the same normalized request/result model. Do not standardize a Horizon client wrapper merely because a reference implementation currently uses one.

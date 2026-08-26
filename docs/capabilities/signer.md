@@ -78,3 +78,17 @@ See also:
 - [Signing Coordination](signing-coordination.md)
 - [External Signer](external-signer.md)
 - [Core Security Boundary](../core-security-boundary.md)
+
+## Reference evidence
+
+Current SDK/Core tests preserve signer derivation, protected-envelope handling, stable identity-mismatch errors and external-signature verification boundaries. Application-client tests additionally exercise signer attachment/detachment around watch-only account state.
+
+Relevant evidence includes:
+
+- [`sdk/rust/src/lib.rs`](../../sdk/rust/src/lib.rs)
+- [`core/rust/src/client_api.rs`](../../core/rust/src/client_api.rs)
+- [`clients/rust-client/src/wallet.rs`](../../clients/rust-client/src/wallet.rs)
+- [`spec/test-vectors/wallet-v1.json`](../../spec/test-vectors/wallet-v1.json)
+- [`spec/test-vectors/transaction-signing-v1.json`](../../spec/test-vectors/transaction-signing-v1.json)
+
+Provider-specific signer records and platform authorization mechanisms remain outside this Normative signer identity/security contract.

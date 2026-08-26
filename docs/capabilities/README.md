@@ -8,6 +8,10 @@ The canonical vocabulary, maturity rules and governance model are defined in [`.
 - a **Defined** capability whose boundary is agreed but detailed APIs remain platform-specific; or
 - an experimental/provider reference that must not be mistaken for a normative capability.
 
+For a **Defined** capability, existing production/reference behavior should not disappear behind the maturity label. The detailed document should record useful **Reference Semantics**, link to their implementation/tests, and clearly distinguish them from implementation-specific choices. This lets independent platform implementations reuse proven ideas without prematurely freezing one implementation as the common contract.
+
+Implementation evidence may come from another Fresnica repository. A Mobile/Web/Desktop implementation can submit a documentation PR that links to its concrete code/tests, records what it adopted or changed, and proposes stable semantics for this shared contract. The shared specification is therefore expected to mature from multiple product implementations rather than only from the Rust/Python references in this repository.
+
 ## Shared domain vocabulary
 
 - [Domain primitives](domain-primitives.md) defines network/account/signer/asset/amount/price semantics reused across multiple capabilities.

@@ -2,6 +2,8 @@
 
 This directory contains the original Python wallet/TUI implementation retained as a behavioral and UX reference. It is **not** the current cross-platform architecture contract. For current architecture terminology start at [`../../docs/README.md`](../../docs/README.md).
 
+When behavior here has proved useful, the corresponding [`Application Capability`](../../docs/application-capabilities.md) should extract it as **Reference Semantics** and link back to the implementation/tests. Python implementation details remain local until cross-platform evidence promotes them into the shared contract. This makes the reference implementation an evidence source for specification evolution rather than a hidden second specification.
+
 The reference implementation uses [uv](https://docs.astral.sh/uv/) for Python,
 dependency, environment, and lockfile management.
 
@@ -73,7 +75,8 @@ details are cached locally so a previously resolved position can still be
 organized when the pool-detail endpoint is temporarily unavailable.
 
 `H` opens a dedicated Activity view backed by the local operation cache. Initial
-sync stores up to 200 recent operations; later refreshes request newer operations
+sync fetches Horizon in pages of up to 200 operations and, by default, walks back
+to retain the newest 2,000 operations; later refreshes request newer operations
 from the latest local cursor, while `M` in Activity loads an older page. Fresnica
 groups operations sharing a transaction hash into one user-facing activity while
 retaining the underlying operations. Summaries are written from the current

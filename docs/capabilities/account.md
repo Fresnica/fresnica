@@ -70,3 +70,16 @@ See also:
 - [Signer Capability](signer.md)
 - [Core Security Boundary](../core-security-boundary.md)
 - [Network / Gateway](network.md)
+
+## Reference evidence
+
+The SDK/Core account parser and identity-bound signer attachment paths exercise these invariants in current code, including Classic/contract identity parsing and fail-closed `identity-mismatch` behavior. The Rust application client additionally tests watch-only attach/detach without changing the account address.
+
+Relevant evidence includes:
+
+- [`sdk/rust/src/lib.rs`](../../sdk/rust/src/lib.rs)
+- [`core/rust/src/client_api.rs`](../../core/rust/src/client_api.rs)
+- [`clients/rust-client/src/wallet.rs`](../../clients/rust-client/src/wallet.rs)
+- [`reference/python/tests/test_wallet_state.py`](../../reference/python/tests/test_wallet_state.py)
+
+These implementations are evidence for the Normative identity rules; their storage record shapes are not part of this contract.

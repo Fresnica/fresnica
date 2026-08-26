@@ -41,6 +41,20 @@ A Dapp request must not:
 - treat a remote application's claimed account/signer identity as trusted without local validation;
 - bypass the stronger Reveal/Export boundary.
 
+## Implementation evidence status
+
+Fresnica does not yet have a sufficiently mature Dapp implementation to define a shared request/session/result model. This is intentional: Mobile or Web should not wait for a speculative universal API before building the first useful implementation.
+
+The first concrete implementation should contribute evidence back to this document, including:
+
+- request classes it actually needs;
+- session/connection lifecycle that proved product-significant;
+- review/result/error semantics that are independent of transport;
+- which parts are WalletConnect/browser/deep-link mechanics only;
+- regression tests or fixtures that demonstrate security boundaries.
+
+A separate implementation repository such as `fresnica-mobile` may submit those findings as a documentation PR without moving its source code into this repository.
+
 ## Promotion criteria
 
 When real Mobile/Web/Desktop implementations reveal a stable cross-platform request/review/result/session model, propose those semantics for promotion to `Normative`. Until then, do not freeze WalletConnect or any other single transport as the universal Fresnica Dapp API.

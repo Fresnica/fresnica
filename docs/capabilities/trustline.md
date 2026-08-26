@@ -28,13 +28,7 @@ Native XLM is not a trustline asset.
 - creates a `ChangeTrust` operation with a positive limit;
 - must preflight native reserve and fee capacity for the additional subentry.
 
-The current Fresnica product default for newly created trustlines is the visible marker limit:
-
-```text
-708269837873.6765
-```
-
-This is a current product policy, not a Stellar protocol constant. Existing user limits must not be rewritten merely to match it.
+The Capability requires a positive valid limit but does not prescribe one universal product default. Existing user limits must not be rewritten merely to match another platform's default.
 
 ### Set limit
 
@@ -47,6 +41,11 @@ This is a current product policy, not a Stellar protocol constant. Existing user
 - requires an existing trustline;
 - encodes zero limit/removal semantics;
 - must reject removal while balance, selling liabilities or buying liabilities are non-zero.
+
+
+## Reference product policy (non-normative)
+
+The current Rust/terminal Fresnica product uses `708269837873.6765` as its visible default limit when adding a trustline. This is an implementation/product-policy reference, not a Stellar constant and not part of the Normative Capability contract. A Mobile/Web product may choose another explicit default while preserving the semantic request and review.
 
 ## Issuer rule
 

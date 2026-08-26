@@ -171,6 +171,20 @@ A candidate capability or semantic extension under discussion. It must not be tr
 
 A production-quality platform implementation may still exist while its common capability remains Defined.
 
+### Reference Semantics for Defined capabilities
+
+`Defined` must not erase mature implementation experience. When a real implementation already demonstrates useful behavior, its Capability reference should separate:
+
+- **Agreed boundary** — semantics already shared across products;
+- **Reference Semantics** — proven behavior that is a candidate for future promotion;
+- **Implementation-specific choices** — mechanisms or product policy that must not be frozen yet.
+
+Reference Semantics should link to the implementation and regression tests that provide the evidence. The implementation does **not** need to live in this repository: `fresnica-mobile`, a future Web/Desktop project or another maintained implementation may contribute links to its commits, tests and design evidence through a documentation PR.
+
+Other platforms may adopt, reject or refine Reference Semantics. Concrete divergence should feed the capability-evolution process rather than creating silent semantic forks.
+
+A reference implementation is therefore part of the specification process without becoming the specification by fiat.
+
 ## 6. Capability catalog
 
 The catalog is shared vocabulary, **not a mandatory product feature checklist**.
@@ -198,15 +212,19 @@ The capability index is also available at [`capabilities/README.md`](capabilitie
 
 ### Why some entries are Defined
 
-`Wallet`, `History` and `Contacts` are intentionally not promoted merely because the Rust engineering client already has implementations.
+A `Defined` label means the capability boundary is useful now but the common contract still needs implementation evidence. It does not mean the capability is unimportant or unimplemented.
 
-Current evidence shows meaningful platform variation:
+Current reasons include:
 
-- Rust terminal storage uses a compact `WalletRecord`, while Mobile models Account/Signer relationships separately;
-- Rust history still exposes Horizon-shaped records, while the Python reference has a richer cache/presentation model;
-- terminal contacts use a local file and Classic-address resolver that should not freeze Mobile/Web address-book design.
+- **Wallet** — terminal references use compact wallet records while Mobile is expected to model Account/Signer relationships more independently;
+- **History** — the Python reference has a mature raw-cache/activity model, while the Rust client still exposes more provider-shaped records and no cross-platform Activity DTO is frozen;
+- **Contacts** — destination precedence semantics are promising, but address types, name normalization, sync and storage vary by product;
+- **Application Security** — Apple/Android Native SDK system-auth behavior provides strong Reference Semantics, but application-level product contracts still need Mobile/Desktop evidence;
+- **Dapp Interaction** — no stable Fresnica request/session/result model exists yet;
+- **External Signer** — the provider-neutral security boundary is defined, but no concrete hardware provider implementation is mature enough to contribute additional shared semantics;
+- **Network / Gateway** — network identity rules are stable, while Horizon/RPC/provider result models are still evolving.
 
-Stable common semantics can be promoted later from real product implementations.
+Stable common semantics can be promoted later from real product implementations and conformance evidence.
 
 ## 7. What must be shared
 
@@ -248,9 +266,26 @@ Do not introduce cross-platform abstractions merely to make implementations look
 
 Capability specifications evolve from real implementation experience.
 
-Any platform may propose a new capability or a contract upgrade when it discovers stable cross-platform semantics.
+Any Fresnica implementation may propose a new capability, add Reference Semantics, record a meaningful divergence or propose a contract upgrade. The implementation may live in this repository or in a separate product repository such as `fresnica-mobile`.
 
-A proposal should explain:
+The preferred contribution path is a documentation PR against the shared Capability contract. Source code does not need to be copied into this repository; the PR should point to durable implementation evidence.
+
+### Evidence contribution
+
+A useful implementation-evidence PR should record, where applicable:
+
+1. platform/product and implementation repository/commit or PR;
+2. which existing semantics the implementation adopted;
+3. concrete behavior that differed and why;
+4. regression tests, fixtures or real-platform validation that support the behavior;
+5. which parts are product/platform mechanism and should stay local;
+6. any candidate semantic change that other Fresnica products could rely on.
+
+Evidence may update a `Defined` capability without changing its maturity. This is expected: collecting good Reference Semantics is itself progress.
+
+### Contract-change proposal
+
+A proposal to change shared semantics should additionally explain:
 
 1. the concrete product/implementation need;
 2. why the behavior is cross-platform rather than one mechanism;
@@ -259,13 +294,24 @@ A proposal should explain:
 5. security impact;
 6. examples/tests/fixtures where useful.
 
+### Promotion rule
+
+Promotion to `Normative` should be evidence-driven rather than implementation-count-driven, but one implementation's internal shape is normally insufficient by itself. Strong promotion evidence includes:
+
+- convergence of materially different platform implementations;
+- independent implementation of the same Reference Semantics;
+- protocol/security invariants that necessarily require identical wallet meaning;
+- cross-language fixtures demonstrating compatible behavior.
+
+When feasible, a promotion should add or update conformance examples so later implementations can detect semantic drift.
+
 The governing rule is:
 
 > **Promote stable semantics into the shared specification; keep platform mechanisms local.**
 
 Do not promote a platform implementation detail merely because one client currently needs it.
 
-Do not block useful platform work merely because a `Defined` capability has not yet standardized its detailed mechanism.
+Do not block useful platform work merely because a `Defined` capability has not yet standardized its detailed mechanism. A platform may implement first, document the result, and then seek to mature the shared contract.
 
 ## 10. Conformance
 

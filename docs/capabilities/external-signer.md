@@ -43,7 +43,7 @@ A conforming implementation must:
 - prefer provider flows that allow meaningful transaction review over blind hash signing where available;
 - keep USB/HID/BLE/WebHID/vendor dependencies above Fresnica Core/platform-neutral SDK.
 
-## Ledger reference
+## Reference design: Ledger
 
 Ledger remains the first candidate hardware provider. The normal Stellar SEP-5 path is:
 
@@ -58,6 +58,24 @@ As reviewed on 2026-08-25, the available Rust `stellar-ledger` path still used `
 Do not solve that mismatch by downgrading Fresnica or introducing an implicit lossy v28 -> v27 transaction reinterpretation just to claim hardware support.
 
 A provider becomes implementation-ready when it can consume/sign the exact current Fresnica transaction representation through a deliberately reviewed boundary.
+
+This Ledger section is a **reference design and dependency constraint**, not Reference Semantics backed by a completed Fresnica hardware implementation.
+
+## Implementation evidence status
+
+No concrete hardware provider is currently mature enough to define additional cross-platform semantics beyond the provider-neutral boundary above.
+
+A future Ledger or other provider implementation may submit a documentation PR recording:
+
+- signer/provider identity model and persisted public configuration;
+- derivation/account selection semantics;
+- exact prepare/provider/apply lifecycle used in practice;
+- review capabilities and provider limitations;
+- cancellation/disconnection/error behavior that proved product-significant;
+- emulator/device regression evidence;
+- proposed contract changes, if any.
+
+The implementation may live in another Fresnica product repository. Source-code co-location is not required for its experience to mature this Capability.
 
 ## Validation target
 

@@ -33,7 +33,14 @@ When preparing a native spend, availability must account for at least:
 - current minimum balance/reserve requirement;
 - transaction fee for the prepared transaction.
 
-The current Classic minimum-balance interpretation is based on Stellar reserve units including base account units, subentries and sponsorship adjustments. Products must use current network/ledger values rather than hard-coded historical reserve constants.
+For the current Classic account model, minimum-balance reserve units are:
+
+```text
+reserve_units = max(0, 2 + subentry_count + num_sponsoring - num_sponsored)
+minimum_balance = reserve_units * current_base_reserve
+```
+
+Products must use current network/ledger reserve values rather than hard-coded historical constants. Sponsorship fields are part of the reserve calculation; `subentry_count` alone is not a complete minimum-balance formula.
 
 ## Issued-asset availability
 
@@ -54,6 +61,13 @@ Payment, Trustline and SDEX Capabilities consume Balance / Availability semantic
 
 Flows should be able to distinguish insufficient asset balance, insufficient XLM fee/reserve capacity and malformed/unavailable network state without parsing transport-specific strings.
 
-## Reference status
+## Reference evidence
 
-The current Rust implementation performs exact stroop parsing, reserve/liability-aware payment preflight and SDEX/trustline capacity checks. A future normalized cross-platform balance DTO may be standardized separately without changing these invariants.
+The reserve/availability semantics above are exercised independently by the Python and Rust references:
+
+- [`reference/python/fresnica/availability.py`](../../reference/python/fresnica/availability.py)
+- [`reference/python/tests/test_availability.py`](../../reference/python/tests/test_availability.py)
+- [`clients/rust-client/src/transaction.rs`](../../clients/rust-client/src/transaction.rs)
+- [`clients/rust-client/src/payment.rs`](../../clients/rust-client/src/payment.rs)
+
+The current Rust implementation also applies the same availability primitives to Payment, Trustline and SDEX preflight. A future normalized cross-platform balance DTO may be standardized separately without changing these invariants.

@@ -62,4 +62,4 @@ Mobile does **not** own:
 - alternate signer identity rules;
 - cross-platform Capability redefinition without updating the common contract.
 
-A mature Mobile implementation may propose upgrades to the common Capability specification.
+A mature Mobile implementation may propose upgrades to the common Capability specification. The preferred path is a documentation PR that links to the `fresnica-mobile` implementation commit/tests, records which Reference Semantics were adopted or changed, and proposes only the behavior that proved reusable across products. Mobile source code does not need to move into this repository for its experience to mature the shared contract.

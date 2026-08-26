@@ -121,7 +121,7 @@ Important implemented semantics include:
 - Hardware / External Signer Interaction;
 - Network / Gateway.
 
-These names/boundaries are shared, but platform-specific implementations may lead future contract upgrades.
+These names/boundaries are shared, but mature implementation behavior should be recorded as Reference Semantics rather than hidden in platform code. `fresnica-mobile` and future Web/Desktop projects may lead contract upgrades through documentation PRs that link to their own implementation/tests; source co-location is not required.
 
 ## 5. Rust engineering clients
 
@@ -237,8 +237,8 @@ Real Rust/Apple/Android/Web/platform gates should run at meaningful validation b
 Current priority is **documentation/contract stabilization**, then landing/validating the existing Rust batch.
 
 1. Keep the five common contracts small and authoritative.
-2. Move stable capability semantics into `docs/capabilities/` rather than duplicating them in platform docs.
-3. Keep platform implementation detail under `docs/platforms/`.
+2. Move stable capability semantics and proven Reference Semantics into `docs/capabilities/` rather than leaving them hidden in implementation docs/code.
+3. Keep platform implementation detail under `docs/platforms/`, while allowing platform repositories to contribute evidence back through documentation PRs.
 4. Land the current development bundle when the documentation batch reaches a natural boundary.
 5. Run real Rust test/release-build validation for the Anchor extraction after landing.
 6. After that, let concrete Mobile/Web/Desktop/product needs drive the next Capability implementation or contract upgrade.

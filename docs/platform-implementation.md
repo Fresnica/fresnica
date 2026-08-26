@@ -142,20 +142,25 @@ Once real implementations reveal stable common semantics, any platform may propo
 
 ## 8. Capability evolution
 
-A platform proposal to change the shared contract should identify:
+A platform is allowed to implement a `Defined` capability before the common contract is mature. Once the implementation produces useful evidence, it should feed that evidence back into the shared documentation rather than silently creating a permanent platform-only semantic fork.
+
+The implementation may live in a separate repository. For example, `fresnica-mobile` can submit a documentation PR here that links to its implementation commit/tests and records the semantics that proved reusable.
+
+A platform evidence/contract PR should identify:
 
 1. the concrete implementation/product need;
 2. the stable semantic behavior discovered;
-3. why it belongs across platforms rather than in one mechanism;
-4. compatibility impact;
-5. security impact;
-6. examples/tests/fixtures when practical.
+3. which existing Reference Semantics were adopted or intentionally changed;
+4. why the behavior belongs across platforms rather than in one mechanism;
+5. compatibility impact;
+6. security impact;
+7. examples/tests/fixtures when practical.
 
 The acceptance rule is:
 
 > **Promote stable semantics into the specification; keep platform mechanisms local.**
 
-A mature platform implementation can therefore lead the common specification rather than waiting for the Rust reference implementation to invent every capability first.
+A mature platform implementation can therefore lead the common specification rather than waiting for the Rust/Python references to invent every capability first. A useful PR may add Reference Semantics without immediately promoting the capability to Normative.
 
 ## 9. Conformance
 

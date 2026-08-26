@@ -13,6 +13,10 @@
 - [x] Detailed Capability contracts/reference pages under `docs/capabilities/`
 - [x] Shared cross-capability domain primitives for network/account/signer/asset/amount/price semantics
 - [x] Capability maturity audit: keep premature Wallet/History/Contacts semantics Defined rather than freezing terminal implementation shapes
+- [x] Reference Semantics model for Defined capabilities, including implementation/test evidence and explicit implementation-specific exclusions
+- [x] Extract RefPython History/Wallet/Contacts behavior into Capability references instead of leaving proven semantics hidden in reference code
+- [x] Record Native SDK Apple/Android system-auth behavior as Application Security Reference Semantics without prematurely freezing product APIs
+- [x] Allow independent product repositories such as `fresnica-mobile` to mature shared contracts through evidence-backed documentation PRs
 - [x] Compact `docs/handoff.md` so stable architecture rules live only in the common contracts
 - [x] Move Python reference product documentation out of the root project README
 - [x] Preserve `fresnica-client` as Rust reference Capability implementation without requiring other platforms to link it
