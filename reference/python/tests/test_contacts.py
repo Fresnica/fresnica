@@ -82,3 +82,10 @@ def test_resolve_destination_preserves_contact_identity_and_memo_precedence(tmp_
     assert no_store.address == raw
     assert no_store.contact_name is None
     assert no_store.memo is None
+
+    shadowed = Keypair.random().public_key
+    store.add(raw, shadowed, memo="shadowed-memo")
+    direct_over_alias = resolve_destination(store, raw, "direct-memo")
+    assert direct_over_alias.address == raw
+    assert direct_over_alias.contact_name is None
+    assert direct_over_alias.memo == "direct-memo"

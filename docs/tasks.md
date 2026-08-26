@@ -46,7 +46,7 @@
 - [ ] Add CAP-18 authorization-aware SDEX preflight: create/update require full authorization while cancel remains valid with maintain-liabilities authorization
 - [ ] Add Trustline remove preflight for `liquidityPoolUseCount`, issuer-existence add/nonzero-limit rules, and resulting authorization/clawback state; keep pool-share ChangeTrustAsset outside current product scope
 - [ ] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry
-- [ ] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
+- [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
 - [ ] Harden Rust Anchor asset matching to exact-case full identity and redirect handling against HTTPS downgrade/unsafe redirects; add delegated/multisig SEP-10 handling through Ledger Authorization/Signing Coordination or explicit unsupported failure
 - [ ] Add cross-language asset-identity vectors for protocol-valid case-sensitive issued codes, including values that high-level SDK convenience constructors may normalize
 - [ ] Add a real Ledger Authorization implementation/evidence set before claiming general Classic multisig/delegated signing support

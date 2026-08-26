@@ -43,6 +43,14 @@ def resolve_destination(
     memo: str | None = None,
 ) -> ResolvedDestination:
     """Resolve a local contact alias while keeping explicit memo precedence."""
+    destination = destination.strip()
+    try:
+        direct_address = Wallet.from_address(destination).address()
+    except (AttributeError, TypeError, ValueError):
+        direct_address = None
+    if direct_address == destination:
+        return ResolvedDestination(address=direct_address, memo=memo)
+
     contact = store.find(destination) if store is not None else None
     if contact is None:
         return ResolvedDestination(address=destination, memo=memo)

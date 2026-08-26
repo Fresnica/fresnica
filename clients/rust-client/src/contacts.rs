@@ -133,6 +133,17 @@ pub fn resolve_destination(
     destination: &str,
     explicit_memo: Option<&str>,
 ) -> Result<ResolvedDestination, String> {
+    let destination = destination.trim();
+    if let Ok(identity) = FresnicaSdk::new().parse_account(destination.to_owned()) {
+        if identity.kind == SdkAccountKind::Classic && identity.address == destination {
+            return Ok(ResolvedDestination {
+                address: identity.address,
+                memo: explicit_memo.map(str::to_owned),
+                contact_name: None,
+            });
+        }
+    }
+
     let store = ContactStore::for_home(storage.home());
     let Some(contact) = store.find(destination)? else {
         return Ok(ResolvedDestination {
@@ -269,5 +280,18 @@ mod tests {
 
         let explicit = resolve_destination(&storage, "alice", Some("explicit")).unwrap();
         assert_eq!(explicit.memo.as_deref(), Some("explicit"));
+    }
+
+    #[test]
+    fn destination_resolution_does_not_allow_alias_to_shadow_direct_address() {
+        let store = store("direct-address");
+        let home = store.path.parent().unwrap().to_path_buf();
+        store.add(ALICE, BOB, Some("shadowed-memo")).unwrap();
+        let storage = WalletStorage::new(&home).unwrap();
+
+        let resolved = resolve_destination(&storage, ALICE, Some("direct-memo")).unwrap();
+        assert_eq!(resolved.address, ALICE);
+        assert_eq!(resolved.memo.as_deref(), Some("direct-memo"));
+        assert_eq!(resolved.contact_name, None);
     }
 }

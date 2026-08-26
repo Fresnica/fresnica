@@ -71,9 +71,9 @@ contact/display identity != chain destination identity
 
 ### 4. Direct chain identity has priority over aliases
 
-The current Rust and RefPython terminal references resolve aliases before falling back to direct addresses. That creates a security-relevant reference gap: a contact whose name is itself a valid `G...` address could redirect a pasted direct destination.
+Both terminal references now check whether the input is already a canonical Classic `G...` identity before consulting the local address book. A contact whose name is itself a valid destination therefore cannot redirect a pasted direct address.
 
-The shared Defined boundary therefore requires direct-valid-identity precedence even though both terminal references still need implementation changes. This is tracked in [`../tasks.md`](../tasks.md).
+Regression tests preserve this precedence in both Rust and RefPython. The shared Defined boundary keeps the rule phrased in terms of identities supported by the consuming Capability so future address families can be added deliberately.
 
 ### 5. Stored destination data is validated, but not trusted as chain truth
 
