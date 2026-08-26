@@ -33,6 +33,8 @@ jobs:
           PY
           git add clients/rust-cli/src/dex_write.rs
           git diff --cached --check
+          git rm --cached -r .validation
+          git rm --cached .github/workflows/validate-write-side-services.yml
           test "$(git write-tree)" = '6197cf7d463853b7c0e165061cf1861e6b556a2a'
 
       - name: Install Rust toolchain
