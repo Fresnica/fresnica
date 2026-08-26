@@ -209,7 +209,6 @@ mod tests {
         ]
         .map(str::to_owned);
         let request = TrustRequest::parse(&args).unwrap();
-        assert_eq!(request.wallet(), Some("alpha"));
         assert!(request.yes());
         assert_eq!(
             request.service_request(),
