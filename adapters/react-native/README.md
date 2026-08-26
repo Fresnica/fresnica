@@ -125,6 +125,6 @@ It reuses `bindings/native/build/apple` when present (or runs the Apple Native S
 
 The underlying `FresnicaSDK.xcframework` iOS path has passed real macOS/Xcode validation. The complete adapter path has also passed `validate-consumer.sh` against a freshly generated React Native 0.87 project after real CocoaPods installation on macOS, producing arm64 device plus arm64/x86_64 simulator slices. The adapter's iOS-device slice selection explicitly excludes the macOS Native SDK slice now carried by the shared Apple XCFrameworks.
 
-## Transitional Mobile code
+## Legacy Mobile code
 
-`bindings/mobile/platform/**` remains the v0.1.0 compatibility/integration donor. New framework work belongs here and must target `fresnica-native-sdk`, not `fresnica-mobile-core`.
+`bindings/mobile/platform/**` is frozen v0.1.0 compatibility/integration donor material. New framework work belongs here and targets the released `fresnica-native-sdk`; do not add new product behavior to `fresnica-mobile-core`.

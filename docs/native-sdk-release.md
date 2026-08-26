@@ -104,7 +104,7 @@ FresnicaSDKFFI.xcframework/
 
 `FresnicaSDK.xcframework` is the direct Swift consumer module. `FresnicaSDKFFI.xcframework` remains beside it because the generated Swift module links/imports the UniFFI FFI module. Both XCFrameworks carry iOS and macOS slices. SDK-owned Keychain/LocalAuthentication code is already compiled into `FresnicaSDK.xcframework`; loose generated/security Swift sources are build diagnostics, not release inputs.
 
-The Apple release job must run `bindings/native/scripts/validate-apple-local.sh` before staging the zip. The complete iOS direct-consumer path passed on real macOS/Xcode on 2026-08-25; the new macOS slice must pass the same expanded validator before the first generalized Native SDK release marker is added.
+The Apple release job runs `bindings/native/scripts/validate-apple-local.sh` before staging the zip. The complete iOS + macOS direct-consumer path passed on real macOS/Xcode on 2026-08-25, including independent Swift consumer import/typecheck. That gate cleared the first generalized Native SDK release marker.
 
 React Native adapter binaries are deliberately absent. A framework consumer builds the canonical adapter once in its own framework environment according to `mobile-framework-adapter-contract.md`.
 
@@ -129,4 +129,4 @@ The release manifest starts from the reviewed marker and adds immutable build id
 
 This keeps expensive Android/Xcode packaging off ordinary `main` pushes while preserving a reproducible release path.
 
-The existing `mobile-sdk-release.yml` remains frozen as the transitional Mobile v0.1.0 release path. Do not reuse its tag namespace or artifact shape for generalized Native SDK releases.
+The old `mobile-sdk-v0.1.0` release is a frozen legacy compatibility artifact. Its release workflow is preserved in Git history/tagged source rather than kept as an active publisher on `main`. The generalized product line begins with `native-sdk-v0.1.0` and uses the independent `native-sdk-v*` tag namespace.

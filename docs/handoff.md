@@ -1,6 +1,6 @@
 # Fresnica Project Handoff
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 This is the compact continuation document for Fresnica. It records the current architecture, product invariants, SDK direction, Mobile handoff boundary and the next major work. Read `roadmap.md` together with this file before starting a new phase.
 
@@ -8,13 +8,14 @@ This is the compact continuation document for Fresnica. It records the current a
 
 - Repository: `manran/fresnica`
 - Default branch: `main`
-- Verified `main` before this handoff update: `89b20e79ed045fecef94051ec99a5ecb6eab692f` (PR #95).
+- Verified Mobile/SDK release baseline: `c25e162a6d982c7b98658ac857630bbe59256a14` (PR #107), the target commit of `native-sdk-v0.1.0`.
 - PR #90 introduced the platform-neutral `fresnica-sdk` semantic contract.
 - PR #91 converted the Mobile v0.1.0 UniFFI facade into a compatibility wrapper over `fresnica-sdk`.
 - PR #92 introduced the generalized `fresnica-native-sdk` UniFFI layer plus framework-neutral Android AAR and Apple package/XCFramework generation.
 - Subsequent SDK/platform validation completed the WASM package, smart-account Testnet conformance vector, Apple/macOS Native SDK validation and the React Native 0.87 Apple consumer gate.
-- PR #95 hardened the Rust CLI validation path: the SDK-boundary guard is portable on the GitHub Ubuntu runner, the Horizon submission mock consumes complete request bodies, Rust unit tests pass 52/52, the release binary builds, and Python/Rust CLI compatibility passes 5/5.
-- `mobile-sdk-v0.1.0` remains a transitional compatibility baseline; new native consumers should target `fresnica-native-sdk`.
+- Rust CLI Phase-5 work subsequently added verified SEP-10 sessions, SEP-24/SEP-6 transfer initiation, transaction status and reviewed withdrawal-payment handoff while keeping signing on the SDK/Core path.
+- PR #107 published the first generalized `native-sdk-v0.1.0` prerelease after Android raw-AAR consumer and Apple iOS/macOS direct-consumer gates passed.
+- `mobile-sdk-v0.1.0` is frozen historical compatibility material; new Mobile/native consumers use `native-sdk-v0.1.0` + the canonical React Native adapter.
 
 Do not treat a SHA in this handoff as the permanent head. Verify `main` and current CI before writing.
 
@@ -34,7 +35,7 @@ Rust Core
   -> Mobile / Desktop / Web wallet experience
 ```
 
-The immediate priority is **not** to continue building the actual React Native product inside this repository. The universal semantic contract now exists; current work is to finish native platform packaging/security support, then build the canonical one-time framework-adapter path and WASM boundary.
+The universal SDK, generalized Native SDK release and canonical one-time React Native adapter path are now established. The independent React Native product can start from `mobile-sdk-usage.md` without waiting for more Core infrastructure. This repository continues reusable SDK/Core/SEP/provider work; `fresnica-mobile` owns product/application development.
 
 ## Target Layering
 
@@ -227,14 +228,15 @@ Future `fresnica-mobile` owns:
 
 PR #81-#84 application-side TypeScript remains migration/reference material until the independent Mobile project absorbs the required behavior. See `mobile-app-migration-pr81-pr84.md`.
 
-The future Mobile onboarding order is:
+The Mobile onboarding order is now executable and documented in `mobile-sdk-usage.md`:
 
-1. pin React Native version;
-2. pin Fresnica Native SDK / Binding API;
-3. compile the canonical RN adapter once in the Mobile environment;
-4. store adapter binaries + compatibility manifest;
-5. prove a smoke operation such as `parseAccount`;
-6. then absorb Account/Signer/Realm/provisioning/passcode/export application flows.
+1. pin an exact React Native version;
+2. pin `native-sdk-v0.1.0` / Native Binding API 1;
+3. checksum-verify the Android/Apple release artifacts;
+4. compile the canonical RN adapter once in the Mobile environment;
+5. store adapter binaries + compatibility manifest;
+6. prove `FresnicaCore.parseAccount` from React Native on Android and iOS;
+7. then absorb Account/Signer/Realm/provisioning/passcode/export application flows.
 
 ## Desktop Direction
 
@@ -255,7 +257,7 @@ Desktop platform key protection remains platform-specific, e.g. Windows DPAPI/Wi
 
 The Rust CLI is substantially implemented and should remain a reference native client for Core/SDK behavior. Its account identity, wallet protection, Reveal/Export and routine passcode-signing paths now consume `fresnica-sdk`; direct Core use is limited to low-level Rust transaction/XDR helpers and mnemonic-language detection where no SDK operation is currently warranted.
 It also covers Classic watch-only upgrade/downgrade: attaching S/mnemonic material is identity-bound through the SDK expected-signer check, while detaching removes local signer material and preserves the G account record.
-The Phase 5 reference-client path now starts absorbing anchor behavior as well: `anchor discover CODE:GISSUER` resolves the issuer `home_domain`, loads SEP-1 `stellar.toml`, verifies exact asset identity and probes SEP-6 / SEP-24 `/info`. This is capability discovery only; authenticated SEP-10/SEP-45 transfer execution has not been moved into the Rust client yet.
+The Phase 5 reference-client path now includes SEP-1 discovery, SEP-10 Classic-account sessions, SEP-24-preferred / SEP-6-fallback deposit/withdraw initiation, transaction-status tracking and an explicit reviewed withdrawal-payment handoff. SEP-45 contract-account execution and SEP-12 customer-information handoff remain separate follow-up work.
 
 A Rust TUI is worth considering after the universal SDK boundary is clear. Its role should be engineering-focused:
 
@@ -363,7 +365,7 @@ Do not rewrite existing user trustline limits automatically and do not change th
 
 ## CI policy
 
-Validation workflows are PR/manual only so branch pushes and merges to `main` do not duplicate expensive builds. The lightweight `Main bundle` workflow is the deliberate `main`-push exception: it only creates/verifies `fresnica-main.bundle`, uploads it as an Actions artifact, and publishes a `main-bundle` commit status containing the artifact ID/run ID for automated discovery. The Mobile SDK release workflow remains the other exception: a release-marker change on `main` may publish the explicit release. Heavy Android/Apple packaging should be run only when the relevant Native SDK/platform boundary changes.
+Validation workflows are PR/manual only so branch pushes and merges to `main` do not duplicate expensive builds. The lightweight `Main bundle` workflow is the deliberate normal `main`-push exception: it creates/verifies `fresnica-main.bundle`, uploads it as an Actions artifact, and publishes a `main-bundle` commit status for automated discovery. The marker-gated **Native SDK** release workflow is the other intentional heavy exception when a `releases/native-sdk-v*.json` release intent changes. The legacy Mobile SDK publisher is retired from active `main` workflows.
 
 `sdk/compatibility/manifest.json` now records the compatible Core/SDK/Native/Mobile/WASM/React-Native version set. Run `node sdk/compatibility/validate.mjs` after changing any API/version constant or adapter contract; the matching GitHub check is lightweight and PR/manual-only.
 
@@ -375,23 +377,23 @@ Real-browser validation exposed upstream `smart-account-kit` 0.6.2 requesting We
 
 ## Immediate Next Work
 
-The next coherent implementation batches are:
+The infrastructure handoff is now split cleanly between SDK maintenance and product work:
 
-1. **Keep Native SDK release explicit**: Apple Native SDK and the React Native 0.87 reference-consumer adapter path are validated, and marker-gated `native-sdk-v*` automation exists, but no release marker is present yet. Create one only when the version/artifact set is intentionally ready to publish; ordinary `main` pushes remain light.
-2. **Keep the RN adapter contract stable**: Android and Apple have validated one-time build entry points plus compatibility manifests; normal Mobile builds should consume the stored binaries rather than rebuild adapter source.
-3. **WASM/Web + smart account**: keep the real Testnet auth vector as the provider conformance baseline; implement a platform-native Mobile passkey provider only when Mobile integration starts rather than adding passkey-derived unlock-key APIs to WASM.
-4. **Adapter extension contracts**: reserve Flutter/Desktop adapter interfaces without prematurely implementing every framework.
-5. **Wallet fundamentals**: continue reusable wallet feature/SEP/hardware-signer work below product UI.
-6. **Reference clients**: keep Rust CLI current; evaluate Rust TUI as an SDK/wallet engineering client.
-7. **Product UX later**: once the above foundation is stable, concentrate effort on Mobile first, then Desktop/Web according to product priorities.
+1. **Mobile can start independently**: follow `mobile-sdk-usage.md`, pin `native-sdk-v0.1.0`, compile/store the RN adapter binaries once, pass the compatibility check and prove `FresnicaCore.parseAccount` on Android/iOS.
+2. **Mobile owns product/application migration**: absorb #81-#84 Account/Signer/Realm/provisioning/passcode/export behavior in `fresnica-mobile` without moving crypto or WalletUnlockKey policy into JavaScript.
+3. **Fresnica keeps SDK evolution additive/released**: Core/SDK/native changes continue here and reach Mobile only through reviewed release/version contracts; normal Mobile builds never compile Rust/UniFFI.
+4. **Wallet standards continue below product UI**: SEP-12 customer-information handoff is the next unblocked Anchor gap; SEP-45 remains the contract-account auth path.
+5. **Smart account / passkey**: keep the real Testnet conformance vector; implement platform-native Mobile provider integration when the Mobile product reaches that feature.
+6. **Hardware signer**: retain the external-signer prepare/apply boundary and wait for a compatible Ledger transport/XDR path instead of forcing conversion.
+7. **Reference/other clients**: keep Rust CLI current; Desktop/Web reuse the same stable SDK architecture.
 
 ## Start Here Next Session
 
 1. Verify `main` HEAD and relevant CI/release status.
 2. Read `roadmap.md` for phase order.
-3. Read `mobile-framework-adapter-contract.md` before changing Native SDK or RN packaging.
+3. Read `mobile-sdk-usage.md` to start the independent Mobile project; read `mobile-framework-adapter-contract.md` before changing Native SDK or RN packaging.
 4. Read `mobile-app-migration-pr81-pr84.md` before starting the independent Mobile application.
 5. Read `client-core-security.md` and `mobile-core-contract.md` before changing signer/passcode/system-auth boundaries.
 6. Preserve Account != Signer, `C...` identity semantics, native-only routine signing and fresh-passcode-only Reveal/Export.
-7. Treat `mobile-sdk-v0.1.0` as a transitional baseline, not the final multi-platform SDK layout.
+7. Treat `mobile-sdk-v0.1.0` as frozen history; new Mobile work pins `native-sdk-v0.1.0` and its generated RN adapter binaries.
 8. Do not start product-specific Desktop/Web framework code until the universal SDK contract has a stable shape.

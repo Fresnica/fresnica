@@ -1,8 +1,8 @@
 # Fresnica Roadmap
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
-Fresnica is moving from a Mobile-specific integration phase to an **SDK-first, multi-platform foundation**. The immediate goal is to make the Rust Core consumable through stable platform SDKs, then keep React Native, Flutter, desktop frameworks and future clients as thin framework adapters over that SDK boundary.
+Fresnica now has an **SDK-first, multi-platform foundation**. Rust Core is consumable through released native/WASM SDK boundaries, while React Native and future frameworks remain thin adapters. The independent Mobile product can start against the pinned Native SDK without waiting for more Core infrastructure.
 
 The product sequence is deliberately:
 
@@ -87,9 +87,9 @@ Completed foundation:
 
 `mobile-sdk-v0.1.0` is a **transitional integration release**. It proves the Core/native/security boundary but predates the finalized Native-SDK/framework-adapter packaging split.
 
-## Phase 4 - Universal SDK Foundation - CURRENT
+## Phase 4 - Universal SDK Foundation - COMPLETED / MAINTENANCE
 
-This is the current priority.
+This foundation is complete enough for product consumers; future changes here are compatibility/release maintenance rather than a Mobile startup blocker.
 
 ### 4.1 Extract a platform-neutral SDK contract - COMPLETED
 
@@ -116,7 +116,7 @@ Stable SDK API / DTO / errors / conformance contract
 
 The shared contract includes wallet/signing semantics, DTOs, errors, API versions and test vectors. Platform security/storage details do not belong in the Core contract.
 
-### 4.2 Native SDK binaries - IN PROGRESS
+### 4.2 Native SDK binaries - COMPLETED
 
 The generalized `fresnica-native-sdk` UniFFI layer, Android AAR packaging and Apple Rust-FFI package are implemented. Android/Apple package paths also carry reusable native signer-authorization helpers. The Apple build additionally archives those SDK-owned Swift pieces into an importable `FresnicaSDK.xcframework`. On 2026-08-25 the complete `validate-apple-local.sh` flow passed on a real macOS/Xcode toolchain, including device/simulator Rust libraries, both XCFrameworks, generated Swift/security typechecking, and an independent consumer `import FresnicaSDK` check. Fresnica should publish **compiled platform SDK content**, not require application projects to rebuild Rust/UniFFI during ordinary builds.
 
@@ -208,9 +208,9 @@ The universal SDK work should provide:
 
 The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
 
-The generalized Native SDK release contract is now defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. No Native SDK release marker has been added yet, so ordinary `main` pushes still cannot trigger heavy release packaging. The transitional `mobile-sdk-v0.1.0` workflow remains separate. The macOS Apple-slice validation gate has passed. The first generalized release now remains gated only on an explicit decision to add a release marker and run the release workflow.
+The generalized Native SDK release contract is defined in `native-sdk-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. The first generalized release, `native-sdk-v0.1.0`, is the Mobile/native integration baseline: Native Binding API 1 over SDK API 2 / Core Client API 2. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and the React Native 0.87 Apple consumer gate establish the release/adapter boundary. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
 
-## Phase 5 - Wallet Functional Foundation and Standards
+## Phase 5 - Wallet Functional Foundation and Standards - CURRENT
 
 Continue wallet functionality while the SDK foundation is being completed. The goal is to stabilize reusable wallet behavior before investing heavily in final product UX.
 
@@ -286,13 +286,13 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. Decide when to create the first `native-sdk-v*` release marker; the Apple iOS + macOS and React Native reference-consumer validation gates are cleared, so release should remain an explicit product/versioning decision rather than an automatic `main` action.
-2. Keep `sdk/compatibility/manifest.json` green as API/package versions change; do not add another parallel version source.
-3. Keep Windows/Linux non-Rust packaging deferred until a concrete consumer language/framework is selected.
-4. Treat the checked-in real smart-account Testnet vector as the provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile integration begins.
-5. Continue Phase 5 wallet fundamentals below product UI. Rust anchor discovery is the next unblocked SEP slice; authenticated transfer execution can follow after its auth boundary is explicit. Hardware/external signer transport remains the next signer-capability gap, but Ledger stays gated by the reviewed XDR-version mismatch rather than forcing a lossy conversion.
-6. Keep the Rust CLI as the reference native client and use the Rust TUI only as an engineering client when it materially improves SDK/wallet-flow validation.
-7. Move concentrated effort into Mobile/Desktop/Web product UX only after these remaining platform/signing validation checkpoints are stable.
+1. **Start independent Mobile integration now** from `mobile-sdk-usage.md`: pin `native-sdk-v0.1.0`, pin an exact React Native version, build Android/Apple RN adapter binaries once, store their compatibility manifest, and prove `FresnicaCore.parseAccount` on both platforms.
+2. **Move Mobile application ownership out of this repository**: Realm schema/migrations, Account/Signer persistence, watch-only/import/generate/passcode/reveal UX and product state belong in `fresnica-mobile`; preserve the #81-#84 invariants from `mobile-app-migration-pr81-pr84.md`.
+3. **Keep the SDK boundary stable**: new Core/SDK capability work may continue independently, but Mobile should upgrade through pinned Native SDK releases and `NATIVE_BINDING_API_VERSION`, not by compiling Rust/Core in normal app builds.
+4. Continue reusable wallet/SEP work (next anchor gap: SEP-12 customer-information handoff) below product UI.
+5. Keep the real smart-account Testnet vector as provider conformance baseline; add a platform-native Mobile passkey provider only when Mobile product integration reaches contract-account signing.
+6. Keep hardware/external signer transport gated by the reviewed Ledger/XDR compatibility constraints rather than forcing lossy conversion.
+7. Keep Rust CLI as the reference native engineering client; Desktop/Web product work follows the same stable SDK boundaries rather than creating new Core architectures.
 
 ## Non-negotiable Architecture Rules
 

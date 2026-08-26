@@ -1,10 +1,10 @@
 # Fresnica Mobile SDK Release Contract
 
-Status: **integration-stable pre-1.0 SDK**.
+Status: **frozen historical contract for `mobile-sdk-v0.1.0` only**.
 
-The Fresnica Mobile SDK is released independently from the future `fresnica-mobile` application. The SDK owns Core/mobile binding/native security integration; the Mobile app owns React Native product state, Realm lifecycle, screens, network behavior and application orchestration.
+This document records the transitional `mobile-sdk-v0.1.0` release that preceded the generalized Native-SDK/framework-adapter split. It is retained for audit/migration reference only. New Mobile integrations use `native-sdk-v0.1.0` and `docs/mobile-sdk-usage.md`.
 
-The finalized framework boundary is defined in `docs/mobile-framework-adapter-contract.md`. The generalized binary release policy is now defined separately in `docs/native-sdk-release.md`; this document remains authoritative only for the transitional Mobile v0.1.0 release. The target model is: **Fresnica publishes compiled Native SDK binaries plus canonical framework-adapter source; each consumer compiles its adapter once in its own framework environment and reuses the generated adapter binary for normal application builds.**
+The finalized framework boundary is defined in `docs/mobile-framework-adapter-contract.md`; the generalized binary release policy is `docs/native-sdk-release.md`. Do not add new `mobile-sdk-v*` releases. The old release workflow is kept in Git history/tagged source, not as an active `main` publisher.
 
 ## Versioning
 
@@ -82,9 +82,9 @@ The v0.1.0 Apple zip contains:
 
 The host application adds the XCFramework and Swift/Objective-C adapter sources to its target. React Native headers are supplied by the host project.
 
-## Target release shape
+## Replacement release shape
 
-Future packaging should separate native binaries from framework adapters:
+The generalized release line now separates native binaries from framework adapters:
 
 ```text
 Native SDK release
@@ -117,31 +117,13 @@ Those belong in the independent Mobile application. See `docs/mobile-app-migrati
 
 Framework adapter source is also not application product logic. It remains Fresnica-owned canonical glue and is compiled by the consuming framework project according to `docs/mobile-framework-adapter-contract.md`.
 
-## Release marker
+## Historical release marker
 
-A reviewed file under:
-
-```text
-releases/mobile-sdk-vVERSION.json
-```
-
-is the release intent. When a new marker is merged to `main`, the release workflow validates that the marker version matches the Cargo package version and API constants, builds both platform packages, computes checksums and creates the corresponding prerelease/tag.
-
-The release workflow refuses to overwrite an already published release/tag. A corrected SDK requires a new version.
+`releases/mobile-sdk-v0.1.0.json` is retained as the immutable release record for the transitional artifact. No new `mobile-sdk-v*` markers should be created. New releases use `releases/native-sdk-vVERSION.json`.
 
 ## Consumer rule for `fresnica-mobile`
 
-The independent Mobile project should pin an exact Native SDK release version during pre-1.0 development. Do not consume `main` Actions artifacts as a normal dependency.
-
-Recommended dependency record in the Mobile repository:
-
-```text
-FRESNICA_MOBILE_SDK_VERSION=0.1.0
-MOBILE_BINDING_API_VERSION=2
-CORE_CLIENT_API_VERSION=2
-```
-
-The app may update those values only in a dedicated SDK-upgrade change that runs native host integration tests.
+The independent Mobile project must not pin this legacy Mobile SDK. Use the generalized dependency record from `docs/mobile-sdk-usage.md` (`native-sdk-v0.1.0`, Native Binding API 1, SDK API 2, Core Client API 2).
 
 For React Native, Mobile must additionally record the generated adapter compatibility manifest defined in `docs/mobile-framework-adapter-contract.md`. A stale framework/Binding-API combination should fail CI with an adapter-rebuild requirement; CI must not silently rebuild the adapter on every application build.
 

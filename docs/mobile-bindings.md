@@ -1,188 +1,179 @@
-# Mobile Rust Binding Architecture
+# Mobile / Native SDK Binding Architecture
 
-Status: **accepted pre-release integration direction**.
+Status: **generalized Native SDK is the authoritative Mobile integration surface**.
 
-This document records how Fresnica Core is exposed to the Xaman-derived mobile application after the account/signer and `CoreClientApi` boundaries were stabilized.
+This document defines how Fresnica Core is consumed by the independent React Native Mobile application. The old `fresnica-mobile-core` / `mobile-sdk-v0.1.0` line is frozen as a compatibility and migration reference; new Mobile work must use `fresnica-native-sdk` plus the canonical React Native adapter.
 
-## Decision
-
-Use stable **UniFFI 0.32.x** to generate Swift and Kotlin bindings from `bindings/mobile`.
-
-Do not bind Rust directly to React Native JSI/TurboModule.
-Do not use the experimental UniFFI Kotlin-JNI backend yet.
-Do not hand-maintain parallel Swift and JNI mappings of the Core API.
-
-The mobile stack is:
+## Authoritative stack
 
 ```text
-React Native UI / product state
+React Native application
         |
-thin platform native module
+canonical Fresnica RN adapter binary
         |
-Swift                 Kotlin
-        \             /
-         stable UniFFI
-              |
-    fresnica-mobile-core
-              |
-        CoreClientApi
-              |
-         Fresnica Core
+Swift / Kotlin Native SDK API
+        |
+fresnica-native-sdk (UniFFI)
+        |
+fresnica-sdk
+        |
+CoreClientApi
+        |
+Fresnica Core
 ```
 
-## Why this fits Xaman
+The application does **not** compile Rust Core, `fresnica-sdk`, UniFFI, or adapter source during normal builds.
 
-The current Xaman application is React Native, but its security and utility integrations still use conventional native modules on both platforms. Examples include:
+## Products and ownership
 
-- iOS `ios/Xaman/Libs/Security/Crypto/Crypto.m`
-- iOS `ios/Xaman/Libs/Security/Vault/VaultManager.m`
-- iOS `ios/Xaman/Libs/Security/Authentication/Biometric/BiometricModule.m`
-- Android `android/app/src/main/java/libs/security/crypto/CryptoModule.java`
-- Android `android/app/src/main/java/libs/security/vault/VaultManagerModule.java`
-- Android `android/app/src/main/java/libs/security/authentication/Biometric/BiometricModule.java`
+Fresnica publishes/owns:
 
-Fresnica can therefore preserve useful navigation, lifecycle, biometric, Keychain/Keystore, and React Native infrastructure while replacing the secret/signing authority behind those modules.
+- `fresnica-native-sdk-VERSION.aar` for Android;
+- `FresnicaSDK-VERSION-apple.zip` containing `FresnicaSDK.xcframework` and `FresnicaSDKFFI.xcframework`;
+- the stable `FresnicaSdkApi` Swift/Kotlin surface;
+- native Keychain/Keystore signer-authorization helpers;
+- canonical React Native adapter source under `adapters/react-native`;
+- adapter build/compatibility tooling;
+- Core/SDK/security semantics and conformance tests.
 
-The new path should be thin:
+The independent Mobile application owns:
+
+- React Native version and application toolchain;
+- one-time compilation of the canonical adapter against that exact environment;
+- checked-in/controlled adapter binaries and compatibility manifest;
+- Realm schema/migrations and application persistence;
+- network/Horizon behavior, screens, navigation and product orchestration.
+
+## Version contract
+
+The first generalized Native SDK line uses independent compatibility numbers:
 
 ```text
-Xaman-derived RN action
-       |
-FresnicaCoreModule.swift / FresnicaCoreModule.kt
-       |
-generated FresnicaCore Swift/Kotlin API
-       |
-Rust
+Native package version:       0.1.0
+NATIVE_BINDING_API_VERSION:   1
+SDK_API_VERSION:              2
+CLIENT_API_VERSION:           2
+RN adapter source version:    0.1.0
 ```
 
-The native module may translate React Native values and errors, but it MUST NOT reimplement derivation, encryption, signer identity checks, transaction hashing, or signature validation.
+Mobile must pin an exact pre-1.0 Native SDK release and record the adapter manifest. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.
 
-## Why not direct JSI
+## Native API
 
-Direct Rust-to-JSI coupling was rejected for this phase because:
+Kotlin package: `com.fresnica.sdk`
 
-- Fresnica's cryptographic operations are low-frequency control operations, not a high-throughput rendering/data path;
-- routine signing should keep `WalletUnlockKey` and signer orchestration in native code rather than make the JavaScript runtime the security boundary;
-- the inherited Xaman app already has mature native-module infrastructure;
-- JSI/TurboModule would couple the Core integration to React Native architecture changes without improving Core correctness.
+Swift module: `FresnicaSDK`
 
-A future performance-driven JSI adapter could still sit above the same `fresnica-mobile-core` API if a measured need appears.
+Primary object: `FresnicaSdkApi`
 
-## Why UniFFI
+The native API exposes wallet/signer lifecycle and signing primitives backed by the platform-neutral SDK, including:
 
-UniFFI removes two classes of duplicate implementation:
+- `version`
+- `parseAccount`
+- `protectSecret`
+- `protectMnemonic`
+- `generateMnemonic`
+- `reprotect`
+- `deriveUnlockKey`
+- `validateUnlockKey`
+- `signTransactionXdr`
+- `reveal`
+- `prepareEd25519Signing`
+- `applyEd25519Signature`
 
-1. manual Rust FFI memory/error/type handling;
-2. separate hand-maintained Swift and Kotlin representations of the Core facade.
+`deriveUnlockKey`, `validateUnlockKey` and raw routine `signTransactionXdr` are **native-only** primitives. The React Native adapter must not forward unlock-key material to JavaScript.
 
-The generated layer is allowed to own only language marshalling. Fresnica-owned semantics remain in Rust.
+## React Native surface
 
-Proc macros are used instead of a duplicate UDL interface so the Rust method signatures and generated metadata cannot drift independently.
+The canonical JavaScript module remains `FresnicaCore`. It exposes the reviewed high-level surface:
 
-## Stable backend choice
+- `parseAccount`
+- `protectSecret`
+- `protectMnemonic`
+- `generateMnemonic`
+- `reprotect`
+- `reveal`
+- `prepareEd25519Signing`
+- `applyEd25519Signature`
+- `canEnrollSystemAuth`
+- `hasSystemAuth`
+- `removeSystemAuth`
+- `enrollSystemAuth`
+- `signWithSystemAuth`
+- `signWithPasscode`
 
-For Android, use UniFFI's established Kotlin/JNA path first.
+The adapter performs only argument/result conversion, React Native registration/lifecycle work and the platform UI steps needed to drive SDK-owned native authorization.
 
-UniFFI 0.32 also contains an experimental Kotlin-JNI generator. Fresnica will not adopt that backend until:
-
-- the standard Kotlin binding is integrated and measured;
-- the JNI backend is no longer experimental or there is a demonstrated performance/packaging reason to accept its instability;
-- the generated API remains equivalent under Fresnica's conformance tests.
-
-The Core operations involved here are normally import, unlock-key derivation, signing, re-protection, account parsing, and explicit reveal/export. JNA call overhead is not the dominant cost of these operations.
-
-## Threading
-
-UniFFI objects must be safe for concurrent foreign-language access.
-
-`MobileCoreApi` is therefore intentionally stateless. It does not retain an unlocked signer, plaintext material, `WalletUnlockKey`, or mutable `CoreClientApi` session. Each call creates a short-lived Core facade and returns owned output.
-
-Platform code remains responsible for serializing UI flows where product semantics require it, for example passcode rotation and account persistence transactions.
+It must not reimplement derivation, protected-envelope parsing, signer identity checks, transaction hashing/signing, signature verification, Keychain/Keystore policy, or `WalletUnlockKey` handling.
 
 ## Secret boundary
 
-Normal software signing should become:
+Routine software signing is:
 
 ```text
-React Native requests sign
+React Native requests reviewed signing
         |
-native module selects account + signer
+native module selects signer/envelope
         |
 Keychain / Keystore + biometric policy
         |
 32-byte WalletUnlockKey released in native memory
         |
-UniFFI sign_transaction_xdr
+FresnicaSdkApi.signTransactionXdr
         |
-Rust opens opaque signer envelope, verifies signer identity, signs
-        |
-signed XDR returned
+signed XDR returned to React Native
 ```
 
-The `WalletUnlockKey` MUST NOT be returned to JavaScript.
+`WalletUnlockKey` must never enter JavaScript.
 
-Mnemonic / `S...` plaintext may cross the React Native/native boundary only where the existing security contract explicitly allows it:
+Mnemonic / `S...` plaintext may cross the framework/native boundary only for:
 
-- initial user import when unavoidable;
-- one-time generated mnemonic presentation/confirmation;
-- explicit Reveal / Export after fresh app-passcode entry.
+- explicit initial import;
+- one-time generated mnemonic backup/confirmation;
+- explicit Reveal / Export after a fresh Fresnica app passcode.
 
-Those values must not be stored in Realm, navigation state, logs, analytics, crash reports, or ordinary Redux/state persistence.
+Do not persist plaintext recovery material in Realm, Redux/application state, navigation state, logs, analytics or crash reports.
 
-## Account and signer persistence
+## Account / signer persistence
 
-The mobile persistence model remains independent from the binding technology.
+Mobile persists the conceptual graph:
 
 ```text
 AccountRecord
-  identity: G... / C...
-  metadata
+  identity/address/network/product metadata
 
 SignerRecord
-  signer_public_key
-  kind
-  opaque protected envelope / external-signer metadata
+  signer public identity
+  signer kind/provider metadata
+  opaque protected envelope when applicable
+
+AccountSignerReference
+  account <-> signer relationship
 ```
 
-A watch-only account has no local signer record.
-A full software wallet has a protected-software signer record.
-A Stellar additional/multisig signer may have a signer public key different from the account address.
+A watch-only account has no applicable local signer. Do not persist a second wallet-type truth that can drift.
 
-The network/client layer determines whether a local signer is currently authorized by the account's on-chain signer/threshold state.
+A classic account and signer may differ under Stellar signer/threshold rules. `C...` contract accounts are identities, not Ed25519 signer public keys.
 
-## Platform work after generated bindings
+## Legacy Mobile v0.1.0
 
-### iOS
+`bindings/mobile` and the `mobile-sdk-v0.1.0` release remain read-only compatibility/donor material for the previous integration surface and the #81-#84 application-lifecycle migration reference.
 
-1. Build Rust as static libraries for supported Apple architectures.
-2. Generate Swift bindings and headers/module map.
-3. Package the Rust library + generated FFI module as an XCFramework or equivalent reproducible Xcode dependency.
-4. Add `FresnicaCoreModule.swift` as the React Native-facing adapter.
-5. Adapt retained Keychain/biometric infrastructure to store/release per-signer `WalletUnlockKey` values.
+Do not start new Mobile integration against:
 
-### Android
+- `fresnica-mobile-core`;
+- `FresnicaCoreFFI.xcframework` from the legacy Mobile package;
+- the legacy AAR containing React Native classes;
+- `bindings/mobile/platform/**` as the authoritative system-auth implementation.
 
-1. Cross-compile Rust shared libraries for supported Android ABIs.
-2. Generate Kotlin bindings in package `com.fresnica.core`.
-3. Package native `.so` files and generated Kotlin code into the Android application/library build.
-4. Add `FresnicaCoreModule.kt` as the React Native-facing adapter.
-5. Adapt retained Keystore/StrongBox/biometric infrastructure to protect/release per-signer `WalletUnlockKey` values.
+New work uses `bindings/native` outputs and `adapters/react-native`.
 
-## CI expectations
+## Build and validation references
 
-Before platform UI integration, CI should prove:
+- Native release contract: [`native-sdk-release.md`](native-sdk-release.md)
+- Framework adapter contract: [`mobile-framework-adapter-contract.md`](mobile-framework-adapter-contract.md)
+- System authentication: [`mobile-system-auth.md`](mobile-system-auth.md)
+- Mobile lifecycle migration: [`mobile-app-migration-pr81-pr84.md`](mobile-app-migration-pr81-pr84.md)
+- React Native upgrade rules: [`react-native-upgrade-playbook.md`](react-native-upgrade-playbook.md)
 
-- Rust Core tests pass;
-- `fresnica-mobile-core` tests pass;
-- Rust FFI library builds;
-- Kotlin bindings generate from the compiled library;
-- Swift bindings generate from the same compiled metadata;
-- generated APIs contain the expected Core object, account/signer records, stable error surface, and external signing operations.
-
-Later platform packaging PRs should add Android ABI builds and Apple static/XCFramework builds rather than weakening this host-level conformance gate.
-
-## React Native framework upgrades
-
-React Native itself is a replaceable host framework layer. Upgrading it must not trigger redesign of Core, signer semantics, protected envelopes, `WalletUnlockKey`, Realm Account/Signer semantics, or the UniFFI facade merely for framework convenience.
-
-All React Native version upgrades must follow [`react-native-upgrade-playbook.md`](react-native-upgrade-playbook.md). The playbook defines the allowed migration surface, New Architecture/TurboModule transition rules, security invariants, CI matrix, acceptance criteria, and rollback criteria.
+The consumer-facing installation, one-time adapter build and first-app smoke-test steps are documented in [`mobile-sdk-usage.md`](mobile-sdk-usage.md).

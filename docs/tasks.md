@@ -114,7 +114,10 @@
 - [x] WASM target/package compile validation
 - [x] Browser-package runtime/shared-vector conformance harness
 - [x] Machine-readable SDK compatibility manifest + source drift validator
-- [x] Native SDK release contract + marker-gated release automation (`native-sdk-v*`; no marker/release published yet)
+- [x] Native SDK release contract + marker-gated release automation (`native-sdk-v*`)
+- [x] First generalized Native SDK integration release (`native-sdk-v0.1.0`)
+- [x] Retire legacy `mobile-sdk-v*` publisher from active `main` workflows
+- [x] Mobile Native SDK / React Native adapter onboarding guide (`docs/mobile-sdk-usage.md`)
 - [x] Execute WASM package/runtime conformance with a Rust + wasm-bindgen toolchain
 - [x] Passkey/smart-account architecture decision: contract-account signer, not WalletUnlockKey wrapper
 - [x] Pinned `smart-account-kit` provider boundary + Testnet deployment fixture + mock conformance tests
