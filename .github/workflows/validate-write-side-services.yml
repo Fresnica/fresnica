@@ -1,0 +1,63 @@
+name: Validate write-side services candidate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact candidate patch
+        shell: bash
+        run: |
+          cat .validation/candidate.b64.* | base64 -d > /tmp/candidate.patch.gz
+          gzip -dc /tmp/candidate.patch.gz > /tmp/candidate.patch
+          echo 'e46becee62c9d88d1fcc8cd5e00c4d5375d12c9c9b07cd6c5c7ccae2929ce601  /tmp/candidate.patch' | sha256sum -c -
+          git config user.name 'OpenAI Validation'
+          git config user.email 'noreply@openai.com'
+          git am /tmp/candidate.patch
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format candidate
+        shell: bash
+        run: |
+          cargo fmt --manifest-path clients/rust-client/Cargo.toml
+          cargo fmt --manifest-path clients/rust-cli/Cargo.toml
+          cargo fmt --manifest-path clients/rust-tui/Cargo.toml
+          git diff --check
+          git diff --binary > /tmp/rustfmt.patch
+
+      - name: SDK boundary
+        run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+
+      - name: Shared client tests
+        run: cargo test --manifest-path clients/rust-client/Cargo.toml
+
+      - name: Rust CLI tests
+        run: cargo test --manifest-path clients/rust-cli/Cargo.toml
+
+      - name: Rust TUI tests
+        run: cargo test --manifest-path clients/rust-tui/Cargo.toml
+
+      - name: Shared client release build
+        run: cargo build --release --manifest-path clients/rust-client/Cargo.toml
+
+      - name: Rust CLI release build
+        run: cargo build --release --manifest-path clients/rust-cli/Cargo.toml
+
+      - name: Rust TUI release build
+        run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml
+
+      - name: Upload rustfmt patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: write-side-rustfmt
+          path: /tmp/rustfmt.patch
+          if-no-files-found: warn
