@@ -4,8 +4,8 @@ use std::process;
 
 use fresnica_client::{
     balance_asset_label, operation_summary, BalanceSnapshot, FresnicaClient, HistorySnapshot,
-    OfferRequest, OfferReviewDetails, OfferSide, PaymentRequest, PreparedOffer, PreparedPayment,
-    PreparedTrustline, TrustlineAction, TrustlineRequest, WalletRecord,
+    OfferRequest, OfferReviewDetails, OfferSide, OpenOffer, PaymentRequest, PreparedOffer,
+    PreparedPayment, PreparedTrustline, TrustlineAction, TrustlineRequest, WalletRecord,
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -23,11 +23,11 @@ Usage:
 
 Keys:
   q / Esc     quit
-  r           refresh balances and recent activity
+  r           refresh balances, offers, and recent activity
   [ / ]       previous / next wallet on the selected network
   s           prepare a payment from the selected signing wallet
   t           add, change, or remove an issued-asset trustline
-  o           create or cancel an SDEX offer
+  o           create, update, or cancel an SDEX offer
 
 Write flow:
   form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
@@ -416,6 +416,7 @@ struct App {
     selected: usize,
     balances: Vec<Value>,
     operations: Vec<Value>,
+    offers: Vec<OpenOffer>,
     status: String,
     mode: Mode,
 }
@@ -457,6 +458,7 @@ impl App {
             selected,
             balances: Vec::new(),
             operations: Vec::new(),
+            offers: Vec::new(),
             status: String::new(),
             mode: Mode::Browse,
         };
@@ -472,6 +474,7 @@ impl App {
         let name = self.selected_wallet().name.clone();
         let balance_result = self.client.balances(Some(&name));
         let history_result = self.client.history(Some(&name), 12);
+        let offers_result = self.client.open_offers(Some(&name), 8);
 
         let mut failures = Vec::new();
         match balance_result {
@@ -481,6 +484,10 @@ impl App {
         match history_result {
             Ok(HistorySnapshot { operations, .. }) => self.operations = operations,
             Err(error) => failures.push(format!("activity: {error}")),
+        }
+        match offers_result {
+            Ok(snapshot) => self.offers = snapshot.offers,
+            Err(error) => failures.push(format!("offers: {error}")),
         }
 
         self.status = if failures.is_empty() {
@@ -793,16 +800,24 @@ impl App {
 
         self.render_header(frame, header_area);
         if main_area.width >= 100 {
-            let [assets_area, activity_area] =
-                Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
+            let [portfolio_area, activity_area] =
+                Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
                     .areas(main_area);
+            let [assets_area, offers_area] =
+                Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .areas(portfolio_area);
             self.render_assets(frame, assets_area);
+            self.render_offers(frame, offers_area);
             self.render_activity(frame, activity_area);
         } else {
-            let [assets_area, activity_area] =
-                Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
-                    .areas(main_area);
+            let [assets_area, offers_area, activity_area] = Layout::vertical([
+                Constraint::Percentage(45),
+                Constraint::Percentage(25),
+                Constraint::Percentage(30),
+            ])
+            .areas(main_area);
             self.render_assets(frame, assets_area);
+            self.render_offers(frame, offers_area);
             self.render_activity(frame, activity_area);
         }
         self.render_footer(frame, footer_area);
@@ -874,6 +889,34 @@ impl App {
         frame.render_widget(table, area);
     }
 
+    fn render_offers(&self, frame: &mut Frame, area: Rect) {
+        let header = Row::new(["ID", "Selling", "Buying", "Amount", "Price"])
+            .style(Style::new().add_modifier(Modifier::BOLD));
+        let rows = self.offers.iter().map(|offer| {
+            Row::new([
+                offer.offer_id.to_string(),
+                compact_asset(&offer.selling),
+                compact_asset(&offer.buying),
+                offer.amount.clone(),
+                offer.price.clone(),
+            ])
+        });
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(10),
+                Constraint::Min(14),
+                Constraint::Min(14),
+                Constraint::Length(14),
+                Constraint::Length(12),
+            ],
+        )
+        .header(header)
+        .column_spacing(1)
+        .block(Block::bordered().title("Open offers"));
+        frame.render_widget(table, area);
+    }
+
     fn render_activity(&self, frame: &mut Frame, area: Rect) {
         let address = &self.selected_wallet().address;
         let items = if self.operations.is_empty() {
@@ -900,14 +943,14 @@ impl App {
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let help = match &self.mode {
             Mode::Browse => {
-                "q quit   r refresh   [ / ] switch wallet   s send   t trustline   o offer"
+                "q quit   r refresh   [ / ] switch wallet   s send   t trustline   o manage offer"
             }
             Mode::Send(_) => "type value   Tab/Up/Down field   Enter next/prepare   Esc cancel",
             Mode::Trustline(_) => {
                 "action: Left/Right or a/l/r   Tab field   Enter next/prepare   Esc cancel"
             }
             Mode::Offer(_) => {
-                "action: Left/Right or b/s/c   Tab field   Space toggles trustline   Enter next/prepare"
+                "action: Left/Right or b/s/u/c   Tab field   Space toggles trustline   Enter next/prepare"
             }
             Mode::PaymentReview(_) | Mode::TrustlineReview(_) | Mode::OfferReview(_) => {
                 "y/Enter sign   n/Esc cancel"
@@ -1170,6 +1213,16 @@ impl App {
     }
 }
 
+fn compact_asset(value: &str) -> String {
+    let Some((code, issuer)) = value.split_once(':') else {
+        return value.to_owned();
+    };
+    if issuer.len() <= 14 {
+        return value.to_owned();
+    }
+    format!("{code}:{}...{}", &issuer[..6], &issuer[issuer.len() - 4..])
+}
+
 fn popup_area(area: Rect) -> Rect {
     let [_, vertical, _] = Layout::vertical([
         Constraint::Percentage(14),
@@ -1312,6 +1365,13 @@ mod tests {
                 ..
             } if wallet == "primary" && amount == "3.5" && price == "1.75"
         ));
+    }
+
+    #[test]
+    fn compact_asset_keeps_code_and_shortens_only_issuer() {
+        let asset = "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        assert_eq!(compact_asset("XLM"), "XLM");
+        assert_eq!(compact_asset(asset), "USD:GAAAAA...AWHF");
     }
 
     #[test]
