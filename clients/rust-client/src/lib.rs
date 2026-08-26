@@ -1,4 +1,5 @@
 pub mod contacts;
+pub mod dex;
 pub mod horizon;
 pub mod payment;
 pub mod storage;
@@ -9,6 +10,10 @@ pub mod wallet;
 mod service;
 
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
+pub use dex::{
+    OfferAction, OfferOperation, OfferRequest, OfferReview, OfferReviewDetails, OfferSide,
+    PreparedOffer,
+};
 pub use horizon::{
     balance_asset_label, operation_summary, HorizonClient, LedgerParameters, SubmissionError,
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,

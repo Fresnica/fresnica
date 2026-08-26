@@ -4,8 +4,8 @@ use std::process;
 
 use fresnica_client::{
     balance_asset_label, operation_summary, BalanceSnapshot, FresnicaClient, HistorySnapshot,
-    PaymentRequest, PreparedPayment, PreparedTrustline, TrustlineAction, TrustlineRequest,
-    WalletRecord,
+    OfferRequest, OfferReviewDetails, OfferSide, PaymentRequest, PreparedOffer, PreparedPayment,
+    PreparedTrustline, TrustlineAction, TrustlineRequest, WalletRecord,
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -27,6 +27,7 @@ Keys:
   [ / ]       previous / next wallet on the selected network
   s           prepare a payment from the selected signing wallet
   t           add, change, or remove an issued-asset trustline
+  o           create or cancel an SDEX offer
 
 Write flow:
   form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
@@ -137,8 +138,10 @@ enum Mode {
     Browse,
     Send(SendForm),
     Trustline(TrustlineForm),
+    Offer(OfferForm),
     PaymentReview(PreparedPayment),
     TrustlineReview(PreparedTrustline),
+    OfferReview(PreparedOffer),
     Passcode {
         prepared: PreparedWrite,
         passcode: String,
@@ -149,6 +152,7 @@ enum Mode {
 enum PreparedWrite {
     Payment(PreparedPayment),
     Trustline(PreparedTrustline),
+    Offer(PreparedOffer),
 }
 
 struct SendForm {
@@ -266,6 +270,127 @@ impl TrustlineForm {
     }
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OfferFormAction {
+    Buy,
+    Sell,
+    Cancel,
+}
+
+impl OfferFormAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Buy => "buy",
+            Self::Sell => "sell",
+            Self::Cancel => "cancel",
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::Buy => Self::Cancel,
+            Self::Sell => Self::Buy,
+            Self::Cancel => Self::Sell,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Buy => Self::Sell,
+            Self::Sell => Self::Cancel,
+            Self::Cancel => Self::Buy,
+        }
+    }
+}
+
+struct OfferForm {
+    action: OfferFormAction,
+    offer_id: String,
+    base: String,
+    counter: String,
+    amount: String,
+    price: String,
+    allow_trustline: bool,
+    active: usize,
+}
+
+impl OfferForm {
+    fn new() -> Self {
+        Self {
+            action: OfferFormAction::Buy,
+            offer_id: String::new(),
+            base: String::new(),
+            counter: "XLM".to_owned(),
+            amount: String::new(),
+            price: String::new(),
+            allow_trustline: false,
+            active: 0,
+        }
+    }
+
+    fn field_count(&self) -> usize {
+        if self.action == OfferFormAction::Cancel {
+            2
+        } else {
+            6
+        }
+    }
+
+    fn next_field(&mut self) {
+        self.active = (self.active + 1) % self.field_count();
+    }
+
+    fn previous_field(&mut self) {
+        self.active = (self.active + self.field_count() - 1) % self.field_count();
+    }
+
+    fn normalize_active(&mut self) {
+        if self.active >= self.field_count() {
+            self.active = self.field_count() - 1;
+        }
+    }
+
+    fn current_mut(&mut self) -> Option<&mut String> {
+        match (self.action, self.active) {
+            (OfferFormAction::Cancel, 1) => Some(&mut self.offer_id),
+            (OfferFormAction::Buy | OfferFormAction::Sell, 1) => Some(&mut self.base),
+            (OfferFormAction::Buy | OfferFormAction::Sell, 2) => Some(&mut self.counter),
+            (OfferFormAction::Buy | OfferFormAction::Sell, 3) => Some(&mut self.amount),
+            (OfferFormAction::Buy | OfferFormAction::Sell, 4) => Some(&mut self.price),
+            _ => None,
+        }
+    }
+
+    fn request(&self, wallet: &str) -> Result<OfferRequest, String> {
+        let wallet = Some(wallet.to_owned());
+        match self.action {
+            OfferFormAction::Buy | OfferFormAction::Sell => Ok(OfferRequest::Create {
+                wallet,
+                side: if self.action == OfferFormAction::Buy {
+                    OfferSide::Buy
+                } else {
+                    OfferSide::Sell
+                },
+                base: self.base.clone(),
+                counter: self.counter.clone(),
+                amount: self.amount.clone(),
+                price: self.price.clone(),
+                allow_trustline: self.allow_trustline,
+            }),
+            OfferFormAction::Cancel => {
+                let offer_id = self
+                    .offer_id
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| "offer id must be a positive integer".to_owned())?;
+                Ok(OfferRequest::Cancel { wallet, offer_id })
+            }
+        }
+    }
+}
+
 struct App {
     client: FresnicaClient,
     wallets: Vec<WalletRecord>,
@@ -369,6 +494,7 @@ impl App {
         let wallet_watch_only = self.selected_wallet().watch_only();
         let mut payment_request = None;
         let mut trustline_request = None;
+        let mut offer_request = None;
         let mut submit = false;
 
         match &mut self.mode {
@@ -395,6 +521,16 @@ impl App {
                     } else {
                         self.mode = Mode::Trustline(TrustlineForm::new());
                         self.status = "Preparing trustline change".to_owned();
+                    }
+                }
+                KeyCode::Char('o') => {
+                    if wallet_watch_only {
+                        self.status =
+                            "Selected wallet is watch-only; attach a signer before managing offers"
+                                .to_owned();
+                    } else {
+                        self.mode = Mode::Offer(OfferForm::new());
+                        self.status = "Preparing SDEX offer".to_owned();
                     }
                 }
                 _ => {}
@@ -448,6 +584,47 @@ impl App {
                 }
                 _ => {}
             },
+            Mode::Offer(form) => match code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Offer change cancelled before review".to_owned();
+                }
+                KeyCode::Tab | KeyCode::Down => form.next_field(),
+                KeyCode::BackTab | KeyCode::Up => form.previous_field(),
+                KeyCode::Left if form.active == 0 => {
+                    form.action = form.action.previous();
+                    form.normalize_active();
+                }
+                KeyCode::Right if form.active == 0 => {
+                    form.action = form.action.next();
+                    form.normalize_active();
+                }
+                KeyCode::Char('b') if form.active == 0 => form.action = OfferFormAction::Buy,
+                KeyCode::Char('s') if form.active == 0 => form.action = OfferFormAction::Sell,
+                KeyCode::Char('c') if form.active == 0 => {
+                    form.action = OfferFormAction::Cancel;
+                    form.normalize_active();
+                }
+                KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if form.active == 5 => {
+                    form.allow_trustline = !form.allow_trustline;
+                }
+                KeyCode::Enter if form.active + 1 < form.field_count() => form.next_field(),
+                KeyCode::Enter => match form.request(&wallet_name) {
+                    Ok(request) => offer_request = Some(request),
+                    Err(error) => self.status = error,
+                },
+                KeyCode::Backspace => {
+                    if let Some(value) = form.current_mut() {
+                        value.pop();
+                    }
+                }
+                KeyCode::Char(character) => {
+                    if let Some(value) = form.current_mut() {
+                        value.push(character);
+                    }
+                }
+                _ => {}
+            },
             Mode::PaymentReview(prepared) => match code {
                 KeyCode::Char('y') | KeyCode::Enter => {
                     self.mode = Mode::Passcode {
@@ -473,6 +650,20 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Esc => {
                     self.mode = Mode::Browse;
                     self.status = "Trustline change cancelled after review".to_owned();
+                }
+                _ => {}
+            },
+            Mode::OfferReview(prepared) => match code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.mode = Mode::Passcode {
+                        prepared: PreparedWrite::Offer(prepared.clone()),
+                        passcode: String::new(),
+                    };
+                    self.status = "Enter Fresnica passcode; input is masked".to_owned();
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.mode = Mode::Browse;
+                    self.status = "Offer change cancelled after review".to_owned();
                 }
                 _ => {}
             },
@@ -515,6 +706,16 @@ impl App {
             }
         }
 
+        if let Some(request) = offer_request {
+            match self.client.prepare_offer(&request) {
+                Ok(prepared) => {
+                    self.mode = Mode::OfferReview(prepared);
+                    self.status = "Review the exact prepared SDEX offer before signing".to_owned();
+                }
+                Err(error) => self.status = error,
+            }
+        }
+
         if submit {
             let result = match &mut self.mode {
                 Mode::Passcode { prepared, passcode } => {
@@ -526,6 +727,9 @@ impl App {
                         }
                         PreparedWrite::Trustline(prepared) => {
                             self.client.submit_trustline(prepared, submitted_passcode)
+                        }
+                        PreparedWrite::Offer(prepared) => {
+                            self.client.submit_offer(prepared, submitted_passcode)
                         }
                     }
                 }
@@ -581,8 +785,10 @@ impl App {
             Mode::Browse => {}
             Mode::Send(form) => self.render_send_form(frame, form),
             Mode::Trustline(form) => self.render_trustline_form(frame, form),
+            Mode::Offer(form) => self.render_offer_form(frame, form),
             Mode::PaymentReview(prepared) => self.render_payment_review(frame, prepared),
             Mode::TrustlineReview(prepared) => self.render_trustline_review(frame, prepared),
+            Mode::OfferReview(prepared) => self.render_offer_review(frame, prepared),
             Mode::Passcode { passcode, .. } => self.render_passcode(frame, passcode),
         }
     }
@@ -667,12 +873,19 @@ impl App {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let help = match &self.mode {
-            Mode::Browse => "q quit   r refresh   [ / ] switch wallet   s send   t trustline",
+            Mode::Browse => {
+                "q quit   r refresh   [ / ] switch wallet   s send   t trustline   o offer"
+            }
             Mode::Send(_) => "type value   Tab/Up/Down field   Enter next/prepare   Esc cancel",
             Mode::Trustline(_) => {
                 "action: Left/Right or a/l/r   Tab field   Enter next/prepare   Esc cancel"
             }
-            Mode::PaymentReview(_) | Mode::TrustlineReview(_) => "y/Enter sign   n/Esc cancel",
+            Mode::Offer(_) => {
+                "action: Left/Right or b/s/c   Tab field   Space toggles trustline   Enter next/prepare"
+            }
+            Mode::PaymentReview(_) | Mode::TrustlineReview(_) | Mode::OfferReview(_) => {
+                "y/Enter sign   n/Esc cancel"
+            }
             Mode::Passcode { .. } => "Enter submit   Backspace edit   Esc cancel",
         };
         let body = format!("{}\n{help}", self.status);
@@ -747,6 +960,49 @@ impl App {
         );
     }
 
+    fn render_offer_form(&self, frame: &mut Frame, form: &OfferForm) {
+        let area = popup_area(frame.area());
+        let fields = if form.action == OfferFormAction::Cancel {
+            vec![
+                ("Action", form.action.label().to_owned()),
+                ("Offer ID", form.offer_id.clone()),
+            ]
+        } else {
+            vec![
+                ("Action", form.action.label().to_owned()),
+                ("Base", form.base.clone()),
+                ("Counter", form.counter.clone()),
+                ("Amount", form.amount.clone()),
+                ("Price", form.price.clone()),
+                (
+                    "Add trustline",
+                    if form.allow_trustline { "yes" } else { "no" }.to_owned(),
+                ),
+            ]
+        };
+        let lines = fields
+            .iter()
+            .enumerate()
+            .map(|(index, (label, value))| {
+                let line = Line::from(format!("{label:<18} {value}"));
+                if index == form.active {
+                    line.style(Style::new().add_modifier(Modifier::BOLD))
+                } else {
+                    line
+                }
+            })
+            .chain(std::iter::once(Line::from("")))
+            .chain(std::iter::once(Line::from(
+                "Pair assets use XLM or CODE:GISSUER. Price is counter units per base unit.",
+            )))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Prepare SDEX offer")),
+            area,
+        );
+    }
+
     fn render_payment_review(&self, frame: &mut Frame, prepared: &PreparedPayment) {
         let review = &prepared.review;
         let mut lines = vec![
@@ -803,6 +1059,60 @@ impl App {
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(lines).block(Block::bordered().title("Review trustline change")),
+            area,
+        );
+    }
+
+    fn render_offer_review(&self, frame: &mut Frame, prepared: &PreparedOffer) {
+        let review = &prepared.review;
+        let mut lines = vec![
+            Line::from(format!(
+                "Operation: {} ({})",
+                review.operation.label(),
+                review.action.label()
+            )),
+            Line::from(format!(
+                "Wallet:    {} ({})",
+                review.wallet_name, review.source
+            )),
+        ];
+        if let Some(offer_id) = review.offer_id {
+            lines.push(Line::from(format!("Offer:     #{offer_id}")));
+        }
+        match &review.details {
+            OfferReviewDetails::Trade {
+                side,
+                base,
+                counter,
+                amount,
+                price,
+                total,
+                trustline_asset,
+            } => {
+                lines.push(Line::from(format!("Side:      {}", side.label())));
+                lines.push(Line::from(format!("Pair:      {base} / {counter}")));
+                lines.push(Line::from(format!("Amount:    {amount} {base}")));
+                lines.push(Line::from(format!("Price:     {price} {counter}/{base}")));
+                lines.push(Line::from(format!("Total:     {total} {counter}")));
+                if let Some(asset) = trustline_asset {
+                    lines.push(Line::from(format!(
+                        "Trustline: + {asset} (explicitly approved)"
+                    )));
+                }
+            }
+            OfferReviewDetails::Cancel { selling, buying } => {
+                lines.push(Line::from(format!("Selling:   {selling}")));
+                lines.push(Line::from(format!("Buying:    {buying}")));
+            }
+        }
+        lines.push(Line::from(format!("Fee:       {} XLM", review.fee_xlm)));
+        lines.push(Line::from(format!("Network:   {}", review.network)));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Press y/Enter to continue to signing."));
+        let area = popup_area(frame.area());
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::bordered().title("Review SDEX offer")),
             area,
         );
     }
@@ -909,6 +1219,43 @@ mod tests {
         assert_eq!(request.asset, "XLM");
         assert_eq!(request.destination, "Alice");
         assert_eq!(request.memo.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn offer_form_builds_shared_create_request() {
+        let mut form = OfferForm::new();
+        form.action = OfferFormAction::Sell;
+        form.base = "XLM".to_owned();
+        form.counter = "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF".to_owned();
+        form.amount = "4.5".to_owned();
+        form.price = "1.25".to_owned();
+        form.allow_trustline = true;
+        let request = form.request("primary").unwrap();
+        assert!(matches!(
+            request,
+            OfferRequest::Create {
+                wallet: Some(ref wallet),
+                side: OfferSide::Sell,
+                allow_trustline: true,
+                ref amount,
+                ref price,
+                ..
+            } if wallet == "primary" && amount == "4.5" && price == "1.25"
+        ));
+    }
+
+    #[test]
+    fn offer_form_builds_shared_cancel_request() {
+        let mut form = OfferForm::new();
+        form.action = OfferFormAction::Cancel;
+        form.offer_id = "42".to_owned();
+        assert!(matches!(
+            form.request("primary").unwrap(),
+            OfferRequest::Cancel {
+                wallet: Some(ref wallet),
+                offer_id: 42,
+            } if wallet == "primary"
+        ));
     }
 
     #[test]

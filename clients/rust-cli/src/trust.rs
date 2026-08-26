@@ -139,14 +139,6 @@ impl TrustRequest {
         }
     }
 
-    fn wallet(&self) -> Option<&str> {
-        match self {
-            Self::Add { wallet, .. } | Self::Limit { wallet, .. } | Self::Remove { wallet, .. } => {
-                wallet.as_deref()
-            }
-        }
-    }
-
     fn yes(&self) -> bool {
         match self {
             Self::Add { yes, .. } | Self::Limit { yes, .. } | Self::Remove { yes, .. } => *yes,

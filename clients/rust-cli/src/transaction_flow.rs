@@ -10,7 +10,7 @@ use fresnica_client::{
 use stellar_xdr::TransactionEnvelope;
 
 pub(crate) use fresnica_client::{
-    account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
+    account_sequence, balance_stroops, build_operation_envelope,
     format_stroops, has_valid_transaction_signature, minimum_balance_stroops, network_client,
     network_passphrase, parse_stroops, parse_transaction_xdr, STROOPS_PER_XLM,
 };

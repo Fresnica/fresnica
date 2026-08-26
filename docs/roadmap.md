@@ -255,9 +255,11 @@ The first `clients/rust-tui` slice consumes the same client layer and provides:
 - recent activity;
 - manual refresh;
 - reviewed XLM/issued-asset payment preparation;
-- masked passcode entry and SDK-backed payment submission with shared pending-transaction protection.
+- masked passcode entry and SDK-backed payment submission with shared pending-transaction protection;
+- trustline add/limit/remove review and submission through shared client services;
+- SDEX BUY/SELL offer creation and offer cancellation through shared offer services.
 
-Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. Additional trustline/SDEX write semantics should be exposed through reusable client services before being added to the TUI; do not create a second wallet/service architecture or call CLI command handlers from the TUI.
+Its purpose remains SDK integration proving, wallet-flow experimentation, debugging/diagnostics, and a native reference UI between CLI and product GUI. SDEX offer update is already shared at the client-service layer; richer pair/orderbook presentation can be added without creating a second wallet/service architecture or calling CLI command handlers from the TUI.
 
 ## Phase 7 - Product Wallet Experience
 

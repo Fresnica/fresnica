@@ -111,7 +111,7 @@ fn run() -> Result<(), String> {
         "send" => send::command_send(&client, &global.command[1..]),
         "contact" => contacts::command_contact(storage, &global.command[1..]),
         "trust" => trust::command_trust(&client, &global.command[1..]),
-        "dex" => dex::command_dex(storage, &global.network, &global.command[1..]),
+        "dex" => dex::command_dex(&client, &global.command[1..]),
         "anchor" => anchor::command_anchor(&client, &global.command[1..]),
         "wallet" => command_wallet(storage, &global.network, &global.command[1..]),
         other => Err(format!("unknown command: {other}\n\n{HELP}")),

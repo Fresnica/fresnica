@@ -45,6 +45,16 @@ impl HorizonClient {
         }
     }
 
+    pub fn get_offer(&self, offer_id: i64) -> Result<Value, String> {
+        if offer_id <= 0 {
+            return Err("offer id must be a positive integer".to_owned());
+        }
+        self.get_json(
+            &format!("/offers/{offer_id}"),
+            &format!("Offer not found: {offer_id}"),
+        )
+    }
+
     pub fn get_transaction(&self, transaction_hash: &str) -> Result<Option<Value>, String> {
         let url = format!("{}/transactions/{transaction_hash}", self.base_url);
         let mut response = match ureq::get(&url).call() {
@@ -406,6 +416,20 @@ mod tests {
         assert_eq!(
             operation_summary(&operations[0], "GACCOUNT"),
             "Received 1 XLM from GSOURCE"
+        );
+    }
+
+    #[test]
+    fn offer_lookup_uses_offer_endpoint_and_404_message() {
+        let body = r#"{"id":"42","seller":"GSELLER"}"#;
+        let base = mock_server("GET", "/offers/42", 200, body);
+        let offer = HorizonClient::new(&base).get_offer(42).unwrap();
+        assert_eq!(offer["id"], "42");
+
+        let base = mock_server("GET", "/offers/43", 404, r#"{}"#);
+        assert_eq!(
+            HorizonClient::new(&base).get_offer(43).unwrap_err(),
+            "Offer not found: 43"
         );
     }
 

@@ -86,6 +86,10 @@
 - [x] First native Rust TUI dashboard over shared client services (`clients/rust-tui`)
 - [x] Shared UI-free Rust transaction/payment prepare-review-submit services with pending retry protection
 - [x] First native Rust TUI reviewed payment write flow over shared client services
+- [x] Shared UI-free Rust trustline prepare-review-submit services
+- [x] Native Rust TUI trustline add/limit/remove flow over shared client services
+- [x] Shared UI-free Rust SDEX offer create/update/cancel services
+- [x] Native Rust TUI SDEX offer create/cancel flow over shared client services
 - [x] Native Rust CLI watch-only signer attach/detach lifecycle with expected-signer verification
 - [x] Native Rust CLI SEP-1 + SEP-6/SEP-24 anchor capability discovery (`anchor discover CODE:GISSUER`)
 - [x] Native Rust CLI SEP-10/SEP-45 authentication metadata discovery and G/C capability classification
