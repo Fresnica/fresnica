@@ -207,12 +207,8 @@ impl FresnicaClient {
         price_text: &str,
         allow_trustline: bool,
     ) -> Result<PreparedOffer, String> {
-        let wallet = resolve_signing_wallet(
-            self.storage(),
-            self.horizon(),
-            self.network(),
-            wallet_name,
-        )?;
+        let wallet =
+            resolve_signing_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
         let base = OfferAsset::parse(base_text)?;
         let counter = OfferAsset::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
@@ -302,12 +298,8 @@ impl FresnicaClient {
         price_text: &str,
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
-        let wallet = resolve_signing_wallet(
-            self.storage(),
-            self.horizon(),
-            self.network(),
-            wallet_name,
-        )?;
+        let wallet =
+            resolve_signing_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
         let base = OfferAsset::parse(base_text)?;
         let counter = OfferAsset::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
@@ -371,12 +363,8 @@ impl FresnicaClient {
         offer_id: i64,
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
-        let wallet = resolve_signing_wallet(
-            self.storage(),
-            self.horizon(),
-            self.network(),
-            wallet_name,
-        )?;
+        let wallet =
+            resolve_signing_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
         let raw_offer = self.horizon().get_offer(offer_id)?;
         ensure_offer_owner(&raw_offer, &wallet)?;
         let selling = OfferAsset::from_horizon(
