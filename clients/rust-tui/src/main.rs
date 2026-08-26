@@ -50,17 +50,19 @@ fn run() -> Result<(), String> {
     let client = FresnicaClient::new(&options.home, &options.network)?;
     let mut app = App::new(client, options.wallet.as_deref())?;
 
-    ratatui::run(|mut terminal| loop {
-        terminal.draw(|frame| app.render(frame))?;
-        match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                KeyCode::Char('r') => app.refresh(),
-                KeyCode::Char('[') | KeyCode::Left => app.select_previous(),
-                KeyCode::Char(']') | KeyCode::Right => app.select_next(),
+    ratatui::run(|terminal| -> std::io::Result<()> {
+        loop {
+            terminal.draw(|frame| app.render(frame))?;
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                    KeyCode::Char('r') => app.refresh(),
+                    KeyCode::Char('[') | KeyCode::Left => app.select_previous(),
+                    KeyCode::Char(']') | KeyCode::Right => app.select_next(),
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
+            }
         }
     })
     .map_err(|error| format!("terminal error: {error}"))
