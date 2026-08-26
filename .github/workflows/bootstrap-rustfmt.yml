@@ -13,26 +13,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Inspect rustfmt
+      - name: Package GNU rustfmt with private runtime
         shell: bash
         run: |
           set -euxo pipefail
-          RUSTFMT="$(rustup which rustfmt)"
-          echo "rustfmt=$RUSTFMT"
+          SYSROOT="$(rustc --print sysroot)"
+          RUSTFMT="$SYSROOT/bin/rustfmt"
+          DRIVER="$(find "$SYSROOT/lib" -maxdepth 1 -name 'librustc_driver-*.so' -print -quit)"
+          LLVM="$(find "$SYSROOT/lib" -maxdepth 1 -name 'libLLVM.so.*' -print -quit)"
           rustfmt --version
-          file "$RUSTFMT"
-          ls -lh "$RUSTFMT"
-          ldd "$RUSTFMT" || true
-      - name: Package rustfmt
+          ls -lh "$RUSTFMT" "$DRIVER" "$LLVM"
+          mkdir -p portable-rustfmt/bin portable-rustfmt/lib
+          cp "$RUSTFMT" portable-rustfmt/bin/rustfmt
+          cp "$DRIVER" "$LLVM" portable-rustfmt/lib/
+          printf '%s\n' 'rustfmt 1.9.0-stable / Rust 1.98.0 / Linux x86_64 GNU' > portable-rustfmt/VERSION.txt
+          tar -czf portable-rustfmt-gnu-linux-x86_64.tar.gz portable-rustfmt
+          ls -lh portable-rustfmt-gnu-linux-x86_64.tar.gz
+      - name: Inspect MUSL host rustfmt
         shell: bash
+        continue-on-error: true
         run: |
           set -euxo pipefail
-          mkdir -p portable-rustfmt/bin
-          cp "$(rustup which rustfmt)" portable-rustfmt/bin/rustfmt
-          printf '%s\n' 'Rust stable 1.98.0 / rustfmt from 2026-08-20; Linux x86_64.' > portable-rustfmt/VERSION.txt
-          tar -czf portable-rustfmt-linux-x86_64.tar.gz portable-rustfmt
+          rustup toolchain install stable-x86_64-unknown-linux-musl --component rustfmt --profile minimal --no-self-update
+          MUSL_RUSTFMT="$(rustup which --toolchain stable-x86_64-unknown-linux-musl rustfmt)"
+          "$MUSL_RUSTFMT" --version
+          file "$MUSL_RUSTFMT"
+          ls -lh "$MUSL_RUSTFMT"
+          ldd "$MUSL_RUSTFMT" || true
       - uses: actions/upload-artifact@v4
         with:
-          name: portable-rustfmt-linux-x86_64
-          path: portable-rustfmt-linux-x86_64.tar.gz
+          name: portable-rustfmt-gnu-linux-x86_64
+          path: portable-rustfmt-gnu-linux-x86_64.tar.gz
           retention-days: 30
