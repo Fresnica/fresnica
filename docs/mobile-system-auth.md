@@ -61,7 +61,7 @@ platform prompt authenticates actual key access
         |
 native obtains 32 bytes
         |
-UniFFI MobileCoreApi.sign_transaction_xdr(...)
+Fresnica Native SDK `FresnicaSdkApi.signTransactionXdr(...)`
         |
 native clears/drops 32-byte temporary buffer
         |
@@ -95,7 +95,7 @@ For a global app-passcode rotation across several protected signers, Mobile stil
 
 ## Android
 
-Implementation: `bindings/mobile/platform/android/.../WalletUnlockKeyStore.java`.
+Implementation: `bindings/native/platform/android/src/main/kotlin/com/fresnica/sdk/security/WalletUnlockKeyStore.kt`.
 
 The first Fresnica Android policy is **strong biometric, auth-per-use** with app-passcode fallback.
 
@@ -152,7 +152,7 @@ The existing Xaman StrongBox/AndroidKeyStore fallback patterns are useful infras
 
 ## Apple
 
-Implementation: `bindings/mobile/platform/apple/FresnicaWalletUnlockKeyStore.swift`.
+Implementation: `bindings/native/platform/apple/FresnicaWalletUnlockKeyStore.swift`.
 
 Each signer unlock key is stored as a Keychain generic-password data item with:
 

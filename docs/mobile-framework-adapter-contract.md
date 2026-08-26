@@ -226,26 +226,26 @@ In particular:
 
 These constraints are independent of React Native/Flutter versions and must survive every adapter rebuild.
 
-## Current v0.1.0 transition
+## Migration status
 
-`mobile-sdk-v0.1.0` predates this finalized packaging boundary. Its Android AAR includes React Native adapter classes and its Apple package includes framework adapter source.
+The Native-SDK/framework-adapter split is now the authoritative Mobile integration model. `mobile-sdk-v0.1.0` is frozen as a legacy compatibility baseline and must not be used for new Mobile work.
 
-Treat `v0.1.0` as the integration baseline, not the final artifact layout.
-
-The next packaging iteration should move toward:
+The generalized line is:
 
 ```text
 Native SDK release
-  = compiled native platform content only
+  = compiled Android / Apple platform content only
 
 Framework adapter
   = canonical source + one-time consumer build tooling
 
 Consumer application
-  = generated adapter binaries + pinned Native SDK binary
+  = pinned Native SDK + generated adapter binaries + compatibility manifest
 ```
 
-This transition must not change the established Core/security semantics merely to reorganize packaging.
+The first generalized release is marker-gated as `native-sdk-v0.1.0`. Its package version is intentionally still 0.1.0; the migration is a packaging/ownership correction, not an artificial semantic API break. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION`.
+
+`bindings/mobile` stays only as migration/reference material until the independent Mobile repository has absorbed the #81-#84 donor behavior and equivalent tests.
 
 ## Mobile onboarding baseline
 

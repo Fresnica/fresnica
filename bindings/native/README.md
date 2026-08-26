@@ -14,7 +14,7 @@ fresnica-native-sdk          UniFFI/native DTO glue
     +-- future Windows/Linux native packages
 ```
 
-It is intentionally separate from `bindings/mobile`, which preserves the transitional Mobile v0.1.0 API. New native consumers should target this generalized binding surface.
+This is the authoritative native binding surface for new Mobile/native consumers. `bindings/mobile` is frozen compatibility/donor material for the transitional Mobile v0.1.0 line.
 
 ## Rules
 
@@ -45,7 +45,7 @@ cargo build --manifest-path bindings/native/Cargo.toml
 
 Generated language bindings are release/build outputs, not hand-maintained source.
 
-On macOS, run `bash bindings/native/scripts/validate-apple-local.sh` to validate the compiled Apple direct-consumer package end to end. The same command covers the already-proven iOS package plus the macOS Swift slice; macOS remains pending until that expanded validation passes on a real Xcode toolchain.
+On macOS, run `bash bindings/native/scripts/validate-apple-local.sh` to validate the compiled Apple direct-consumer package end to end. The command covers iOS and macOS Swift slices; the expanded validation passed on a real Xcode toolchain on 2026-08-25.
 
 ## Android raw-AAR dependencies
 
