@@ -1011,10 +1011,10 @@ fn stellar_price(price_stroops: i64) -> Result<Price, String> {
     let mut best_d = current_d;
 
     loop {
-        let a = numerator / denominator;
-        if a > INT32_MAX {
+        if i128::from(numerator) > i128::from(denominator) * i128::from(INT32_MAX) {
             break;
         }
+        let a = numerator / denominator;
         let next_n = a
             .checked_mul(current_n)
             .and_then(|value| value.checked_add(previous_n))
@@ -1039,6 +1039,38 @@ fn stellar_price(price_stroops: i64) -> Result<Price, String> {
         }
         numerator = denominator;
         denominator = remainder;
+    }
+
+    if best_n <= 0 || best_d <= 0 {
+        let mut coefficient = INT32_MAX;
+        if current_n > 0 {
+            coefficient = coefficient.min((INT32_MAX - previous_n) / current_n);
+        }
+        if current_d > 0 {
+            coefficient = coefficient.min((INT32_MAX - previous_d) / current_d);
+        }
+        if coefficient >= 1 {
+            let recovered_n = coefficient
+                .checked_mul(current_n)
+                .and_then(|value| value.checked_add(previous_n))
+                .ok_or_else(|| {
+                    "Offer price has no Stellar int32 rational approximation".to_owned()
+                })?;
+            let recovered_d = coefficient
+                .checked_mul(current_d)
+                .and_then(|value| value.checked_add(previous_d))
+                .ok_or_else(|| {
+                    "Offer price has no Stellar int32 rational approximation".to_owned()
+                })?;
+            if recovered_n > 0
+                && recovered_d > 0
+                && recovered_n <= INT32_MAX
+                && recovered_d <= INT32_MAX
+            {
+                best_n = recovered_n;
+                best_d = recovered_d;
+            }
+        }
     }
 
     if best_n <= 0 || best_d <= 0 {
@@ -1489,7 +1521,10 @@ mod tests {
                 d: 10_000_000
             }
         );
-        assert!(stellar_price(parse_offer_value("2147483648", "price").unwrap()).is_err());
+        assert_eq!(
+            stellar_price(parse_offer_value("2147483648", "price").unwrap()).unwrap(),
+            Price { n: i32::MAX, d: 1 }
+        );
     }
 
     #[test]

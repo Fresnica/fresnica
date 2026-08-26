@@ -76,7 +76,7 @@ The resulting `n/d` is the transaction truth. A conforming implementation must u
 
 The original decimal may also be retained as user intent. If rationalization changes the value, review must expose enough information to make the effective encoded price clear; it must not display only the requested decimal while signing a materially different `n/d`.
 
-The current Rust reference matches exact/common cases such as `0.325 -> 13/40` but still has an implementation gap at signed-int32 approximation boundaries where semi-convergent recovery is possible. This gap is tracked in [`../tasks.md`](../tasks.md) and does not weaken the contract.
+The current Rust reference now follows this bounded behavior for exact/common cases such as `0.325 -> 13/40` and for signed-int32 recovery cases such as `2147483648 -> 2147483647/1`. Cross-language conformance vectors should preserve both classes of behavior.
 
 ### Liability arithmetic
 
