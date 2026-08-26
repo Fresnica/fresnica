@@ -1,11 +1,6 @@
 import Foundation
 
-/// Native-only protected-software signer orchestration for Fresnica on Apple platforms.
-///
-/// A native host or reviewed framework adapter may provide reviewed XDR, an encrypted signer
-/// envelope, signer public key, and an app passcode for an explicit fallback/enrollment action.
-/// WalletUnlockKey bytes remain inside this native service and are zeroed on a best-effort basis
-/// after the Rust SDK call.
+/// Native-only protected-software signer authorization for Fresnica on Apple platforms.
 public final class FresnicaSignerAuthorization {
     private let core: FresnicaSdkApiProtocol
     private let keyStore: FresnicaWalletUnlockKeyStore
@@ -18,16 +13,18 @@ public final class FresnicaSignerAuthorization {
         self.keyStore = keyStore
     }
 
-    public func canEnrollSystemAuth() -> Bool {
-        keyStore.canEnrollBiometry()
+    public func canEnrollSystemAuth() -> Bool { keyStore.canEnrollBiometry() }
+
+    public func hasSystemAuthDomain() throws -> Bool { try keyStore.hasDomain() }
+
+    /// One device-level biometric enrollment. No signer secret is involved in this operation.
+    public func initializeSystemAuth(reason: String) throws {
+        try keyStore.initializeDomain(reason: reason)
     }
 
-    public func isSystemAuthEnrolled(expectedSignerPublicKey: String) throws -> Bool {
-        try keyStore.isEnrolled(signerId: expectedSignerPublicKey)
-    }
-
-    /// Derives a verified key through the Fresnica SDK and immediately moves it into biometric Keychain.
-    public func enrollSystemAuth(
+    /// Passcode-authenticated signer registration. This wraps the verified key with the domain
+    /// public key and therefore does not trigger Face ID / Touch ID.
+    public func registerSignerSystemAuth(
         envelopeJson: String,
         appPasscode: String,
         expectedSignerPublicKey: String
@@ -38,18 +35,22 @@ public final class FresnicaSignerAuthorization {
             expectedSignerPublicKey: expectedSignerPublicKey
         )
         defer { wipe(&unlockKey) }
-
         guard unlockKey.count == FresnicaWalletUnlockKeyStore.unlockKeyLength else {
             throw AuthorizationError.invalidUnlockKeyLength
         }
-        try keyStore.enroll(
-            signerId: expectedSignerPublicKey,
-            unlockKey: unlockKey
-        )
+        try keyStore.enroll(signerId: expectedSignerPublicKey, unlockKey: unlockKey)
     }
 
-    /// Keychain access performs the real Face ID / Touch ID operation that releases the key.
-    /// Only signed XDR leaves this method.
+    public func isSignerSystemAuthEnrolled(expectedSignerPublicKey: String) throws -> Bool {
+        try keyStore.isEnrolled(signerId: expectedSignerPublicKey)
+    }
+
+    public func removeSignerSystemAuth(expectedSignerPublicKey: String) throws {
+        try keyStore.delete(signerId: expectedSignerPublicKey)
+    }
+
+    public func removeSystemAuthDomain() throws { try keyStore.deleteDomain() }
+
     public func signWithSystemAuth(
         envelopeJson: String,
         expectedSignerPublicKey: String,
@@ -57,12 +58,8 @@ public final class FresnicaSignerAuthorization {
         networkPassphrase: String,
         reason: String
     ) throws -> Data {
-        var unlockKey = try keyStore.load(
-            signerId: expectedSignerPublicKey,
-            reason: reason
-        )
+        var unlockKey = try keyStore.load(signerId: expectedSignerPublicKey, reason: reason)
         defer { wipe(&unlockKey) }
-
         guard unlockKey.count == FresnicaWalletUnlockKeyStore.unlockKeyLength else {
             throw AuthorizationError.invalidUnlockKeyLength
         }
@@ -75,7 +72,6 @@ public final class FresnicaSignerAuthorization {
         )
     }
 
-    /// App-passcode fallback. The derived WalletUnlockKey stays native and is never returned.
     public func signWithPasscode(
         envelopeJson: String,
         appPasscode: String,
@@ -89,7 +85,6 @@ public final class FresnicaSignerAuthorization {
             expectedSignerPublicKey: expectedSignerPublicKey
         )
         defer { wipe(&unlockKey) }
-
         guard unlockKey.count == FresnicaWalletUnlockKeyStore.unlockKeyLength else {
             throw AuthorizationError.invalidUnlockKeyLength
         }
@@ -100,10 +95,6 @@ public final class FresnicaSignerAuthorization {
             transactionXdr: transactionXdr,
             networkPassphrase: networkPassphrase
         )
-    }
-
-    public func removeSystemAuth(expectedSignerPublicKey: String) throws {
-        try keyStore.delete(signerId: expectedSignerPublicKey)
     }
 
     private func wipe(_ data: inout Data) {

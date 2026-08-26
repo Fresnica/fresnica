@@ -43,8 +43,8 @@ def test_tui_core_subtitle_reports_python_reference_without_bridge():
 def test_bridge_version(core_client):
     version = core_client.version()
     assert version["protocol_version"] == 2
-    assert version["client_api_version"] == 2
-    assert version["core_version"] == "0.1.0"
+    assert version["client_api_version"] == 3
+    assert version["core_version"] == "0.2.0"
 
 
 def test_bridge_parses_classic_and_contract_identity(core_client):

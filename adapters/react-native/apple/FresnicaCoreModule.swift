@@ -113,6 +113,28 @@ public final class FresnicaCoreModule: NSObject {
         }
     }
 
+    @objc(deriveMnemonicSigner:appPasscode:expectedSourceSignerPublicKey:index:resolver:rejecter:)
+    public func deriveMnemonicSigner(
+        _ sourceEnvelopeJson: String,
+        appPasscode: String,
+        expectedSourceSignerPublicKey: String,
+        index: NSNumber,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard let parsedIndex = uint32(index, field: "index", reject: reject) else { return }
+        do {
+            resolve(protectedSignerDictionary(try core.deriveMnemonicSigner(
+                sourceEnvelopeJson: sourceEnvelopeJson,
+                appPasscode: appPasscode,
+                expectedSourceSignerPublicKey: expectedSourceSignerPublicKey,
+                index: parsedIndex
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
     @objc(reprotect:currentPasscode:newPasscode:expectedSignerPublicKey:resolver:rejecter:)
     public func reprotect(
         _ envelopeJson: String,
@@ -231,45 +253,42 @@ public final class FresnicaCoreModule: NSObject {
 
     // MARK: - Native-only protected software signing
 
-    @objc(canEnrollSystemAuth:rejecter:)
-    public func canEnrollSystemAuth(
+    @objc(canUseSystemAuth:rejecter:)
+    public func canUseSystemAuth(
         _ resolve: @escaping FresnicaPromiseResolveBlock,
         rejecter reject: @escaping FresnicaPromiseRejectBlock
     ) {
         resolve(NSNumber(value: authorization.canEnrollSystemAuth()))
     }
 
-    @objc(hasSystemAuth:resolver:rejecter:)
-    public func hasSystemAuth(
-        _ expectedSignerPublicKey: String,
-        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+    @objc(hasSystemAuthDomain:rejecter:)
+    public func hasSystemAuthDomain(
+        _ resolve: @escaping FresnicaPromiseResolveBlock,
         rejecter reject: @escaping FresnicaPromiseRejectBlock
     ) {
         do {
-            resolve(NSNumber(value: try authorization.isSystemAuthEnrolled(
-                expectedSignerPublicKey: expectedSignerPublicKey
-            )))
+            resolve(NSNumber(value: try authorization.hasSystemAuthDomain()))
         } catch {
             rejectNativeError(error, with: reject)
         }
     }
 
-    @objc(removeSystemAuth:resolver:rejecter:)
-    public func removeSystemAuth(
-        _ expectedSignerPublicKey: String,
+    @objc(initializeSystemAuth:resolver:rejecter:)
+    public func initializeSystemAuth(
+        _ reason: String,
         resolver resolve: @escaping FresnicaPromiseResolveBlock,
         rejecter reject: @escaping FresnicaPromiseRejectBlock
     ) {
         do {
-            try authorization.removeSystemAuth(expectedSignerPublicKey: expectedSignerPublicKey)
+            try authorization.initializeSystemAuth(reason: reason)
             resolve(true)
         } catch {
             rejectNativeError(error, with: reject)
         }
     }
 
-    @objc(enrollSystemAuth:appPasscode:expectedSignerPublicKey:resolver:rejecter:)
-    public func enrollSystemAuth(
+    @objc(registerSignerSystemAuth:appPasscode:expectedSignerPublicKey:resolver:rejecter:)
+    public func registerSignerSystemAuth(
         _ envelopeJson: String,
         appPasscode: String,
         expectedSignerPublicKey: String,
@@ -277,11 +296,53 @@ public final class FresnicaCoreModule: NSObject {
         rejecter reject: @escaping FresnicaPromiseRejectBlock
     ) {
         do {
-            try authorization.enrollSystemAuth(
+            try authorization.registerSignerSystemAuth(
                 envelopeJson: envelopeJson,
                 appPasscode: appPasscode,
                 expectedSignerPublicKey: expectedSignerPublicKey
             )
+            resolve(true)
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(hasSignerSystemAuth:resolver:rejecter:)
+    public func hasSignerSystemAuth(
+        _ expectedSignerPublicKey: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            resolve(NSNumber(value: try authorization.isSignerSystemAuthEnrolled(
+                expectedSignerPublicKey: expectedSignerPublicKey
+            )))
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(removeSignerSystemAuth:resolver:rejecter:)
+    public func removeSignerSystemAuth(
+        _ expectedSignerPublicKey: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            try authorization.removeSignerSystemAuth(expectedSignerPublicKey: expectedSignerPublicKey)
+            resolve(true)
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(removeSystemAuthDomain:rejecter:)
+    public func removeSystemAuthDomain(
+        _ resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            try authorization.removeSystemAuthDomain()
             resolve(true)
         } catch {
             rejectNativeError(error, with: reject)
@@ -486,6 +547,10 @@ public final class FresnicaCoreModule: NSObject {
                 return ("invalid-unlock-key", "WalletUnlockKey has an invalid length")
             case .emptyAuthenticationReason:
                 return ("invalid-input", "authentication reason must not be empty")
+            case .systemAuthDomainMissing:
+                return ("system-auth-not-enrolled", "No Fresnica system-auth domain exists")
+            case .staleSignerRecord:
+                return ("system-auth-not-enrolled", "Signer system-auth registration belongs to a stale domain")
             case let .biometryUnavailable(detail):
                 return ("system-auth-unavailable", detail ?? "Biometric authentication is unavailable")
             case let .accessControlCreationFailed(detail):
@@ -503,8 +568,10 @@ public final class FresnicaCoreModule: NSObject {
                 default:
                     return ("system-auth-error", "Keychain operation failed (\(status))")
                 }
+            case let .crypto(detail):
+                return ("system-auth-error", detail ?? "System-auth cryptographic operation failed")
             case .invalidStoredValue:
-                return ("invalid-protected-data", "Stored WalletUnlockKey record is invalid")
+                return ("invalid-protected-data", "Stored system-auth record is invalid")
             @unknown default:
                 return ("system-auth-error", "Unknown system-auth Keychain error")
             }

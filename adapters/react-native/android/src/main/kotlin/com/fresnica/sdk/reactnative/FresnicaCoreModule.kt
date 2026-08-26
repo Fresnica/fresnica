@@ -127,6 +127,26 @@ class FresnicaCoreModule(
     }
 
     @ReactMethod
+    fun deriveMnemonicSigner(
+        sourceEnvelopeJson: String,
+        appPasscode: String,
+        expectedSourceSignerPublicKey: String,
+        index: Double,
+        promise: Promise,
+    ) {
+        val parsedIndex = uint32(index, "index", promise) ?: return
+        runCatching {
+            core.deriveMnemonicSigner(
+                sourceEnvelopeJson,
+                appPasscode,
+                expectedSourceSignerPublicKey,
+                parsedIndex,
+            )
+        }.onSuccess { promise.resolve(protectedSignerMap(it)) }
+            .onFailure { reject(promise, it) }
+    }
+
+    @ReactMethod
     fun reprotect(
         envelopeJson: String,
         currentPasscode: String,
@@ -222,7 +242,7 @@ class FresnicaCoreModule(
     // Native-only protected software signing -------------------------------------------------
 
     @ReactMethod
-    fun canEnrollSystemAuth(promise: Promise) {
+    fun canUseSystemAuth(promise: Promise) {
         val available =
             currentFragmentActivity() != null &&
                 BiometricManager.from(reactApplicationContext)
@@ -231,42 +251,27 @@ class FresnicaCoreModule(
     }
 
     @ReactMethod
-    fun hasSystemAuth(expectedSignerPublicKey: String, promise: Promise) {
-        runCatching {
-            authorization.isSystemAuthEnrolled(expectedSignerPublicKey)
-        }.onSuccess(promise::resolve).onFailure { reject(promise, it) }
+    fun hasSystemAuthDomain(promise: Promise) {
+        runCatching { authorization.hasSystemAuthDomain() }
+            .onSuccess(promise::resolve)
+            .onFailure { reject(promise, it) }
     }
 
     @ReactMethod
-    fun removeSystemAuth(expectedSignerPublicKey: String, promise: Promise) {
-        runCatching {
-            authorization.removeSystemAuth(expectedSignerPublicKey)
-        }.onSuccess { promise.resolve(true) }.onFailure { reject(promise, it) }
-    }
-
-    @ReactMethod
-    fun enrollSystemAuth(
-        envelopeJson: String,
-        appPasscode: String,
-        expectedSignerPublicKey: String,
-        promise: Promise,
-    ) {
+    fun initializeSystemAuth(reason: String, promise: Promise) {
         val activity = currentFragmentActivity()
         if (activity == null) {
-            promise.reject(ERROR_SYSTEM_AUTH_UNAVAILABLE, "A FragmentActivity is required for biometric enrollment")
+            promise.reject(ERROR_SYSTEM_AUTH_UNAVAILABLE, "A FragmentActivity is required for system authentication")
             return
         }
+        if (!requireNonBlank(reason, "reason", promise)) return
         if (!authenticationInProgress.compareAndSet(false, true)) {
             promise.reject(ERROR_AUTH_IN_PROGRESS, "Another Fresnica biometric operation is already active")
             return
         }
 
         val session = try {
-            authorization.beginSystemAuthEnrollment(
-                envelopeJson,
-                appPasscode,
-                expectedSignerPublicKey,
-            )
+            authorization.beginSystemAuthDomainEnrollment()
         } catch (error: Throwable) {
             authenticationInProgress.set(false)
             reject(promise, error)
@@ -281,14 +286,14 @@ class FresnicaCoreModule(
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                         try {
                             if (result.cryptoObject?.cipher !== session.cipher) {
-                                runCatching { authorization.cancelSystemAuthEnrollment(session) }
+                                runCatching { authorization.cancelSystemAuthDomainEnrollment(session) }
                                 promise.reject(
                                     ERROR_SYSTEM_AUTH_FAILED,
-                                    "BiometricPrompt did not authorize the Fresnica enrollment Cipher",
+                                    "BiometricPrompt did not authorize the Fresnica system-auth domain Cipher",
                                 )
                                 return
                             }
-                            authorization.finishSystemAuthEnrollment(session)
+                            authorization.finishSystemAuthDomainEnrollment(session)
                             promise.resolve(true)
                         } catch (error: Throwable) {
                             reject(promise, error)
@@ -299,22 +304,53 @@ class FresnicaCoreModule(
 
                     override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                         try {
-                            runCatching { authorization.cancelSystemAuthEnrollment(session) }
-                            promise.reject(
-                                biometricErrorCode(errorCode),
-                                errString.toString(),
-                            )
+                            runCatching { authorization.cancelSystemAuthDomainEnrollment(session) }
+                            promise.reject(biometricErrorCode(errorCode), errString.toString())
                         } finally {
                             authenticationInProgress.set(false)
                         }
                     }
                 },
             )
-            prompt.authenticate(
-                promptInfo("Enable biometric signing"),
-                BiometricPrompt.CryptoObject(session.cipher),
-            )
+            prompt.authenticate(promptInfo(reason), BiometricPrompt.CryptoObject(session.cipher))
         }
+    }
+
+    @ReactMethod
+    fun registerSignerSystemAuth(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        promise: Promise,
+    ) {
+        runCatching {
+            authorization.registerSignerSystemAuth(
+                envelopeJson,
+                appPasscode,
+                expectedSignerPublicKey,
+            )
+        }.onSuccess { promise.resolve(true) }.onFailure { reject(promise, it) }
+    }
+
+    @ReactMethod
+    fun hasSignerSystemAuth(expectedSignerPublicKey: String, promise: Promise) {
+        runCatching { authorization.isSignerSystemAuthEnrolled(expectedSignerPublicKey) }
+            .onSuccess(promise::resolve)
+            .onFailure { reject(promise, it) }
+    }
+
+    @ReactMethod
+    fun removeSignerSystemAuth(expectedSignerPublicKey: String, promise: Promise) {
+        runCatching { authorization.removeSignerSystemAuth(expectedSignerPublicKey) }
+            .onSuccess { promise.resolve(true) }
+            .onFailure { reject(promise, it) }
+    }
+
+    @ReactMethod
+    fun removeSystemAuthDomain(promise: Promise) {
+        runCatching { authorization.removeSystemAuthDomain() }
+            .onSuccess { promise.resolve(true) }
+            .onFailure { reject(promise, it) }
     }
 
     @ReactMethod
@@ -539,7 +575,10 @@ class FresnicaCoreModule(
             )
             is GeneralSecurityException -> {
                 val message = error.message ?: "Android system authentication failed"
-                val code = if (message.contains("No system-auth", ignoreCase = true)) {
+                val code = if (
+                    message.contains("system-auth domain", ignoreCase = true) ||
+                    message.contains("wrapped WalletUnlockKey", ignoreCase = true)
+                ) {
                     ERROR_SYSTEM_AUTH_NOT_ENROLLED
                 } else {
                     ERROR_SYSTEM_AUTH_FAILED

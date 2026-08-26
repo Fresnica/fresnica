@@ -31,6 +31,13 @@ RCT_EXTERN_METHOD(generateMnemonic:(NSString *)language
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(deriveMnemonicSigner:(NSString *)sourceEnvelopeJson
+                  appPasscode:(NSString *)appPasscode
+                  expectedSourceSignerPublicKey:(NSString *)expectedSourceSignerPublicKey
+                  index:(nonnull NSNumber *)index
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(reprotect:(NSString *)envelopeJson
                   currentPasscode:(NSString *)currentPasscode
                   newPasscode:(NSString *)newPasscode
@@ -56,21 +63,31 @@ RCT_EXTERN_METHOD(applyEd25519Signature:(NSString *)transactionXdrBase64
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(canEnrollSystemAuth:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(canUseSystemAuth:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(hasSystemAuth:(NSString *)expectedSignerPublicKey
+RCT_EXTERN_METHOD(hasSystemAuthDomain:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(initializeSystemAuth:(NSString *)reason
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(removeSystemAuth:(NSString *)expectedSignerPublicKey
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-
-RCT_EXTERN_METHOD(enrollSystemAuth:(NSString *)envelopeJson
+RCT_EXTERN_METHOD(registerSignerSystemAuth:(NSString *)envelopeJson
                   appPasscode:(NSString *)appPasscode
                   expectedSignerPublicKey:(NSString *)expectedSignerPublicKey
                   resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(hasSignerSystemAuth:(NSString *)expectedSignerPublicKey
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(removeSignerSystemAuth:(NSString *)expectedSignerPublicKey
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(removeSystemAuthDomain:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(signWithSystemAuth:(NSString *)envelopeJson

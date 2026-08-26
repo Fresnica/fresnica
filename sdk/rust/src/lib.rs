@@ -16,7 +16,7 @@ use serde_json::Value;
 use zeroize::{Zeroize, Zeroizing};
 
 /// Version of the platform-neutral Fresnica SDK semantic contract.
-pub const SDK_API_VERSION: u64 = 2;
+pub const SDK_API_VERSION: u64 = 3;
 
 /// Stateless platform-neutral entry point.
 ///
@@ -133,6 +133,27 @@ impl FresnicaSdk {
             language: generated.language,
             index: sdk_u32(generated.index, "index")?,
         })
+    }
+
+    pub fn derive_mnemonic_signer(
+        &self,
+        source_envelope_json: String,
+        passcode: String,
+        expected_source_signer_public_key: String,
+        index: u32,
+    ) -> Result<SdkProtectedSoftwareSigner, SdkError> {
+        let envelope = parse_envelope(&source_envelope_json)?;
+        let passcode = Zeroizing::new(passcode);
+        let protected = self
+            .core()
+            .derive_mnemonic_signer(
+                &envelope,
+                passcode.as_str(),
+                &expected_source_signer_public_key,
+                sdk_usize(index, "index")?,
+            )
+            .map_err(SdkError::from)?;
+        sdk_protected_signer(protected)
     }
 
     pub fn reprotect(
@@ -657,6 +678,40 @@ mod tests {
             )
             .unwrap();
         assert_ne!(new_key, unlock_key);
+    }
+
+    #[test]
+    fn derives_mnemonic_signer_from_existing_protected_source() {
+        let sdk = FresnicaSdk::new();
+        let generated = sdk
+            .generate_mnemonic(
+                "english".to_owned(),
+                128,
+                String::new(),
+                0,
+                "passcode".to_owned(),
+            )
+            .unwrap();
+        let source_public_key = generated.signer.signer_public_key.clone();
+        let derived = sdk
+            .derive_mnemonic_signer(
+                generated.signer.envelope_json,
+                "passcode".to_owned(),
+                source_public_key.clone(),
+                1,
+            )
+            .unwrap();
+        assert_ne!(derived.signer_public_key, source_public_key);
+
+        let revealed = sdk
+            .reveal(
+                derived.envelope_json,
+                "passcode".to_owned(),
+                derived.signer_public_key,
+            )
+            .unwrap();
+        assert_eq!(revealed.kind, SdkSigningMaterialKind::Mnemonic);
+        assert_eq!(revealed.index, Some(1));
     }
 
     #[test]

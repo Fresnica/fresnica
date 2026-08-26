@@ -10,39 +10,49 @@ import android.util.Base64;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.MessageDigest;
+import java.security.PrivateKey;
 import java.security.ProviderException;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.UUID;
 
 import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
 
 /**
- * Native-only storage for one Fresnica WalletUnlockKey per software signer.
+ * Device-level system-auth protection domain for Fresnica WalletUnlockKeys.
  *
- * <p>The 32-byte unlock key is encrypted with a per-enrollment AndroidKeyStore AES-GCM key whose
- * use requires strong biometric authentication for every cryptographic operation. The encrypted
- * bytes and IV are stored in private SharedPreferences; the Keystore key is non-exportable.
- *
- * <p>This class deliberately does not invoke BiometricPrompt itself. Callers wrap the Cipher from
- * {@link EnrollmentSession#getCipher()} or {@link UnlockSession#getCipher()} in a
- * BiometricPrompt.CryptoObject, authenticate, and only then call the corresponding finish method.
- * This keeps the unlock key in native memory and prevents a successful biometric probe from being
- * confused with authorization of the actual key-decryption operation.
+ * <p>One auth-bound AndroidKeyStore RSA private key protects all local software signers on this
+ * installation. The public key can wrap a newly derived per-signer WalletUnlockKey without user
+ * authentication. The private key requires strong biometric authentication for every unwrap.
+ * Each signer still has an independent Core envelope and WalletUnlockKey; only the OS protection
+ * domain is shared.
  */
 public final class WalletUnlockKeyStore {
     public static final int UNLOCK_KEY_BYTES = 32;
 
     private static final String KEYSTORE = "AndroidKeyStore";
-    private static final String PREFS = "fresnica_wallet_unlock_keys_v1";
-    private static final String ALIAS_PREFIX = "fresnica.unlock.";
-    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
-    private static final int AES_KEY_BITS = 256;
-    private static final int GCM_TAG_BITS = 128;
+    private static final String PREFS = "fresnica_system_auth_domain_v2";
+    private static final String ACTIVE_ALIAS = "active_alias";
+    private static final String SIGNER_PREFIX = "signer.";
+    private static final String ALIAS_PREFIX = "fresnica.systemauth.";
+    private static final String TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
+    private static final int RSA_KEY_BITS = 2048;
+    private static final int CHALLENGE_BYTES = 32;
+    private static final OAEPParameterSpec OAEP_PARAMETERS = new OAEPParameterSpec(
+            "SHA-256",
+            "MGF1",
+            MGF1ParameterSpec.SHA1,
+            PSource.PSpecified.DEFAULT);
 
     private final SharedPreferences preferences;
 
@@ -51,79 +61,101 @@ public final class WalletUnlockKeyStore {
         preferences = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** Begins a recoverable enrollment without deleting any existing enrollment. */
-    public EnrollmentSession beginEnrollment(String signerId)
+    /** Creates a pending device protection domain and an authenticated proof operation. */
+    public DomainEnrollmentSession beginDomainEnrollment()
             throws GeneralSecurityException, IOException {
-        String digest = signerDigest(signerId);
-        String alias = ALIAS_PREFIX + digest + "." + UUID.randomUUID();
-        SecretKey key = generateUserAuthKey(alias);
+        String alias = ALIAS_PREFIX + UUID.randomUUID();
+        generateUserAuthKeyPair(alias);
+        byte[] challenge = new byte[CHALLENGE_BYTES];
+        new SecureRandom().nextBytes(challenge);
         try {
-            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, key);
-            return new EnrollmentSession(signerId, alias, cipher);
-        } catch (GeneralSecurityException error) {
+            byte[] ciphertext = encryptWithPublicKey(alias, challenge);
+            Cipher cipher = decryptCipher(alias);
+            return new DomainEnrollmentSession(alias, cipher, ciphertext, challenge);
+        } catch (GeneralSecurityException | IOException error) {
+            Arrays.fill(challenge, (byte) 0);
             deleteAlias(alias);
             throw error;
         }
     }
 
-    /**
-     * Completes enrollment after BiometricPrompt authenticated the session Cipher.
-     *
-     * <p>The previous enrollment, if any, is deleted only after the new encrypted record is
-     * durably committed. If persistence fails, the new pending Keystore key is removed and the
-     * previous enrollment remains usable.
-     */
-    public void finishEnrollment(EnrollmentSession session, byte[] unlockKey)
+    /** Commits the pending domain only after BiometricPrompt authorized the private-key Cipher. */
+    public void finishDomainEnrollment(DomainEnrollmentSession session)
+            throws GeneralSecurityException, IOException {
+        byte[] clear = null;
+        try {
+            clear = session.cipher.doFinal(session.ciphertext);
+            if (!MessageDigest.isEqual(clear, session.challenge)) {
+                throw new GeneralSecurityException("System-auth domain challenge verification failed");
+            }
+
+            String previousAlias = activeAlias();
+            SharedPreferences.Editor editor = preferences.edit().putString(ACTIVE_ALIAS, session.alias);
+            for (String key : preferences.getAll().keySet()) {
+                if (key.startsWith(SIGNER_PREFIX)) {
+                    editor.remove(key);
+                }
+            }
+            if (!editor.commit()) {
+                deleteAlias(session.alias);
+                throw new IOException("Unable to persist Fresnica system-auth domain");
+            }
+            if (previousAlias != null && !previousAlias.equals(session.alias)) {
+                deleteAlias(previousAlias);
+            }
+        } finally {
+            if (clear != null) Arrays.fill(clear, (byte) 0);
+            session.clear();
+        }
+    }
+
+    public void cancelDomainEnrollment(DomainEnrollmentSession session)
+            throws GeneralSecurityException, IOException {
+        try {
+            deleteAlias(session.alias);
+        } finally {
+            session.clear();
+        }
+    }
+
+    /** Returns whether the device-level protection domain is currently usable. */
+    public boolean hasDomain() {
+        try {
+            String alias = activeAlias();
+            return alias != null && keyStore().containsAlias(alias);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /** Wraps/replaces one signer unlock key without requiring biometric authentication. */
+    public void enrollSigner(String signerId, byte[] unlockKey)
             throws GeneralSecurityException, IOException {
         if (unlockKey == null || unlockKey.length != UNLOCK_KEY_BYTES) {
             throw new GeneralSecurityException("WalletUnlockKey must be exactly 32 bytes");
         }
-
-        byte[] ciphertext = session.cipher.doFinal(unlockKey);
-        byte[] iv = session.cipher.getIV();
-        if (iv == null || iv.length == 0) {
-            deleteAlias(session.alias);
-            throw new GeneralSecurityException("AndroidKeyStore did not provide an AES-GCM IV");
+        String alias = requireActiveAlias();
+        byte[] ciphertext = encryptWithPublicKey(alias, unlockKey);
+        StoredRecord record = new StoredRecord(alias, ciphertext);
+        if (!preferences.edit().putString(recordKey(signerId), record.encode()).commit()) {
+            Arrays.fill(ciphertext, (byte) 0);
+            throw new IOException("Unable to persist wrapped Fresnica WalletUnlockKey");
         }
-
-        String recordKey = recordKey(session.signerId);
-        StoredRecord previous = decodeRecord(preferences.getString(recordKey, null));
-        StoredRecord replacement = new StoredRecord(session.alias, iv, ciphertext);
-
-        if (!preferences.edit().putString(recordKey, replacement.encode()).commit()) {
-            deleteAlias(session.alias);
-            throw new IOException("Unable to persist Fresnica WalletUnlockKey metadata");
-        }
-
-        if (previous != null && !previous.alias.equals(session.alias)) {
-            deleteAlias(previous.alias);
-        }
+        Arrays.fill(ciphertext, (byte) 0);
     }
 
-    /** Deletes a pending enrollment after cancellation or a failed biometric flow. */
-    public void cancelEnrollment(EnrollmentSession session) throws GeneralSecurityException, IOException {
-        deleteAlias(session.alias);
-    }
-
-    /** Begins one authenticated decrypt operation for an enrolled signer. */
+    /** Begins one biometric-gated private-key unwrap for an enrolled signer. */
     public UnlockSession beginUnlock(String signerId)
             throws GeneralSecurityException, IOException {
+        String activeAlias = requireActiveAlias();
         StoredRecord record = requireRecord(signerId);
-        SecretKey key = loadKey(record.alias);
-        if (key == null) {
-            throw new GeneralSecurityException("WalletUnlockKey Keystore key is missing");
+        if (!activeAlias.equals(record.alias)) {
+            throw new GeneralSecurityException("Stored WalletUnlockKey belongs to a stale system-auth domain");
         }
-
-        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, record.iv));
-        return new UnlockSession(signerId, record.alias, cipher, record.ciphertext);
+        return new UnlockSession(signerId, decryptCipher(activeAlias), record.ciphertext);
     }
 
-    /**
-     * Returns the 32-byte unlock key only after BiometricPrompt authenticated the session Cipher.
-     * The caller must keep the result native-only and zero it immediately after the SDK call.
-     */
+    /** Returns the 32-byte key after the authenticated private-key operation succeeds. */
     public byte[] finishUnlock(UnlockSession session) throws GeneralSecurityException {
         byte[] clear = session.cipher.doFinal(session.ciphertext);
         if (clear.length != UNLOCK_KEY_BYTES) {
@@ -133,85 +165,123 @@ public final class WalletUnlockKeyStore {
         return clear;
     }
 
-    /** Best-effort enrollment status for UI metadata; actual use is verified by beginUnlock. */
     public boolean isEnrolled(String signerId) {
         try {
+            String alias = activeAlias();
+            if (alias == null || !keyStore().containsAlias(alias)) return false;
             StoredRecord record = decodeRecord(preferences.getString(recordKey(signerId), null));
-            return record != null && keyStore().containsAlias(record.alias);
+            return record != null && alias.equals(record.alias);
         } catch (Exception ignored) {
             return false;
         }
     }
 
-    /** Removes encrypted metadata and the corresponding AndroidKeyStore key. */
-    public void delete(String signerId) throws GeneralSecurityException, IOException {
-        String key = recordKey(signerId);
-        StoredRecord record = decodeRecord(preferences.getString(key, null));
-        if (!preferences.edit().remove(key).commit()) {
-            throw new IOException("Unable to remove Fresnica WalletUnlockKey metadata");
-        }
-        if (record != null) {
-            deleteAlias(record.alias);
+    public void deleteSigner(String signerId) throws GeneralSecurityException, IOException {
+        if (!preferences.edit().remove(recordKey(signerId)).commit()) {
+            throw new IOException("Unable to remove wrapped Fresnica WalletUnlockKey");
         }
     }
 
-    private SecretKey generateUserAuthKey(String alias) throws GeneralSecurityException, IOException {
+    /** Deletes the device domain and all per-signer wrapped keys. */
+    public void deleteDomain() throws GeneralSecurityException, IOException {
+        String alias = activeAlias();
+        if (!preferences.edit().clear().commit()) {
+            throw new IOException("Unable to remove Fresnica system-auth domain metadata");
+        }
+        if (alias != null) deleteAlias(alias);
+    }
+
+    private void generateUserAuthKeyPair(String alias) throws GeneralSecurityException {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                return generateKey(alias, true);
+                generateKeyPair(alias, true);
+                return;
             } catch (ProviderException strongBoxUnavailable) {
-                // StrongBox is an optimization, not a requirement. AndroidKeyStore still keeps
-                // the fallback key non-exportable and may back it with the device TEE.
+                deleteAliasQuietly(alias);
             }
         }
-        return generateKey(alias, false);
+        generateKeyPair(alias, false);
     }
 
-    private SecretKey generateKey(String alias, boolean strongBox)
-            throws GeneralSecurityException {
-        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
+    private void generateKeyPair(String alias, boolean strongBox) throws GeneralSecurityException {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, KEYSTORE);
         KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(
                 alias,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setRandomizedEncryptionRequired(true)
-                .setKeySize(AES_KEY_BITS)
+                KeyProperties.PURPOSE_DECRYPT)
+                .setKeySize(RSA_KEY_BITS)
+                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA1)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
                 .setUserAuthenticationRequired(true)
                 .setInvalidatedByBiometricEnrollment(true);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             builder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG);
         } else {
-            // On API 23-29, -1 means biometric authentication is required for every use.
             builder.setUserAuthenticationValidityDurationSeconds(-1);
         }
-
         if (strongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             builder.setIsStrongBoxBacked(true);
         }
+        generator.initialize(builder.build());
+        generator.generateKeyPair();
+    }
 
-        generator.init(builder.build());
-        return generator.generateKey();
+    private byte[] encryptWithPublicKey(String alias, byte[] clear)
+            throws GeneralSecurityException, IOException {
+        KeyStore store = keyStore();
+        java.security.cert.Certificate certificate = store.getCertificate(alias);
+        if (certificate == null) {
+            throw new GeneralSecurityException("System-auth domain public key is missing");
+        }
+        byte[] encoded = certificate.getPublicKey().getEncoded();
+        PublicKey publicKey = KeyFactory.getInstance("RSA")
+                .generatePublic(new X509EncodedKeySpec(encoded));
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey, OAEP_PARAMETERS);
+        return cipher.doFinal(clear);
+    }
+
+    private Cipher decryptCipher(String alias) throws GeneralSecurityException, IOException {
+        PrivateKey privateKey = (PrivateKey) keyStore().getKey(alias, null);
+        if (privateKey == null) {
+            throw new GeneralSecurityException("System-auth domain private key is missing");
+        }
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        cipher.init(Cipher.DECRYPT_MODE, privateKey, OAEP_PARAMETERS);
+        return cipher;
+    }
+
+    private String requireActiveAlias() throws GeneralSecurityException, IOException {
+        String alias = activeAlias();
+        if (alias == null || !keyStore().containsAlias(alias)) {
+            throw new GeneralSecurityException("No Fresnica system-auth domain exists");
+        }
+        return alias;
+    }
+
+    private String activeAlias() {
+        String alias = preferences.getString(ACTIVE_ALIAS, null);
+        return alias == null || alias.trim().isEmpty() ? null : alias;
     }
 
     private StoredRecord requireRecord(String signerId) throws GeneralSecurityException {
         StoredRecord record = decodeRecord(preferences.getString(recordKey(signerId), null));
         if (record == null) {
-            throw new GeneralSecurityException("No system-auth WalletUnlockKey enrollment exists");
+            throw new GeneralSecurityException("No wrapped WalletUnlockKey exists for this signer");
         }
         return record;
     }
 
-    private SecretKey loadKey(String alias) throws GeneralSecurityException, IOException {
-        return (SecretKey) keyStore().getKey(alias, null);
+    private void deleteAliasQuietly(String alias) {
+        try {
+            deleteAlias(alias);
+        } catch (Exception ignored) {
+        }
     }
 
     private void deleteAlias(String alias) throws GeneralSecurityException, IOException {
         KeyStore store = keyStore();
-        if (store.containsAlias(alias)) {
-            store.deleteEntry(alias);
-        }
+        if (store.containsAlias(alias)) store.deleteEntry(alias);
     }
 
     private static KeyStore keyStore() throws GeneralSecurityException, IOException {
@@ -221,96 +291,81 @@ public final class WalletUnlockKeyStore {
     }
 
     private static String recordKey(String signerId) throws GeneralSecurityException {
-        return "signer." + signerDigest(signerId);
+        return SIGNER_PREFIX + signerDigest(signerId);
     }
 
     private static String signerDigest(String signerId) throws GeneralSecurityException {
         if (signerId == null || signerId.trim().isEmpty()) {
             throw new GeneralSecurityException("signerId must not be empty");
         }
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(signerId.getBytes(StandardCharsets.UTF_8));
+        byte[] hash = MessageDigest.getInstance("SHA-256")
+                .digest(signerId.getBytes(StandardCharsets.UTF_8));
         StringBuilder text = new StringBuilder(hash.length * 2);
-        for (byte value : hash) {
-            text.append(String.format("%02x", value & 0xff));
-        }
+        for (byte value : hash) text.append(String.format("%02x", value & 0xff));
         Arrays.fill(hash, (byte) 0);
         return text.toString();
     }
 
     private static StoredRecord decodeRecord(String encoded) {
-        if (encoded == null) {
-            return null;
-        }
+        if (encoded == null) return null;
         String[] fields = encoded.split("\\|", -1);
-        if (fields.length != 3 || fields[0].isEmpty()) {
-            return null;
-        }
+        if (fields.length != 2 || fields[0].isEmpty()) return null;
         try {
-            return new StoredRecord(
-                    fields[0],
-                    Base64.decode(fields[1], Base64.NO_WRAP),
-                    Base64.decode(fields[2], Base64.NO_WRAP));
+            return new StoredRecord(fields[0], Base64.decode(fields[1], Base64.NO_WRAP));
         } catch (IllegalArgumentException ignored) {
             return null;
         }
     }
 
-    public static final class EnrollmentSession {
-        private final String signerId;
+    public static final class DomainEnrollmentSession {
         private final String alias;
         private final Cipher cipher;
+        private byte[] ciphertext;
+        private byte[] challenge;
 
-        private EnrollmentSession(String signerId, String alias, Cipher cipher) {
-            this.signerId = signerId;
+        private DomainEnrollmentSession(String alias, Cipher cipher, byte[] ciphertext, byte[] challenge) {
             this.alias = alias;
             this.cipher = cipher;
+            this.ciphertext = ciphertext;
+            this.challenge = challenge;
         }
 
-        public Cipher getCipher() {
-            return cipher;
+        public Cipher getCipher() { return cipher; }
+
+        private void clear() {
+            Arrays.fill(ciphertext, (byte) 0);
+            Arrays.fill(challenge, (byte) 0);
+            ciphertext = new byte[0];
+            challenge = new byte[0];
         }
     }
 
     public static final class UnlockSession {
         private final String signerId;
-        private final String alias;
         private final Cipher cipher;
         private final byte[] ciphertext;
 
-        private UnlockSession(String signerId, String alias, Cipher cipher, byte[] ciphertext) {
+        private UnlockSession(String signerId, Cipher cipher, byte[] ciphertext) {
             this.signerId = signerId;
-            this.alias = alias;
             this.cipher = cipher;
             this.ciphertext = ciphertext;
         }
 
-        public Cipher getCipher() {
-            return cipher;
-        }
-
-        public String getSignerId() {
-            return signerId;
-        }
+        public Cipher getCipher() { return cipher; }
+        public String getSignerId() { return signerId; }
     }
 
     private static final class StoredRecord {
         private final String alias;
-        private final byte[] iv;
         private final byte[] ciphertext;
 
-        private StoredRecord(String alias, byte[] iv, byte[] ciphertext) {
+        private StoredRecord(String alias, byte[] ciphertext) {
             this.alias = alias;
-            this.iv = iv;
             this.ciphertext = ciphertext;
         }
 
         private String encode() {
-            return alias
-                    + "|"
-                    + Base64.encodeToString(iv, Base64.NO_WRAP)
-                    + "|"
-                    + Base64.encodeToString(ciphertext, Base64.NO_WRAP);
+            return alias + "|" + Base64.encodeToString(ciphertext, Base64.NO_WRAP);
         }
     }
 }
