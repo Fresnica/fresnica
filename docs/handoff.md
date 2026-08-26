@@ -267,6 +267,8 @@ The Phase 5 reference-client path includes SEP-1 discovery, SEP-10 Classic-accou
 
 A reusable Rust application layer now lives at `clients/rust-client` (`fresnica-client`). It is deliberately above the universal SDK and below terminal presentation. The first extracted surface owns the existing Rust engineering-client wallet storage/lifecycle, contacts, Horizon transport, and account/balance/history services. It does **not** become a new crypto authority: protected signer semantics still route through `fresnica-sdk`, while application persistence/network orchestration remain client-layer concerns.
 
+Mobile should mirror this same application-layer shape rather than inventing a separate product architecture: React Native screens/state -> Mobile application services -> Realm/network/platform adapters + Fresnica Native SDK. Reuse the service responsibilities and wallet semantics where they are common, but do not require Mobile to link the concrete `fresnica-client` Rust implementation; persistence technology, platform lifecycle and product orchestration remain application-owned.
+
 The first native Rust TUI slice lives at `clients/rust-tui`. It consumes `fresnica-client` rather than importing CLI command handlers. The initial scope is intentionally narrow:
 
 - selected wallet identity and watch-only/local-signer capability;
