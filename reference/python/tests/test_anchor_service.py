@@ -5,15 +5,17 @@ from stellar_sdk import Keypair, TransactionEnvelope
 from stellar_sdk.sep.stellar_web_authentication import build_challenge_transaction
 
 from fresnica.anchor_service import AnchorCapabilities, AnchorError, AnchorService
+from fresnica.errors import NetworkError
 from fresnica.models import Asset
 from fresnica.network import get_network
 from fresnica.wallet import Wallet
 
 
 class Response:
-    def __init__(self, body="{}", *, json_body=None):
+    def __init__(self, body="{}", *, json_body=None, status_code=200):
         self.content = body.encode("utf-8")
         self._json = json_body
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
@@ -29,7 +31,8 @@ class Session:
         self.responses = list(responses)
         self.urls = []
 
-    def get(self, url, timeout):
+    def get(self, url, timeout, allow_redirects=True):
+        assert allow_redirects is False
         self.urls.append((url, timeout))
         return self.responses.pop(0)
 
@@ -89,6 +92,65 @@ issuer = "{other}"
     assert len(session.urls) == 1
 
 
+def test_anchor_discovery_requires_exact_case_and_issuer_identity():
+    issuer = Keypair.random().public_key
+    for currency in (
+        f'''[[CURRENCIES]]
+code = "usd"
+issuer = "{issuer}"
+''',
+        '''[[CURRENCIES]]
+code = "USD"
+''',
+    ):
+        toml = f'''TRANSFER_SERVER = "https://anchor.example/sep6"
+{currency}'''
+        session = Session([Response(toml)])
+        capabilities = AnchorService(session=session).discover(
+            Asset("USD", issuer),
+            "anchor.example",
+        )
+        assert capabilities.sep6_url is None
+        assert capabilities.warnings == ("stellar.toml does not list this exact asset",)
+        assert len(session.urls) == 1
+
+
+def test_anchor_info_keys_are_case_sensitive():
+    issuer = Keypair.random().public_key
+    toml = f'''TRANSFER_SERVER = "https://anchor.example/sep6"
+[[CURRENCIES]]
+code = "USD"
+issuer = "{issuer}"
+'''
+    session = Session(
+        [
+            Response(toml),
+            Response(
+                "{}",
+                json_body={
+                    "deposit": {"usd": {"enabled": True}},
+                    "withdraw": {"usd": {"enabled": True}},
+                },
+            ),
+        ]
+    )
+    capabilities = AnchorService(session=session).discover(
+        Asset("USD", issuer),
+        "anchor.example",
+    )
+    assert capabilities.sep6_deposit is False
+    assert capabilities.sep6_withdraw is False
+
+
+def test_anchor_discovery_rejects_http_redirects():
+    session = Session([Response(status_code=302)])
+    with pytest.raises(NetworkError, match="redirects are not allowed"):
+        AnchorService(session=session).discover(
+            Asset("USD", Keypair.random().public_key),
+            "anchor.example",
+        )
+
+
 class Sep24Session:
     def __init__(self, challenge_xdr, client_public_key, network_passphrase):
         self.challenge_xdr = challenge_xdr
@@ -96,11 +158,21 @@ class Sep24Session:
         self.network_passphrase = network_passphrase
         self.calls = []
 
-    def get(self, url, params=None, timeout=None):
+    def get(self, url, params=None, timeout=None, allow_redirects=True):
+        assert allow_redirects is False
         self.calls.append(("GET", url, params))
         return Response(json_body={"transaction": self.challenge_xdr})
 
-    def post(self, url, data=None, json=None, headers=None, timeout=None):
+    def post(
+        self,
+        url,
+        data=None,
+        json=None,
+        headers=None,
+        timeout=None,
+        allow_redirects=True,
+    ):
+        assert allow_redirects is False
         self.calls.append(("POST", url, data, json, headers))
         if url.endswith("/auth"):
             signed = TransactionEnvelope.from_xdr(
@@ -199,7 +271,15 @@ class Sep6Session:
         self.payload = payload
         self.calls = []
 
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(
+        self,
+        url,
+        params=None,
+        headers=None,
+        timeout=None,
+        allow_redirects=True,
+    ):
+        assert allow_redirects is False
         self.calls.append((url, params, headers, timeout))
         return Response(json_body=self.payload)
 

@@ -222,7 +222,9 @@ class AnchorService:
                 endpoint,
                 params={"account": wallet.address()},
                 timeout=self.timeout,
+                allow_redirects=False,
             )
+            _reject_redirect(response, endpoint)
             response.raise_for_status()
             challenge_payload = response.json()
         except (requests.RequestException, ValueError) as exc:
@@ -260,7 +262,8 @@ class AnchorService:
     def _stellar_toml(self, domain: str) -> dict:
         url = f"https://{domain}/.well-known/stellar.toml"
         try:
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, timeout=self.timeout, allow_redirects=False)
+            _reject_redirect(response, url)
             response.raise_for_status()
         except requests.RequestException as exc:
             raise NetworkError(f"Unable to load stellar.toml from {domain}") from exc
@@ -274,7 +277,8 @@ class AnchorService:
 
     def _json(self, url: str) -> dict:
         try:
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.session.get(url, timeout=self.timeout, allow_redirects=False)
+            _reject_redirect(response, url)
             response.raise_for_status()
             value = response.json()
         except (requests.RequestException, ValueError) as exc:
@@ -285,10 +289,15 @@ class AnchorService:
 
     def _get_json(self, url: str, *, params=None, headers=None, allow_403: bool = False) -> dict:
         try:
-            kwargs = {"params": params, "timeout": self.timeout}
+            kwargs = {
+                "params": params,
+                "timeout": self.timeout,
+                "allow_redirects": False,
+            }
             if headers:
                 kwargs["headers"] = headers
             response = self.session.get(url, **kwargs)
+            _reject_redirect(response, url)
             try:
                 value = response.json()
             except ValueError:
@@ -310,7 +319,9 @@ class AnchorService:
                 json=json_body,
                 headers=headers,
                 timeout=self.timeout,
+                allow_redirects=False,
             )
+            _reject_redirect(response, url)
             response.raise_for_status()
             value = response.json()
         except (requests.RequestException, ValueError) as exc:
@@ -337,6 +348,12 @@ def _endpoint(value) -> str | None:
     return text
 
 
+def _reject_redirect(response, url: str) -> None:
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and 300 <= status < 400:
+        raise NetworkError(f"Anchor endpoint {url} returned HTTP {status}; redirects are not allowed")
+
+
 def _url_host(value: str) -> str:
     parsed = urlparse(value)
     if not parsed.hostname:
@@ -355,10 +372,10 @@ def _currency_matches(toml: dict, asset: Asset) -> bool:
     for item in currencies:
         if not isinstance(item, dict):
             continue
-        if str(item.get("code", "")).upper() != asset.code.upper():
+        if item.get("code") != asset.code:
             continue
         issuer = item.get("issuer")
-        if issuer is None or str(issuer) == asset.issuer:
+        if issuer == asset.issuer:
             return True
     return False
 
@@ -367,8 +384,6 @@ def _asset_info(section, code: str) -> dict | None:
     if not isinstance(section, dict):
         return None
     value = section.get(code)
-    if not isinstance(value, dict):
-        value = section.get(code.upper()) or section.get(code.lower())
     return dict(value) if isinstance(value, dict) else None
 
 

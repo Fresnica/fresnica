@@ -163,7 +163,7 @@ The common Classic Anchor Capability contract includes:
 - reviewed withdrawal payment handoff;
 - common SEP-12 customer status and scalar/binary updates.
 
-The current Rust Anchor extraction moves protocol/transport semantics into `fresnica-client`; CLI remains product/prompt/rendering orchestration. Exact-case asset matching, redirect-chain hardening and delegated/multisig SEP-10 remain known reference conformance gaps; do not describe the Rust reference as fully conformant on those points yet.
+The current Rust Anchor extraction moves protocol/transport semantics into `fresnica-client`; CLI remains product/prompt/rendering orchestration. Rust and RefPython now require exact-case `code + issuer` asset identity and reject automatic Anchor redirects. Delegated/multisig SEP-10 remains a known reference conformance gap; do not describe the direct-Classic reference path as general ledger-authorization support yet.
 
 Still demand-driven/deferred:
 

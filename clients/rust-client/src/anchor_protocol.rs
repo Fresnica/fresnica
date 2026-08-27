@@ -458,12 +458,15 @@ pub fn start_anchor_sep24_transfer(
     let request = ureq::post(&endpoint)
         .header("Authorization", authorization.as_str())
         .config()
+        .https_only(true)
+        .max_redirects(0)
         .http_status_as_error(false)
         .build();
     let mut response = request
         .send(form)
         .map_err(|error| format!("Unable to call SEP-24 endpoint {endpoint}: {error}"))?;
     let status = response.status().as_u16();
+    reject_anchor_redirect(status, &endpoint)?;
     let value = response
         .body_mut()
         .with_config()
@@ -543,12 +546,18 @@ pub fn start_anchor_sep6_transfer(
     if let Some(authorization) = authorization.as_ref() {
         request = request.header("Authorization", authorization.as_str());
     }
-    let request = request.config().http_status_as_error(false).build();
     let endpoint = endpoint_label(&url);
+    let request = request
+        .config()
+        .https_only(true)
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build();
     let mut response = request
         .call()
         .map_err(|error| format!("Unable to call SEP-6 endpoint {endpoint}: {error}"))?;
     let status = response.status().as_u16();
+    reject_anchor_redirect(status, &endpoint)?;
     let value = response
         .body_mut()
         .with_config()
@@ -670,8 +679,13 @@ pub fn fetch_anchor_transaction(
     if let Some(authorization) = authorization.as_ref() {
         request = request.header("Authorization", authorization.as_str());
     }
-    let request = request.config().http_status_as_error(false).build();
     let endpoint = endpoint_label(&url);
+    let request = request
+        .config()
+        .https_only(true)
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build();
     let mut response = request.call().map_err(|error| {
         format!(
             "Unable to call {} endpoint {endpoint}: {error}",
@@ -679,6 +693,7 @@ pub fn fetch_anchor_transaction(
         )
     })?;
     let status = response.status().as_u16();
+    reject_anchor_redirect(status, &endpoint)?;
     let value = response
         .body_mut()
         .with_config()
@@ -986,10 +1001,15 @@ fn exchange_sep10_challenge(
     signed_transaction: &str,
 ) -> Result<Zeroizing<String>, String> {
     let mut response = ureq::post(web_auth_endpoint)
+        .config()
+        .https_only(true)
+        .max_redirects(0)
+        .build()
         .send_json(serde_json::json!({"transaction": signed_transaction}))
         .map_err(|error| {
             format!("Unable to exchange SEP-10 challenge at {web_auth_endpoint}: {error}")
         })?;
+    reject_anchor_redirect(response.status().as_u16(), web_auth_endpoint)?;
     let value = response
         .body_mut()
         .with_config()
@@ -1214,23 +1234,20 @@ fn currency_matches(document: &TomlValue, asset: &AnchorAsset) -> bool {
         let code_matches = table
             .get("code")
             .and_then(TomlValue::as_str)
-            .is_some_and(|code| code.eq_ignore_ascii_case(&asset.code));
+            .is_some_and(|code| code == asset.code);
         if !code_matches {
             return false;
         }
         table
             .get("issuer")
             .and_then(TomlValue::as_str)
-            .is_none_or(|issuer| issuer == asset.issuer)
+            .is_some_and(|issuer| issuer == asset.issuer)
     })
 }
 
 fn asset_info<'a>(section: Option<&'a JsonValue>, code: &str) -> Option<&'a JsonValue> {
     let section = section?.as_object()?;
-    let value = section
-        .get(code)
-        .or_else(|| section.get(&code.to_ascii_uppercase()))
-        .or_else(|| section.get(&code.to_ascii_lowercase()))?;
+    let value = section.get(code)?;
     value.as_object()?;
     Some(value)
 }
@@ -1244,8 +1261,13 @@ fn asset_enabled(section: Option<&JsonValue>, code: &str) -> bool {
 
 fn fetch_text(url: &str, label: &str) -> Result<String, String> {
     let mut response = ureq::get(url)
+        .config()
+        .https_only(true)
+        .max_redirects(0)
+        .build()
         .call()
         .map_err(|error| format!("Unable to load {label} from {url}: {error}"))?;
+    reject_anchor_redirect(response.status().as_u16(), url)?;
     response
         .body_mut()
         .with_config()
@@ -1256,8 +1278,13 @@ fn fetch_text(url: &str, label: &str) -> Result<String, String> {
 
 fn fetch_json(url: &str) -> Result<JsonValue, String> {
     let mut response = ureq::get(url)
+        .config()
+        .https_only(true)
+        .max_redirects(0)
+        .build()
         .call()
         .map_err(|error| format!("Unable to load {url}: {error}"))?;
+    reject_anchor_redirect(response.status().as_u16(), url)?;
     response
         .body_mut()
         .with_config()
@@ -1275,6 +1302,15 @@ fn endpoint_label(url: &Url) -> String {
     sanitized.set_query(None);
     sanitized.set_fragment(None);
     sanitized.to_string()
+}
+
+fn reject_anchor_redirect(status: u16, endpoint: &str) -> Result<(), String> {
+    if (300..400).contains(&status) {
+        return Err(format!(
+            "Anchor endpoint {endpoint} returned HTTP {status}; redirects are not allowed"
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1738,15 +1774,68 @@ issuer = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I"
     }
 
     #[test]
-    fn discovery_keeps_info_failure_as_warning() {
-        let document = r#"TRANSFER_SERVER = "https://anchor.example/sep6"
+    fn discovery_requires_exact_case_and_issuer_identity() {
+        for currency in [
+            format!(
+                r#"[[CURRENCIES]]
+code = "usd"
+issuer = "{ISSUER}"
+"#
+            ),
+            r#"[[CURRENCIES]]
+code = "USD"
+"#
+            .to_owned(),
+        ] {
+            let document = format!("TRANSFER_SERVER = \"https://anchor.example/sep6\"\n{currency}");
+            let capabilities =
+                capabilities_from_document(&asset(), "anchor.example", &document, |_| {
+                    panic!("info must not be loaded for a mismatched asset")
+                })
+                .unwrap();
+            assert!(capabilities.sep6_url.is_none());
+            assert_eq!(
+                capabilities.warnings,
+                vec!["stellar.toml does not list this exact asset"]
+            );
+        }
+    }
+
+    #[test]
+    fn discovery_info_keys_are_case_sensitive() {
+        let document = format!(
+            r#"TRANSFER_SERVER = "https://anchor.example/sep6"
 [[CURRENCIES]]
 code = "USD"
-"#;
-        let capabilities = capabilities_from_document(&asset(), "anchor.example", document, |_| {
-            Err("offline".to_owned())
-        })
-        .unwrap();
+issuer = "{ISSUER}"
+"#
+        );
+        let capabilities =
+            capabilities_from_document(&asset(), "anchor.example", &document, |_| {
+                Ok(serde_json::json!({
+                    "deposit": {"usd": {"enabled": true}},
+                    "withdraw": {"usd": {"enabled": true}}
+                }))
+            })
+            .unwrap();
+        assert!(!capabilities.sep6_deposit);
+        assert!(!capabilities.sep6_withdraw);
+    }
+
+    #[test]
+    fn discovery_keeps_info_failure_as_warning() {
+        let document = format!(
+            r#"TRANSFER_SERVER = "https://anchor.example/sep6"
+[[CURRENCIES]]
+code = "USD"
+issuer = "{ISSUER}"
+"#
+        );
+        let capabilities =
+            capabilities_from_document(&asset(), "anchor.example", &document, |_| {
+                Err("offline".to_owned())
+            })
+            .unwrap();
         assert_eq!(
             capabilities.sep6_url.as_deref(),
             Some("https://anchor.example/sep6")
@@ -2123,6 +2212,16 @@ issuer = "{ISSUER}"
         let credentialed: TomlValue =
             toml::from_str(r#"TRANSFER_SERVER = "https://user:pass@anchor.example/sep6""#).unwrap();
         assert!(endpoint(&credentialed, "TRANSFER_SERVER").is_err());
+    }
+
+    #[test]
+    fn anchor_http_redirects_are_rejected() {
+        assert!(reject_anchor_redirect(200, "https://anchor.example/info").is_ok());
+        assert!(reject_anchor_redirect(403, "https://anchor.example/info").is_ok());
+        assert_eq!(
+            reject_anchor_redirect(302, "https://anchor.example/info").unwrap_err(),
+            "Anchor endpoint https://anchor.example/info returned HTTP 302; redirects are not allowed"
+        );
     }
 
     #[test]

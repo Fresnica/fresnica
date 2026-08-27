@@ -195,7 +195,7 @@ This is especially useful for Mobile because SEP-24 browser handoff, SEP-6 requi
 
 The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements most of the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
 
-Known reference conformance gaps from this contract audit include exact-case SEP-1 asset matching, redirect-chain hardening after initial endpoint validation, and delegated/multisig SEP-10 authorization. These are tracked implementation follow-ups rather than reasons to weaken the contract.
+The Rust and RefPython references now require exact-case SEP-1 `code + issuer` identity and reject automatic HTTP redirects for Anchor protocol requests, preserving the endpoint security boundary rather than following a redirected target implicitly. Delegated/multisig SEP-10 authorization remains a known reference conformance gap: the current direct-Classic path must not be described as general ledger-authorization support.
 
 Current deferred areas:
 
