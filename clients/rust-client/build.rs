@@ -48,6 +48,7 @@ fn main() {
         "test-xdr-fix.patch",
         "sep10-small.patch",
         "sep10-anchor-protocol.patch",
+        "cleanup-direct-resolvers.patch",
     ] {
         apply_patch(&root, &patches.join(name));
     }
