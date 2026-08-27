@@ -1,0 +1,266 @@
+diff --git a/clients/rust-client/src/ledger_authorization.rs b/clients/rust-client/src/ledger_authorization.rs
+index 84fe775..47392bc 100644
+--- a/clients/rust-client/src/ledger_authorization.rs
++++ b/clients/rust-client/src/ledger_authorization.rs
+@@ -1,7 +1,9 @@
+ use std::collections::{BTreeMap, BTreeSet};
+ use std::str::FromStr;
+ 
+-use fresnica_core::{transaction_envelope_has_valid_signature, transaction_hash};
++use fresnica_core::{
++    transaction_envelope_has_valid_signature, transaction_envelope_satisfies_signer_key,
++};
+ use serde_json::Value as JsonValue;
+ use stellar_xdr::{
+     AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, SignerKey,
+@@ -167,13 +169,16 @@ impl AccountAuthorizationRequirement {
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct LedgerAuthorizationPlan {
+     pub requirements: Vec<AccountAuthorizationRequirement>,
++    pub extra_signers: BTreeSet<LedgerSignerCondition>,
+ }
+ 
+ impl LedgerAuthorizationPlan {
+     pub fn is_satisfiable_by(&self, available: &BTreeSet<LedgerSignerCondition>) -> bool {
+-        self.requirements
+-            .iter()
+-            .all(|requirement| requirement.is_satisfiable_by(available))
++        self.extra_signers.is_subset(available)
++            && self
++                .requirements
++                .iter()
++                .all(|requirement| requirement.is_satisfiable_by(available))
+     }
+ }
+ 
+@@ -203,15 +208,12 @@ pub fn satisfied_transaction_conditions(
+     envelope: &TransactionEnvelope,
+     network_passphrase: &str,
+ ) -> Result<BTreeSet<LedgerSignerCondition>, String> {
+-    let mut satisfied = satisfied_ed25519_conditions(plan, envelope, network_passphrase)?;
+-    let hash = transaction_hash(envelope, network_passphrase)
+-        .map_err(|error| format!("Unable to hash transaction for ledger authorization: {error}"))?;
++    let mut satisfied = BTreeSet::new();
+     for condition in signer_conditions(plan) {
+-        if condition.kind == LedgerSignerKind::PreauthorizedTransaction
+-            && matches!(
+-                SignerKey::from_str(&condition.key),
+-                Ok(SignerKey::PreAuthTx(value)) if value.0 == hash
+-            )
++        let signer = SignerKey::from_str(&condition.key)
++            .map_err(|_| "Ledger authorization contains an invalid signer key".to_owned())?;
++        if transaction_envelope_satisfies_signer_key(envelope, network_passphrase, &signer)
++            .map_err(|error| format!("Unable to verify transaction signer condition: {error}"))?
+         {
+             satisfied.insert(condition);
+         }
+@@ -220,10 +222,15 @@ pub fn satisfied_transaction_conditions(
+ }
+ 
+ fn signer_conditions(plan: &LedgerAuthorizationPlan) -> BTreeSet<LedgerSignerCondition> {
+-    plan.requirements
++    plan.extra_signers
+         .iter()
+-        .flat_map(|requirement| &requirement.signers)
+-        .map(|signer| signer.condition.clone())
++        .cloned()
++        .chain(
++            plan.requirements
++                .iter()
++                .flat_map(|requirement| &requirement.signers)
++                .map(|signer| signer.condition.clone()),
++        )
+         .collect()
+ }
+ 
+@@ -232,6 +239,7 @@ pub fn plan_classic_ledger_authorization(
+     accounts: &[LedgerAccountAuthorization],
+ ) -> Result<LedgerAuthorizationPlan, String> {
+     let uses = classic_authorization_uses(envelope)?;
++    let extra_signers = extra_signer_conditions(envelope)?;
+     let mut account_index = BTreeMap::new();
+     for account in accounts {
+         if account_index
+@@ -255,7 +263,10 @@ pub fn plan_classic_ledger_authorization(
+             authorization_use.threshold,
+         )?;
+     }
+-    Ok(LedgerAuthorizationPlan { requirements })
++    Ok(LedgerAuthorizationPlan {
++        requirements,
++        extra_signers,
++    })
+ }
+ 
+ pub fn load_classic_ledger_authorization_plan(
+@@ -282,14 +293,6 @@ fn classic_authorization_uses(
+             "Ledger Authorization currently supports TransactionV1Envelope only".to_owned(),
+         );
+     };
+-    if let Preconditions::V2(preconditions) = &envelope.tx.cond {
+-        if !preconditions.extra_signers.is_empty() {
+-            return Err(
+-                "Ledger Authorization does not yet support PreconditionsV2.extraSigners".to_owned(),
+-            );
+-        }
+-    }
+-
+     let transaction_source = authorization_account_id(&envelope.tx.source_account);
+     let mut uses = vec![RequiredAuthorizationUse {
+         account_id: transaction_source.clone(),
+@@ -314,6 +317,36 @@ fn classic_authorization_uses(
+     Ok(uses)
+ }
+ 
++fn extra_signer_conditions(
++    envelope: &TransactionEnvelope,
++) -> Result<BTreeSet<LedgerSignerCondition>, String> {
++    let TransactionEnvelope::Tx(envelope) = envelope else {
++        return Err(
++            "Ledger Authorization currently supports TransactionV1Envelope only".to_owned(),
++        );
++    };
++    let Preconditions::V2(preconditions) = &envelope.tx.cond else {
++        return Ok(BTreeSet::new());
++    };
++
++    let mut conditions = BTreeSet::new();
++    for signer in &preconditions.extra_signers {
++        let condition = LedgerSignerCondition {
++            kind: match signer {
++                SignerKey::Ed25519(_) => LedgerSignerKind::Ed25519PublicKey,
++                SignerKey::PreAuthTx(_) => LedgerSignerKind::PreauthorizedTransaction,
++                SignerKey::HashX(_) => LedgerSignerKind::HashX,
++                SignerKey::Ed25519SignedPayload(_) => LedgerSignerKind::Ed25519SignedPayload,
++            },
++            key: signer.to_string(),
++        };
++        if !conditions.insert(condition) {
++            return Err("PreconditionsV2.extraSigners contains a duplicate signer".to_owned());
++        }
++    }
++    Ok(conditions)
++}
++
+ fn load_classic_ledger_authorization_plan_with<F>(
+     envelope: &TransactionEnvelope,
+     mut fetch_account: F,
+@@ -426,7 +459,10 @@ mod tests {
+     use super::*;
+     use crate::build_operation_envelope;
+     use fresnica_core::{sign_transaction_envelope, SoftwareSigner};
+-    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber, String64, Uint256};
++    use sha2::Digest;
++    use stellar_xdr::{
++        BumpSequenceOp, OperationBody, PreconditionsV2, SequenceNumber, String64, Uint256, VecM,
++    };
+ 
+     const ACCOUNT_A: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+     const ACCOUNT_B: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+@@ -559,6 +595,43 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn transaction_satisfaction_recognizes_existing_hash_x_signature() {
++        let mut envelope = build_operation_envelope(
++            ACCOUNT_A,
++            vec![OperationBody::BumpSequence(BumpSequenceOp {
++                bump_to: SequenceNumber(2),
++            })],
++            1,
++            100,
++            None,
++        )
++        .unwrap();
++        let preimage = b"fresnica-hash-x";
++        let hash: [u8; 32] = sha2::Sha256::digest(preimage).into();
++        let hash_x = SignerKey::HashX(Uint256(hash));
++        let TransactionEnvelope::Tx(transaction) = &mut envelope else {
++            unreachable!();
++        };
++        transaction.signatures = vec![stellar_xdr::DecoratedSignature {
++            hint: stellar_xdr::SignatureHint(hash[28..32].try_into().unwrap()),
++            signature: stellar_xdr::Signature(preimage.to_vec().try_into().unwrap()),
++        }]
++        .try_into()
++        .unwrap();
++        transaction.tx.cond = Preconditions::V2(PreconditionsV2 {
++            extra_signers: VecM::try_from(vec![hash_x.clone()]).unwrap(),
++            ..Default::default()
++        });
++        let account = horizon_account(ACCOUNT_A, 1, 1, 1, &[(ACCOUNT_A, 1, "ed25519_public_key")]);
++        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
++
++        let satisfied =
++            satisfied_transaction_conditions(&plan, &envelope, TESTNET_PASSPHRASE).unwrap();
++
++        assert!(satisfied.contains(plan.extra_signers.iter().next().unwrap()));
++    }
++
+     #[test]
+     fn transaction_satisfaction_recognizes_existing_ed25519_signature() {
+         let mut envelope = build_operation_envelope(
+@@ -588,6 +661,62 @@ mod tests {
+         assert_eq!(satisfied, BTreeSet::from([ed25519(ACCOUNT_B)]));
+     }
+ 
++    #[test]
++    fn extra_signer_is_an_independent_required_condition() {
++        let mut envelope = build_operation_envelope(
++            ACCOUNT_A,
++            vec![OperationBody::BumpSequence(BumpSequenceOp {
++                bump_to: SequenceNumber(2),
++            })],
++            1,
++            100,
++            None,
++        )
++        .unwrap();
++        let TransactionEnvelope::Tx(transaction) = &mut envelope else {
++            unreachable!();
++        };
++        transaction.tx.cond = Preconditions::V2(PreconditionsV2 {
++            extra_signers: VecM::try_from(vec![SignerKey::from_str(ACCOUNT_B).unwrap()]).unwrap(),
++            ..Default::default()
++        });
++        let account = horizon_account(ACCOUNT_A, 1, 1, 1, &[(ACCOUNT_A, 1, "ed25519_public_key")]);
++
++        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
++
++        assert_eq!(plan.extra_signers, BTreeSet::from([ed25519(ACCOUNT_B)]));
++        assert!(!plan.is_satisfiable_by(&BTreeSet::from([ed25519(ACCOUNT_A)])));
++        assert!(plan.is_satisfiable_by(&BTreeSet::from([ed25519(ACCOUNT_A), ed25519(ACCOUNT_B),])));
++    }
++
++    #[test]
++    fn duplicate_extra_signer_is_rejected() {
++        let mut envelope = build_operation_envelope(
++            ACCOUNT_A,
++            vec![OperationBody::BumpSequence(BumpSequenceOp {
++                bump_to: SequenceNumber(2),
++            })],
++            1,
++            100,
++            None,
++        )
++        .unwrap();
++        let TransactionEnvelope::Tx(transaction) = &mut envelope else {
++            unreachable!();
++        };
++        let signer = SignerKey::from_str(ACCOUNT_B).unwrap();
++        transaction.tx.cond = Preconditions::V2(PreconditionsV2 {
++            extra_signers: VecM::try_from(vec![signer.clone(), signer]).unwrap(),
++            ..Default::default()
++        });
++        let account = horizon_account(ACCOUNT_A, 1, 1, 1, &[(ACCOUNT_A, 1, "ed25519_public_key")]);
++
++        assert_eq!(
++            plan_classic_ledger_authorization(&envelope, &[account]).unwrap_err(),
++            "PreconditionsV2.extraSigners contains a duplicate signer"
++        );
++    }
++
+     #[test]
+     fn transaction_source_low_and_medium_operation_share_one_account_requirement() {
+         let account = horizon_account(
