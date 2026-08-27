@@ -1,6 +1,6 @@
 name: Security patch relay
 
-# One-shot relay; retry after verified chunk correction.
+# One-shot relay; retry after chunk hashes were verified.
 on:
   push:
     branches:
