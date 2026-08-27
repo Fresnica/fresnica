@@ -38,6 +38,10 @@ pub fn parse_transaction_xdr(xdr: &[u8]) -> Result<TransactionEnvelope, String> 
         .map_err(|error| format!("invalid Stellar transaction XDR: {error}"))
 }
 
+pub fn transaction_xdr_bytes(envelope: &TransactionEnvelope) -> Result<Vec<u8>, String> {
+    transaction_envelope_xdr(envelope).map_err(|error| error.to_string())
+}
+
 pub fn has_valid_transaction_signature(
     envelope: &TransactionEnvelope,
     network: &str,
@@ -245,7 +249,7 @@ pub fn sign_and_submit(
         .map_err(|error| format!("Unable to hash signed transaction: {error}"))?;
     let tx_hash_hex = hex(&tx_hash);
     let encoded = STANDARD.encode(
-        transaction_envelope_xdr(envelope)
+        transaction_xdr_bytes(envelope)
             .map_err(|error| format!("Unable to encode signed transaction: {error}"))?,
     );
     match horizon.submit_transaction(&encoded) {

@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fresnica_core::transaction_envelope_xdr;
 use stellar_xdr::TransactionEnvelope;
 
 use crate::ledger_authorization::{
@@ -10,6 +9,7 @@ use crate::ledger_authorization::{
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction::{
     network_passphrase, parse_transaction_xdr, sign_transaction_xdr_with_passcode,
+    transaction_xdr_bytes,
 };
 
 pub fn sign_with_local_ed25519(
@@ -63,7 +63,7 @@ pub fn sign_needed_local_ed25519(
         let record = records
             .get(&key)
             .expect("selected signer must come from local records");
-        let transaction_xdr = transaction_envelope_xdr(envelope)
+        let transaction_xdr = transaction_xdr_bytes(envelope)
             .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
         *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_passcode(
             record,

@@ -3,7 +3,6 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use fresnica_core::transaction_envelope_xdr;
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -24,6 +23,7 @@ use crate::payment::PaymentMemo;
 use crate::service::FresnicaClient;
 use crate::transaction::{
     has_valid_transaction_signature, network_passphrase, parse_transaction_xdr,
+    transaction_xdr_bytes,
 };
 
 const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
@@ -1022,7 +1022,7 @@ pub fn exchange_anchor_sep10_challenge(
         );
     }
 
-    let signed_xdr = transaction_envelope_xdr(signed_envelope)
+    let signed_xdr = transaction_xdr_bytes(signed_envelope)
         .map_err(|error| format!("Unable to encode signed SEP-10 challenge: {error}"))?;
     exchange_sep10_challenge(&challenge.web_auth_endpoint, &STANDARD.encode(signed_xdr))
 }

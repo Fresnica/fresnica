@@ -78,7 +78,7 @@ pub fn transaction_envelope_satisfies_signer_key(
         SignerKey::Ed25519SignedPayload(signed) => {
             let verifying_key = VerifyingKey::from_bytes(&signed.ed25519.0)
                 .map_err(|_| SignerError::InvalidPublicKey)?;
-            let payload = signed.payload.0.as_slice();
+            let payload = signed.payload.as_slice();
             let public_hint = signature_hint(&signed.ed25519.0);
             let payload_hint = signature_hint(payload);
             let hint = SignatureHint(core::array::from_fn(|index| {
@@ -103,7 +103,7 @@ fn signature_hint(bytes: &[u8]) -> SignatureHint {
     if bytes.len() < hint.len() {
         hint[..bytes.len()].copy_from_slice(bytes);
     } else {
-        hint.copy_from_slice(&bytes[bytes.len() - hint.len()..]);
+        hint.copy_from_slice(&bytes[bytes.len() - 4..]);
     }
     SignatureHint(hint)
 }

@@ -12,6 +12,7 @@ fi
 
 mapfile -t core_files < <(grep -RIl 'use fresnica_core' clients/rust-cli/src clients/rust-client/src | sort)
 expected=(
+  "clients/rust-client/src/ledger_authorization.rs"
   "clients/rust-client/src/transaction.rs"
   "clients/rust-client/src/wallet.rs"
 )
