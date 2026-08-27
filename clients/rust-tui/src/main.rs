@@ -28,9 +28,8 @@ Keys:
   r           refresh balances, offers, and recent activity
   [ / ]       previous / next wallet on the selected network
   s           prepare a payment from the selected signing wallet
-  t           add, change, or remove an issued-asset trustline
-  o           create, update, or cancel an SDEX offer
-  m           open an SDEX market view
+  t           manage issued-asset trustlines
+  d           open the DEX market selector
 
 Write flow:
   form -> shared service preparation -> review -> passcode -> SDK/Core signing -> Horizon
@@ -371,6 +370,18 @@ impl OfferForm {
         }
     }
 
+    fn for_market(action: OfferFormAction, base: String, counter: String) -> Self {
+        let mut form = Self::new();
+        form.action = action;
+        form.base = base;
+        form.counter = counter;
+        form.active = match action {
+            OfferFormAction::Buy | OfferFormAction::Sell => 3,
+            OfferFormAction::Update | OfferFormAction::Cancel => 1,
+        };
+        form
+    }
+
     fn field_count(&self) -> usize {
         if self.action == OfferFormAction::Cancel {
             2
@@ -589,19 +600,9 @@ impl App {
                         self.status = "Preparing trustline change".to_owned();
                     }
                 }
-                KeyCode::Char('o') => {
-                    if wallet_watch_only {
-                        self.status =
-                            "Selected wallet is watch-only; attach a signer before managing offers"
-                                .to_owned();
-                    } else {
-                        self.mode = Mode::Offer(OfferForm::new());
-                        self.status = "Preparing SDEX offer".to_owned();
-                    }
-                }
-                KeyCode::Char('m') => {
+                KeyCode::Char('d') => {
                     self.mode = Mode::Market(MarketForm::new());
-                    self.status = "Choose an SDEX market pair".to_owned();
+                    self.status = "Choose a DEX market pair".to_owned();
                 }
                 _ => {}
             },
@@ -633,7 +634,7 @@ impl App {
                 KeyCode::Char('l') if form.active == 0 => {
                     form.action = TrustlineFormAction::SetLimit
                 }
-                KeyCode::Char('r') if form.active == 0 => form.action = TrustlineFormAction::Remove,
+                KeyCode::Char('x') if form.active == 0 => form.action = TrustlineFormAction::Remove,
                 KeyCode::Enter if form.active == 0 => form.active = 1,
                 KeyCode::Enter
                     if form.active == 1 && form.action == TrustlineFormAction::Remove =>
@@ -671,11 +672,11 @@ impl App {
                 }
                 KeyCode::Char('b') if form.active == 0 => form.action = OfferFormAction::Buy,
                 KeyCode::Char('s') if form.active == 0 => form.action = OfferFormAction::Sell,
-                KeyCode::Char('u') if form.active == 0 => {
+                KeyCode::Char('e') if form.active == 0 => {
                     form.action = OfferFormAction::Update;
                     form.normalize_active();
                 }
-                KeyCode::Char('c') if form.active == 0 => {
+                KeyCode::Char('x') if form.active == 0 => {
                     form.action = OfferFormAction::Cancel;
                     form.normalize_active();
                 }
@@ -728,9 +729,39 @@ impl App {
                         snapshot.order_book.counter.clone(),
                     ));
                 }
-                KeyCode::Char('m') => {
-                    self.mode = Mode::Market(MarketForm::new());
-                    self.status = "Choose another SDEX market pair".to_owned();
+                KeyCode::Char('w') => {
+                    market_request = Some((
+                        snapshot.order_book.counter.clone(),
+                        snapshot.order_book.base.clone(),
+                    ));
+                }
+                KeyCode::Char('b')
+                | KeyCode::Char('s')
+                | KeyCode::Char('e')
+                | KeyCode::Char('x') => {
+                    if wallet_watch_only {
+                        self.status =
+                            "Selected wallet is watch-only; attach a signer before managing offers"
+                                .to_owned();
+                    } else {
+                        let action = match code {
+                            KeyCode::Char('b') => OfferFormAction::Buy,
+                            KeyCode::Char('s') => OfferFormAction::Sell,
+                            KeyCode::Char('e') => OfferFormAction::Update,
+                            KeyCode::Char('x') => OfferFormAction::Cancel,
+                            _ => unreachable!(),
+                        };
+                        let base = snapshot.order_book.base.clone();
+                        let counter = snapshot.order_book.counter.clone();
+                        self.mode = Mode::Offer(OfferForm::for_market(action, base, counter));
+                        self.status = match action {
+                            OfferFormAction::Buy => "Preparing DEX buy offer",
+                            OfferFormAction::Sell => "Preparing DEX sell offer",
+                            OfferFormAction::Update => "Enter the offer ID to edit",
+                            OfferFormAction::Cancel => "Enter the offer ID to cancel",
+                        }
+                        .to_owned();
+                    }
                 }
                 _ => {}
             },
@@ -1056,17 +1087,19 @@ impl App {
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let help = match &self.mode {
             Mode::Browse => {
-                "q quit   r refresh   [ / ] switch wallet   s send   t trustline   o offer   m market"
+                "q quit   r refresh   [ / ] switch wallet   s send   t manage assets   d DEX"
             }
             Mode::Send(_) => "type value   Tab/Up/Down field   Enter next/prepare   Esc cancel",
             Mode::Trustline(_) => {
-                "action: Left/Right or a/l/r   Tab field   Enter next/prepare   Esc cancel"
+                "action: Left/Right or a/l/x   Tab field   Enter next/prepare   Esc cancel"
             }
             Mode::Offer(_) => {
-                "action: Left/Right or b/s/u/c   Tab field   Space toggles trustline   Enter next/prepare"
+                "action: Left/Right or b/s/e/x   Tab field   Space toggles trustline   Enter next/prepare"
             }
             Mode::Market(_) => "type asset   Tab/Up/Down field   Enter next/open   Esc cancel",
-            Mode::MarketView(_) => "r refresh market   m change pair   Esc close",
+            Mode::MarketView(_) => {
+                "r refresh   w swap pair   b buy   s sell   e edit   x cancel   Esc back"
+            }
             Mode::PaymentReview(_) | Mode::TrustlineReview(_) | Mode::OfferReview(_) => {
                 "y/Enter sign   n/Esc cancel"
             }
@@ -1586,6 +1619,27 @@ mod tests {
         assert_eq!(request.asset, "XLM");
         assert_eq!(request.destination, "Alice");
         assert_eq!(request.memo.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn market_offer_form_uses_dex_pair_and_action_focus() {
+        let buy = OfferForm::for_market(
+            OfferFormAction::Buy,
+            "XLM".to_owned(),
+            "USD:GISSUER".to_owned(),
+        );
+        assert_eq!(buy.action, OfferFormAction::Buy);
+        assert_eq!(buy.base, "XLM");
+        assert_eq!(buy.counter, "USD:GISSUER");
+        assert_eq!(buy.active, 3);
+
+        let edit = OfferForm::for_market(
+            OfferFormAction::Update,
+            "XLM".to_owned(),
+            "USD:GISSUER".to_owned(),
+        );
+        assert_eq!(edit.action, OfferFormAction::Update);
+        assert_eq!(edit.active, 1);
     }
 
     #[test]
