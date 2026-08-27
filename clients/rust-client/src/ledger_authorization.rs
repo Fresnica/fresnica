@@ -6,6 +6,8 @@ use stellar_xdr::{
     AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, TransactionEnvelope,
 };
 
+use crate::horizon::HorizonClient;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthorizationThreshold {
     Low,
@@ -166,19 +168,7 @@ pub fn plan_classic_ledger_authorization(
     envelope: &TransactionEnvelope,
     accounts: &[LedgerAccountAuthorization],
 ) -> Result<LedgerAuthorizationPlan, String> {
-    let TransactionEnvelope::Tx(envelope) = envelope else {
-        return Err(
-            "Ledger Authorization currently supports TransactionV1Envelope only".to_owned(),
-        );
-    };
-    if let Preconditions::V2(preconditions) = &envelope.tx.cond {
-        if !preconditions.extra_signers.is_empty() {
-            return Err(
-                "Ledger Authorization does not yet support PreconditionsV2.extraSigners".to_owned(),
-            );
-        }
-    }
-
+    let uses = classic_authorization_uses(envelope)?;
     let mut account_index = BTreeMap::new();
     for account in accounts {
         if account_index
@@ -193,15 +183,56 @@ pub fn plan_classic_ledger_authorization(
     }
 
     let mut requirements = Vec::new();
-    let transaction_source = authorization_account_id(&envelope.tx.source_account);
-    add_requirement(
-        &mut requirements,
-        &account_index,
-        &transaction_source,
-        AuthorizationScope::TransactionSource,
-        AuthorizationThreshold::Low,
-    )?;
+    for authorization_use in uses {
+        add_requirement(
+            &mut requirements,
+            &account_index,
+            &authorization_use.account_id,
+            authorization_use.scope,
+            authorization_use.threshold,
+        )?;
+    }
+    Ok(LedgerAuthorizationPlan { requirements })
+}
 
+pub fn load_classic_ledger_authorization_plan(
+    horizon: &HorizonClient,
+    envelope: &TransactionEnvelope,
+) -> Result<LedgerAuthorizationPlan, String> {
+    load_classic_ledger_authorization_plan_with(envelope, |account_id| {
+        horizon.get_account(account_id)
+    })
+}
+
+#[derive(Clone, Debug)]
+struct RequiredAuthorizationUse {
+    account_id: String,
+    scope: AuthorizationScope,
+    threshold: AuthorizationThreshold,
+}
+
+fn classic_authorization_uses(
+    envelope: &TransactionEnvelope,
+) -> Result<Vec<RequiredAuthorizationUse>, String> {
+    let TransactionEnvelope::Tx(envelope) = envelope else {
+        return Err(
+            "Ledger Authorization currently supports TransactionV1Envelope only".to_owned(),
+        );
+    };
+    if let Preconditions::V2(preconditions) = &envelope.tx.cond {
+        if !preconditions.extra_signers.is_empty() {
+            return Err(
+                "Ledger Authorization does not yet support PreconditionsV2.extraSigners".to_owned(),
+            );
+        }
+    }
+
+    let transaction_source = authorization_account_id(&envelope.tx.source_account);
+    let mut uses = vec![RequiredAuthorizationUse {
+        account_id: transaction_source.clone(),
+        scope: AuthorizationScope::TransactionSource,
+        threshold: AuthorizationThreshold::Low,
+    }];
     for (index, operation) in envelope.tx.operations.iter().enumerate() {
         let source = operation
             .source_account
@@ -211,16 +242,43 @@ pub fn plan_classic_ledger_authorization(
         let (kind, threshold) = operation_authorization(&operation.body).ok_or_else(|| {
             format!("Ledger Authorization does not yet support Classic operation #{index}")
         })?;
-        add_requirement(
-            &mut requirements,
-            &account_index,
-            &source,
-            AuthorizationScope::Operation { index, kind },
+        uses.push(RequiredAuthorizationUse {
+            account_id: source,
+            scope: AuthorizationScope::Operation { index, kind },
             threshold,
-        )?;
+        });
+    }
+    Ok(uses)
+}
+
+fn load_classic_ledger_authorization_plan_with<F>(
+    envelope: &TransactionEnvelope,
+    mut fetch_account: F,
+) -> Result<LedgerAuthorizationPlan, String>
+where
+    F: FnMut(&str) -> Result<JsonValue, String>,
+{
+    let uses = classic_authorization_uses(envelope)?;
+    let mut source_accounts = BTreeSet::new();
+    for authorization_use in &uses {
+        source_accounts.insert(authorization_use.account_id.clone());
     }
 
-    Ok(LedgerAuthorizationPlan { requirements })
+    let mut accounts = Vec::with_capacity(source_accounts.len());
+    for account_id in source_accounts {
+        let raw = fetch_account(&account_id)?;
+        let account = LedgerAccountAuthorization::from_horizon(&raw).map_err(|error| {
+            format!("Unable to interpret ledger authorization for {account_id}: {error}")
+        })?;
+        if account.account_id != account_id {
+            return Err(format!(
+                "Horizon returned ledger authorization for {} while loading {account_id}",
+                account.account_id
+            ));
+        }
+        accounts.push(account);
+    }
+    plan_classic_ledger_authorization(envelope, &accounts)
 }
 
 fn add_requirement(
@@ -465,6 +523,77 @@ mod tests {
 
         let available = BTreeSet::from([ed25519(ACCOUNT_A), ed25519(ACCOUNT_B), ed25519(SIGNER_C)]);
         assert!(plan.is_satisfiable_by(&available));
+    }
+
+    #[test]
+    fn loader_fetches_each_source_once_before_planning() {
+        let envelope = build_operation_envelope(
+            ACCOUNT_A,
+            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let mut fetched = Vec::new();
+        let plan = load_classic_ledger_authorization_plan_with(&envelope, |account_id| {
+            fetched.push(account_id.to_owned());
+            Ok(serde_json::json!({
+                "account_id": ACCOUNT_A,
+                "thresholds": {
+                    "low_threshold": 1,
+                    "med_threshold": 2,
+                    "high_threshold": 3
+                },
+                "signers": [
+                    {"key": ACCOUNT_A, "weight": 2, "type": "ed25519_public_key"}
+                ]
+            }))
+        })
+        .unwrap();
+
+        assert_eq!(fetched, vec![ACCOUNT_A]);
+        assert_eq!(plan.requirements.len(), 1);
+        assert_eq!(plan.requirements[0].required_weight, 2);
+    }
+
+    #[test]
+    fn loader_rejects_horizon_account_identity_mismatch() {
+        let envelope = build_operation_envelope(
+            ACCOUNT_A,
+            vec![OperationBody::BumpSequence(BumpSequenceOp {
+                bump_to: SequenceNumber(2),
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+
+        let error = load_classic_ledger_authorization_plan_with(&envelope, |_| {
+            Ok(serde_json::json!({
+                "account_id": ACCOUNT_B,
+                "thresholds": {
+                    "low_threshold": 1,
+                    "med_threshold": 2,
+                    "high_threshold": 3
+                },
+                "signers": [
+                    {"key": ACCOUNT_B, "weight": 1, "type": "ed25519_public_key"}
+                ]
+            }))
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            format!(
+                "Horizon returned ledger authorization for {ACCOUNT_B} while loading {ACCOUNT_A}"
+            )
+        );
     }
 
     #[test]

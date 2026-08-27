@@ -37,9 +37,10 @@ pub use horizon::{
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
 };
 pub use ledger_authorization::{
-    plan_classic_ledger_authorization, AccountAuthorizationRequirement, AuthorizationScope,
-    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, LedgerAccountAuthorization,
-    LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
+    AccountAuthorizationRequirement, AuthorizationScope, AuthorizationThreshold, AuthorizationUse,
+    ClassicOperationKind, LedgerAccountAuthorization, LedgerAuthorizationPlan,
+    LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
