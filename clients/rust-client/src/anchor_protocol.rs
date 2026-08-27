@@ -1687,7 +1687,7 @@ mod tests {
             ]
         });
         let authorization = sep10_authorization_plan(Some(&ledger_account), ISSUER).unwrap();
-        assert!(authorization.is_satisfiable_by(&BTreeSet::new()));
+        assert!(authorization.is_satisfiable_by(&std::collections::BTreeSet::new()));
         assert_eq!(
             exchange_anchor_sep10_challenge(TESTNET, &challenge, &authorization, &signed_envelope)
                 .unwrap_err(),
