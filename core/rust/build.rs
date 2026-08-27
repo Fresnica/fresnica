@@ -14,6 +14,7 @@ fn main() {
         "core-transaction.patch",
         "ledger-authorization.patch",
         "remaining.patch",
+        "test-import.patch",
     ] {
         let patch = root.join("validation/typed-signers").join(name);
         println!("cargo:rerun-if-changed={}", patch.display());
