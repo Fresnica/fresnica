@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
-use fresnica_core::{transaction_envelope_has_valid_signature, transaction_hash};
+use fresnica_core::{
+    transaction_envelope_has_valid_signature, transaction_envelope_satisfies_signer_key,
+};
 use serde_json::Value as JsonValue;
 use stellar_xdr::{
     AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, SignerKey,
@@ -206,15 +208,12 @@ pub fn satisfied_transaction_conditions(
     envelope: &TransactionEnvelope,
     network_passphrase: &str,
 ) -> Result<BTreeSet<LedgerSignerCondition>, String> {
-    let mut satisfied = satisfied_ed25519_conditions(plan, envelope, network_passphrase)?;
-    let hash = transaction_hash(envelope, network_passphrase)
-        .map_err(|error| format!("Unable to hash transaction for ledger authorization: {error}"))?;
+    let mut satisfied = BTreeSet::new();
     for condition in signer_conditions(plan) {
-        if condition.kind == LedgerSignerKind::PreauthorizedTransaction
-            && matches!(
-                SignerKey::from_str(&condition.key),
-                Ok(SignerKey::PreAuthTx(value)) if value.0 == hash
-            )
+        let signer = SignerKey::from_str(&condition.key)
+            .map_err(|_| "Ledger authorization contains an invalid signer key".to_owned())?;
+        if transaction_envelope_satisfies_signer_key(envelope, network_passphrase, &signer)
+            .map_err(|error| format!("Unable to verify transaction signer condition: {error}"))?
         {
             satisfied.insert(condition);
         }
@@ -460,6 +459,7 @@ mod tests {
     use super::*;
     use crate::build_operation_envelope;
     use fresnica_core::{sign_transaction_envelope, SoftwareSigner};
+    use sha2::Digest;
     use stellar_xdr::{
         BumpSequenceOp, OperationBody, PreconditionsV2, SequenceNumber, String64, Uint256, VecM,
     };
@@ -593,6 +593,43 @@ mod tests {
             satisfied.iter().next().unwrap().kind,
             LedgerSignerKind::PreauthorizedTransaction
         );
+    }
+
+    #[test]
+    fn transaction_satisfaction_recognizes_existing_hash_x_signature() {
+        let mut envelope = build_operation_envelope(
+            ACCOUNT_A,
+            vec![OperationBody::BumpSequence(BumpSequenceOp {
+                bump_to: SequenceNumber(2),
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let preimage = b"fresnica-hash-x";
+        let hash: [u8; 32] = sha2::Sha256::digest(preimage).into();
+        let hash_x = SignerKey::HashX(Uint256(hash));
+        let TransactionEnvelope::Tx(transaction) = &mut envelope else {
+            unreachable!();
+        };
+        transaction.signatures = vec![stellar_xdr::DecoratedSignature {
+            hint: stellar_xdr::SignatureHint(hash[28..32].try_into().unwrap()),
+            signature: stellar_xdr::Signature(preimage.to_vec().try_into().unwrap()),
+        }]
+        .try_into()
+        .unwrap();
+        transaction.tx.cond = Preconditions::V2(PreconditionsV2 {
+            extra_signers: VecM::try_from(vec![hash_x.clone()]).unwrap(),
+            ..Default::default()
+        });
+        let account = horizon_account(ACCOUNT_A, 1, 1, 1, &[(ACCOUNT_A, 1, "ed25519_public_key")]);
+        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
+
+        let satisfied =
+            satisfied_transaction_conditions(&plan, &envelope, TESTNET_PASSPHRASE).unwrap();
+
+        assert!(satisfied.contains(plan.extra_signers.iter().next().unwrap()));
     }
 
     #[test]

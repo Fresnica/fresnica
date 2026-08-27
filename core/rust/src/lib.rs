@@ -38,13 +38,12 @@ pub use secret_store::{
     SCRYPT_R,
 };
 pub use signer::{
-    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner,
-    TransactionSigningRequest,
+    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner, TransactionSigningRequest,
 };
 pub use transaction::{
     network_id, parse_transaction_envelope_xdr, sign_transaction_envelope,
-    transaction_envelope_has_valid_signature, transaction_envelope_xdr, transaction_hash,
-    TransactionSigningError,
+    transaction_envelope_has_valid_signature, transaction_envelope_satisfies_signer_key,
+    transaction_envelope_xdr, transaction_hash, TransactionSigningError,
 };
 pub use wallet::{
     derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,

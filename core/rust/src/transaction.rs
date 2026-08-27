@@ -2,7 +2,8 @@ use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use stellar_strkey::ed25519::PublicKey;
 use stellar_xdr::{
-    DecoratedSignature, Limits, ReadXdr, Signature, SignatureHint, TransactionEnvelope, WriteXdr,
+    DecoratedSignature, Limits, ReadXdr, Signature, SignatureHint, SignerKey, TransactionEnvelope,
+    Uint256, WriteXdr,
 };
 use thiserror::Error;
 
@@ -28,30 +29,83 @@ pub fn transaction_envelope_has_valid_signature(
 ) -> Result<bool, TransactionSigningError> {
     let public =
         PublicKey::from_string(signer_public_key).map_err(|_| SignerError::InvalidPublicKey)?;
-    let verifying_key =
-        VerifyingKey::from_bytes(&public.0).map_err(|_| SignerError::InvalidPublicKey)?;
-    let hash = transaction_hash(envelope, network_passphrase)?;
-    let hint = SignatureHint(public.0[28..32].try_into().expect("fixed public key length"));
+    transaction_envelope_satisfies_signer_key(
+        envelope,
+        network_passphrase,
+        &SignerKey::Ed25519(Uint256(public.0)),
+    )
+}
+
+pub fn transaction_envelope_satisfies_signer_key(
+    envelope: &TransactionEnvelope,
+    network_passphrase: &str,
+    signer: &SignerKey,
+) -> Result<bool, TransactionSigningError> {
     let signatures = match envelope {
         TransactionEnvelope::TxV0(value) => &value.signatures,
         TransactionEnvelope::Tx(value) => &value.signatures,
         TransactionEnvelope::TxFeeBump(value) => &value.signatures,
     };
 
-    for decorated in signatures {
-        if decorated.hint != hint {
-            continue;
+    match signer {
+        SignerKey::Ed25519(public) => {
+            let verifying_key =
+                VerifyingKey::from_bytes(&public.0).map_err(|_| SignerError::InvalidPublicKey)?;
+            let hash = transaction_hash(envelope, network_passphrase)?;
+            let hint = signature_hint(&public.0);
+            Ok(signatures.iter().any(|decorated| {
+                decorated.hint == hint
+                    && <[u8; 64]>::try_from(decorated.signature.0.as_slice())
+                        .map(|bytes| {
+                            verifying_key
+                                .verify_strict(&hash, &Ed25519Signature::from_bytes(&bytes))
+                                .is_ok()
+                        })
+                        .unwrap_or(false)
+            }))
         }
-        let Ok(signature_bytes) = <[u8; 64]>::try_from(decorated.signature.0.as_slice()) else {
-            continue;
-        };
-        let signature = Ed25519Signature::from_bytes(&signature_bytes);
-        if verifying_key.verify_strict(&hash, &signature).is_ok() {
-            return Ok(true);
+        SignerKey::PreAuthTx(expected) => {
+            Ok(expected.0 == transaction_hash(envelope, network_passphrase)?)
+        }
+        SignerKey::HashX(expected) => {
+            let hint = signature_hint(&expected.0);
+            Ok(signatures.iter().any(|decorated| {
+                decorated.hint == hint
+                    && <[u8; 32]>::from(Sha256::digest(decorated.signature.0.as_slice()))
+                        == expected.0
+            }))
+        }
+        SignerKey::Ed25519SignedPayload(signed) => {
+            let verifying_key = VerifyingKey::from_bytes(&signed.ed25519.0)
+                .map_err(|_| SignerError::InvalidPublicKey)?;
+            let payload = signed.payload.0.as_slice();
+            let public_hint = signature_hint(&signed.ed25519.0);
+            let payload_hint = signature_hint(payload);
+            let hint = SignatureHint(core::array::from_fn(|index| {
+                public_hint.0[index] ^ payload_hint.0[index]
+            }));
+            Ok(signatures.iter().any(|decorated| {
+                decorated.hint == hint
+                    && <[u8; 64]>::try_from(decorated.signature.0.as_slice())
+                        .map(|bytes| {
+                            verifying_key
+                                .verify_strict(payload, &Ed25519Signature::from_bytes(&bytes))
+                                .is_ok()
+                        })
+                        .unwrap_or(false)
+            }))
         }
     }
+}
 
-    Ok(false)
+fn signature_hint(bytes: &[u8]) -> SignatureHint {
+    let mut hint = [0u8; 4];
+    if bytes.len() < hint.len() {
+        hint[..bytes.len()].copy_from_slice(bytes);
+    } else {
+        hint.copy_from_slice(&bytes[bytes.len() - hint.len()..]);
+    }
+    SignatureHint(hint)
 }
 
 pub fn sign_transaction_envelope<S: ClassicSigner + ?Sized>(
@@ -90,9 +144,7 @@ pub fn sign_transaction_envelope<S: ClassicSigner + ?Sized>(
 
     let mut updated: Vec<_> = signatures.clone().into();
     updated.push(decorated);
-    *signatures = updated
-        .try_into()
-        .map_err(TransactionSigningError::Xdr)?;
+    *signatures = updated.try_into().map_err(TransactionSigningError::Xdr)?;
     Ok(())
 }
 
@@ -140,6 +192,10 @@ pub enum TransactionSigningError {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use ed25519_dalek::{Signer as _, SigningKey};
+    use stellar_strkey::ed25519::PrivateKey;
+    use stellar_xdr::SignerKeyEd25519SignedPayload;
+
     use super::*;
     use crate::{ExternalEd25519Signer, SoftwareSigner};
 
@@ -177,13 +233,21 @@ mod tests {
         decode_hex(hex).try_into().unwrap()
     }
 
+    fn set_signatures(envelope: &mut TransactionEnvelope, signatures: Vec<DecoratedSignature>) {
+        let signatures = signatures.try_into().unwrap();
+        match envelope {
+            TransactionEnvelope::TxV0(value) => value.signatures = signatures,
+            TransactionEnvelope::Tx(value) => value.signatures = signatures,
+            TransactionEnvelope::TxFeeBump(value) => value.signatures = signatures,
+        }
+    }
+
     #[test]
     fn derives_stellar_testnet_network_id() {
-        let expected: [u8; 32] = decode_hex(
-            "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472",
-        )
-        .try_into()
-        .unwrap();
+        let expected: [u8; 32] =
+            decode_hex("cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472")
+                .try_into()
+                .unwrap();
 
         assert_eq!(network_id(TESTNET), expected);
     }
@@ -203,7 +267,10 @@ mod tests {
 
         sign_transaction_envelope(&mut envelope, TESTNET, &signer).unwrap();
 
-        assert_eq!(transaction_envelope_xdr(&envelope).unwrap(), decode_hex(SIGNED_XDR_HEX));
+        assert_eq!(
+            transaction_envelope_xdr(&envelope).unwrap(),
+            decode_hex(SIGNED_XDR_HEX)
+        );
     }
 
     #[test]
@@ -221,10 +288,16 @@ mod tests {
         sign_transaction_envelope(&mut envelope, TESTNET, &signer).unwrap();
 
         let request = captured.lock().unwrap().clone().unwrap();
-        assert_eq!(request.transaction_hash, decode_hex_array::<32>(TRANSACTION_HASH_HEX));
+        assert_eq!(
+            request.transaction_hash,
+            decode_hex_array::<32>(TRANSACTION_HASH_HEX)
+        );
         assert_eq!(request.transaction_xdr, decode_hex(UNSIGNED_XDR_HEX));
         assert_eq!(request.network_passphrase, TESTNET);
-        assert_eq!(transaction_envelope_xdr(&envelope).unwrap(), decode_hex(SIGNED_XDR_HEX));
+        assert_eq!(
+            transaction_envelope_xdr(&envelope).unwrap(),
+            decode_hex(SIGNED_XDR_HEX)
+        );
     }
 
     #[test]
@@ -234,15 +307,23 @@ mod tests {
 
         let result = sign_transaction_envelope(&mut envelope, TESTNET, &signer);
 
-        assert!(matches!(result, Err(TransactionSigningError::InvalidSignature)));
-        assert_eq!(transaction_envelope_xdr(&envelope).unwrap(), decode_hex(UNSIGNED_XDR_HEX));
+        assert!(matches!(
+            result,
+            Err(TransactionSigningError::InvalidSignature)
+        ));
+        assert_eq!(
+            transaction_envelope_xdr(&envelope).unwrap(),
+            decode_hex(UNSIGNED_XDR_HEX)
+        );
     }
 
     #[test]
     fn external_provider_failure_does_not_mutate_envelope() {
         let mut envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
         let signer = ExternalEd25519Signer::new(PUBLIC, |_| {
-            Err(SignerError::ExternalProvider("device disconnected".to_owned()))
+            Err(SignerError::ExternalProvider(
+                "device disconnected".to_owned(),
+            ))
         })
         .unwrap();
 
@@ -253,7 +334,10 @@ mod tests {
             Err(TransactionSigningError::Signer(SignerError::ExternalProvider(message)))
                 if message == "device disconnected"
         ));
-        assert_eq!(transaction_envelope_xdr(&envelope).unwrap(), decode_hex(UNSIGNED_XDR_HEX));
+        assert_eq!(
+            transaction_envelope_xdr(&envelope).unwrap(),
+            decode_hex(UNSIGNED_XDR_HEX)
+        );
     }
 
     #[test]
@@ -279,6 +363,69 @@ mod tests {
             PUBLIC,
         )
         .unwrap());
+    }
+
+    #[test]
+    fn typed_signer_verifier_recognizes_preauth() {
+        let envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
+        let signer = SignerKey::PreAuthTx(Uint256(transaction_hash(&envelope, TESTNET).unwrap()));
+
+        assert!(transaction_envelope_satisfies_signer_key(&envelope, TESTNET, &signer).unwrap());
+    }
+
+    #[test]
+    fn typed_signer_verifier_recognizes_hash_x() {
+        let mut envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
+        let preimage = b"fresnica-hash-x";
+        let hash: [u8; 32] = Sha256::digest(preimage).into();
+        set_signatures(
+            &mut envelope,
+            vec![DecoratedSignature {
+                hint: signature_hint(&hash),
+                signature: Signature(preimage.to_vec().try_into().unwrap()),
+            }],
+        );
+
+        assert!(transaction_envelope_satisfies_signer_key(
+            &envelope,
+            TESTNET,
+            &SignerKey::HashX(Uint256(hash)),
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn typed_signer_verifier_recognizes_signed_payload() {
+        let mut envelope = parse_transaction_envelope_xdr(&decode_hex(UNSIGNED_XDR_HEX)).unwrap();
+        let private = PrivateKey::from_string(SECRET).unwrap();
+        let signing_key = SigningKey::from_bytes(&private.0);
+        let payload = b"x";
+        let public = signing_key.verifying_key().to_bytes();
+        let public_hint = signature_hint(&public);
+        let payload_hint = signature_hint(payload);
+        let hint = SignatureHint(core::array::from_fn(|index| {
+            public_hint.0[index] ^ payload_hint.0[index]
+        }));
+        set_signatures(
+            &mut envelope,
+            vec![DecoratedSignature {
+                hint,
+                signature: Signature(
+                    signing_key
+                        .sign(payload)
+                        .to_bytes()
+                        .to_vec()
+                        .try_into()
+                        .unwrap(),
+                ),
+            }],
+        );
+        let signer = SignerKey::Ed25519SignedPayload(SignerKeyEd25519SignedPayload {
+            ed25519: Uint256(public),
+            payload: payload.to_vec().try_into().unwrap(),
+        });
+
+        assert!(transaction_envelope_satisfies_signer_key(&envelope, TESTNET, &signer).unwrap());
     }
 
     #[test]
