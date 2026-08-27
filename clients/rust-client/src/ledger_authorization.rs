@@ -3,7 +3,8 @@ use std::str::FromStr;
 
 use serde_json::Value as JsonValue;
 use stellar_xdr::{
-    AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, TransactionEnvelope,
+    AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, SignerKey,
+    TransactionEnvelope,
 };
 
 use crate::horizon::HorizonClient;
@@ -65,17 +66,28 @@ impl LedgerAccountAuthorization {
         let mut signers = Vec::with_capacity(raw_signers.len());
         for signer in raw_signers {
             let key = json_string(signer, "key", "Horizon signer")?.to_owned();
-            let kind = match json_string(signer, "type", "Horizon signer")? {
+            let signer_type = json_string(signer, "type", "Horizon signer")?;
+            let expected_kind = match signer_type {
                 "ed25519_public_key" => LedgerSignerKind::Ed25519PublicKey,
                 "preauth_tx" => LedgerSignerKind::PreauthorizedTransaction,
                 "sha256_hash" => LedgerSignerKind::HashX,
                 "ed25519_signed_payload" => LedgerSignerKind::Ed25519SignedPayload,
                 other => return Err(format!("unsupported Horizon signer type: {other}")),
             };
-            if kind == LedgerSignerKind::Ed25519PublicKey {
-                AccountId::from_str(&key)
-                    .map_err(|_| "Horizon Ed25519 signer has an invalid key".to_owned())?;
+            let actual_kind = match SignerKey::from_str(&key)
+                .map_err(|_| "Horizon signer has an invalid StrKey".to_owned())?
+            {
+                SignerKey::Ed25519(_) => LedgerSignerKind::Ed25519PublicKey,
+                SignerKey::PreAuthTx(_) => LedgerSignerKind::PreauthorizedTransaction,
+                SignerKey::HashX(_) => LedgerSignerKind::HashX,
+                SignerKey::Ed25519SignedPayload(_) => LedgerSignerKind::Ed25519SignedPayload,
+            };
+            if actual_kind != expected_kind {
+                return Err(format!(
+                    "Horizon signer type {signer_type} does not match signer key"
+                ));
             }
+            let kind = expected_kind;
             let weight = json_u8(signer, "weight", "Horizon signer")?;
             let condition = LedgerSignerCondition { kind, key };
             if !conditions.insert(condition.clone()) {
@@ -443,26 +455,58 @@ mod tests {
             &[
                 (ACCOUNT_A, 1, "ed25519_public_key"),
                 (
-                    "TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    "TA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUPUI",
                     2,
                     "preauth_tx",
                 ),
                 (
-                    "XAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    "XA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVLRR",
                     3,
                     "sha256_hash",
+                ),
+                (
+                    "PA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAQACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB6IBZGM",
+                    4,
+                    "ed25519_signed_payload",
                 ),
             ],
         );
 
         assert_eq!(account.account_id, ACCOUNT_A);
         assert_eq!(account.required_weight(AuthorizationThreshold::Medium), 2);
-        assert_eq!(account.signers.len(), 3);
+        assert_eq!(account.signers.len(), 4);
         assert_eq!(
             account.signers[1].condition.kind,
             LedgerSignerKind::PreauthorizedTransaction
         );
         assert_eq!(account.signers[2].condition.kind, LedgerSignerKind::HashX);
+        assert_eq!(
+            account.signers[3].condition.kind,
+            LedgerSignerKind::Ed25519SignedPayload
+        );
+    }
+
+    #[test]
+    fn rejects_horizon_signer_type_key_mismatch() {
+        let error = LedgerAccountAuthorization::from_horizon(&serde_json::json!({
+            "account_id": ACCOUNT_A,
+            "thresholds": {
+                "low_threshold": 1,
+                "med_threshold": 2,
+                "high_threshold": 3
+            },
+            "signers": [{
+                "key": ACCOUNT_A,
+                "weight": 1,
+                "type": "preauth_tx"
+            }]
+        }))
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "Horizon signer type preauth_tx does not match signer key"
+        );
     }
 
     #[test]
