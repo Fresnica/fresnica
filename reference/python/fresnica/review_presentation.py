@@ -198,21 +198,34 @@ def _project_trustline(review: TrustlineReview) -> ReviewPresentation:
     ]
     if review.limit is not None:
         fields.append(ReviewField("Limit", review.limit))
+    if review.authorization is not None:
+        fields.append(ReviewField("Authorization", review.authorization))
+    if review.clawback_enabled is not None:
+        fields.append(
+            ReviewField(
+                "Clawback",
+                "enabled" if review.clawback_enabled else "disabled",
+            )
+        )
     fields.extend(
         [
             ReviewField("Fee", f"{review.fee} XLM"),
             ReviewField("Network", review.network),
         ]
     )
-    warnings = (
-        ("Removing a trustline is irreversible unless you create it again.",)
-        if review.action == "remove"
-        else ()
-    )
+    warnings = []
+    if review.action == "remove":
+        warnings.append("Removing a trustline is irreversible unless you create it again.")
+    if review.authorization == "unauthorized":
+        warnings.append("Issuer authorization is required before this asset can be used.")
+    elif review.authorization == "maintain_liabilities":
+        warnings.append("This trustline can only maintain or reduce existing liabilities.")
+    if review.clawback_enabled:
+        warnings.append("The issuer has clawback enabled for this trustline.")
     return ReviewPresentation(
         kind="trustline",
         title=title,
         summary=summary,
         fields=tuple(fields),
-        warnings=warnings,
+        warnings=tuple(warnings),
     )

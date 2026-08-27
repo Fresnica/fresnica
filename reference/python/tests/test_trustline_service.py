@@ -39,12 +39,33 @@ class FakeAdapter:
     def __init__(self, base_fee=100, base_reserve=5_000_000):
         self.base_fee = base_fee
         self.base_reserve = base_reserve
+        self.missing_accounts = set()
+        self.accounts = {}
+        self.pools = {}
 
     def fetch_base_fee(self):
         return self.base_fee
 
     def get_base_reserve_stroops(self):
         return self.base_reserve
+
+    def account_exists(self, address):
+        return address not in self.missing_accounts
+
+    def get_account(self, address):
+        return self.accounts.get(
+            address,
+            {
+                "account_id": address,
+                "flags": {
+                    "auth_required": False,
+                    "auth_clawback_enabled": False,
+                },
+            },
+        )
+
+    def get_liquidity_pool(self, pool_id):
+        return self.pools[pool_id]
 
 
 class FakeBalanceService:
@@ -111,6 +132,9 @@ def _line(asset, *, balance="0", buying="0", selling="0", limit="1000"):
         "buying_liabilities": buying,
         "selling_liabilities": selling,
         "limit": limit,
+        "is_authorized": True,
+        "is_authorized_to_maintain_liabilities": True,
+        "is_clawback_enabled": False,
     }
 
 
@@ -137,6 +161,8 @@ def test_add_requires_new_reserve_and_builds_change_trust():
     assert call["asset"] == asset
     assert call["limit"] == Decimal("250.5")
     assert call["base_fee_stroops"] == 100
+    assert call["authorization"] == "full"
+    assert call["clawback_enabled"] is False
 
 
 def test_add_uses_fresnica_marker_limit_by_default():
@@ -219,6 +245,78 @@ def test_remove_requires_zero_balance_and_liabilities_then_uses_zero_limit():
     service.prepare_remove("main", wallet, asset)
     assert builder.calls[-1]["action"] == "remove"
     assert builder.calls[-1]["limit"] == Decimal("0")
+
+
+def test_add_requires_existing_issuer_and_reports_initial_flags():
+    wallet = Wallet()
+    issuer = Keypair.random().public_key
+    asset = Asset("USD", issuer)
+    adapter = FakeAdapter()
+    adapter.accounts[issuer] = {
+        "account_id": issuer,
+        "flags": {"auth_required": True, "auth_clawback_enabled": True},
+    }
+    service = TrustlineService(
+        FakeBalanceService(_account(native="2"), adapter),
+        FakeBuilder(),
+        FakeTransactionService(),
+    )
+
+    prepared = service.prepare_add("main", wallet, asset)
+    assert prepared.review == "trustline-review"
+    assert service.transaction_builder.calls[-1]["authorization"] == "unauthorized"
+    assert service.transaction_builder.calls[-1]["clawback_enabled"] is True
+
+    adapter.missing_accounts.add(issuer)
+    with pytest.raises(TransactionError, match="issuer account does not exist"):
+        service.prepare_add("main", wallet, asset)
+
+
+def test_nonzero_limit_requires_issuer_but_remove_allows_orphaned_asset():
+    wallet = Wallet()
+    issuer = Keypair.random().public_key
+    asset = Asset("USD", issuer)
+    adapter = FakeAdapter()
+    adapter.missing_accounts.add(issuer)
+    balance_service = FakeBalanceService(
+        _account(trustline=_line(asset), subentries=1), adapter
+    )
+    builder = FakeBuilder()
+    service = TrustlineService(balance_service, builder, FakeTransactionService())
+
+    with pytest.raises(TransactionError, match="issuer account does not exist"):
+        service.prepare_limit("main", wallet, asset, "10")
+
+    service.prepare_remove("main", wallet, asset)
+    assert builder.calls[-1]["action"] == "remove"
+
+
+def test_remove_rejects_asset_referenced_by_pool_share_trustline():
+    wallet = Wallet()
+    asset = Asset("USD", Keypair.random().public_key)
+    account = _account(trustline=_line(asset), subentries=2)
+    account["balances"].append(
+        {
+            "asset_type": "liquidity_pool_shares",
+            "liquidity_pool_id": "pool-1",
+            "balance": "0",
+        }
+    )
+    adapter = FakeAdapter()
+    adapter.pools["pool-1"] = {
+        "reserves": [
+            {"asset": "native", "amount": "1"},
+            {"asset": f"{asset.code}:{asset.issuer}", "amount": "1"},
+        ]
+    }
+    service = TrustlineService(
+        FakeBalanceService(account, adapter),
+        FakeBuilder(),
+        FakeTransactionService(),
+    )
+
+    with pytest.raises(TransactionError, match="liquidity pool pool-1 uses"):
+        service.prepare_remove("main", wallet, asset)
 
 
 def test_trustline_rejects_watch_only_native_self_issued_and_bad_precision():

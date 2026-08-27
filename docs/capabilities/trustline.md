@@ -60,6 +60,8 @@ Successful `ChangeTrust` creation does not always mean the asset is immediately 
 
 Capabilities/Flows must preserve this ledger state rather than translate every successful add into a generic "asset ready" result. Full authorization and `AUTHORIZED_TO_MAINTAIN_LIABILITIES` have different Payment/SDEX meaning.
 
+At prepare/review time, implementations may expose the issuer-derived expected initial state. That state is a preflight observation, not a substitute for refreshing the resulting trustline after ledger confirmation because issuer flags can change between preparation and execution.
+
 ## Issuer rule
 
 An asset issuer cannot create a trustline to its own issued asset.
@@ -72,6 +74,7 @@ A review should expose at least:
 - source account;
 - full asset identity;
 - resulting limit when applicable;
+- current/expected authorization and clawback state when the trustline will remain after the operation;
 - fee;
 - network.
 

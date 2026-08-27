@@ -44,7 +44,7 @@
 - [x] Add Balance/Payment receiving-capacity semantics in Rust/RefPython, including issued trustline limit/buying-liability headroom, native `INT64_MAX` headroom and issuer-own-asset special handling
 - [x] Add Payment source/destination trustline full-authorization and destination-capacity preflight plus explicit SEP-29 `memo_required` protection to the Rust shared Payment path; keep issuer-special/orphaned-issuer behavior aligned with current protocol
 - [x] Add CAP-18 authorization-aware SDEX preflight: create/update require full authorization while cancel remains valid with maintain-liabilities authorization
-- [ ] Add Trustline remove preflight for `liquidityPoolUseCount`, issuer-existence add/nonzero-limit rules, and resulting authorization/clawback state; keep pool-share ChangeTrustAsset outside current product scope
+- [x] Add Trustline remove preflight for `liquidityPoolUseCount`, issuer-existence add/nonzero-limit rules, and resulting authorization/clawback state; keep pool-share ChangeTrustAsset outside current product scope
 - [x] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry
 - [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
 - [ ] Harden Rust Anchor asset matching to exact-case full identity and redirect handling against HTTPS downgrade/unsafe redirects; add delegated/multisig SEP-10 handling through Ledger Authorization/Signing Coordination or explicit unsupported failure

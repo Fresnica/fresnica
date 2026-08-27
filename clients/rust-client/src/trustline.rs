@@ -9,7 +9,7 @@ use stellar_xdr::{
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
     minimum_balance_stroops, parse_stroops, resolve_signing_wallet, sign_and_submit,
-    FresnicaClient, TransactionSubmission, WalletRecord,
+    FresnicaClient, HorizonClient, TransactionSubmission, WalletRecord,
 };
 
 pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -45,6 +45,23 @@ impl TrustlineOperation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustlineAuthorization {
+    Full,
+    MaintainLiabilities,
+    Unauthorized,
+}
+
+impl TrustlineAuthorization {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::MaintainLiabilities => "maintain liabilities only",
+            Self::Unauthorized => "unauthorized",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustlineReview {
     pub operation: TrustlineOperation,
@@ -52,6 +69,8 @@ pub struct TrustlineReview {
     pub source: String,
     pub asset: String,
     pub limit: Option<String>,
+    pub authorization: Option<TrustlineAuthorization>,
+    pub clawback_enabled: Option<bool>,
     pub fee_xlm: String,
     pub network: String,
 }
@@ -83,7 +102,7 @@ impl FresnicaClient {
         let ledger = self.horizon().get_ledger_parameters()?;
         let existing = find_trustline(&account, &asset);
 
-        let (operation, limit) = match &request.action {
+        let (operation, limit, authorization, clawback_enabled) = match &request.action {
             TrustlineAction::Add { limit } => {
                 if existing.is_some() {
                     return Err(format!(
@@ -91,6 +110,14 @@ impl FresnicaClient {
                         asset.display()
                     ));
                 }
+                if !self.horizon().account_exists(&asset.issuer)? {
+                    return Err(format!(
+                        "Asset issuer account does not exist: {}",
+                        asset.issuer
+                    ));
+                }
+                let issuer = self.horizon().get_account(&asset.issuer)?;
+                let (authorization, clawback_enabled) = initial_trustline_state(&issuer)?;
                 ensure_native_capacity(
                     &account,
                     ledger.base_reserve_in_stroops,
@@ -100,6 +127,8 @@ impl FresnicaClient {
                 (
                     TrustlineOperation::Add,
                     parse_limit(limit.as_deref().unwrap_or(DEFAULT_TRUSTLINE_LIMIT))?,
+                    Some(authorization),
+                    Some(clawback_enabled),
                 )
             }
             TrustlineAction::SetLimit { limit } => {
@@ -119,13 +148,25 @@ impl FresnicaClient {
                         format_stroops(committed)
                     ));
                 }
+                if !self.horizon().account_exists(&asset.issuer)? {
+                    return Err(format!(
+                        "Asset issuer account does not exist: {}",
+                        asset.issuer
+                    ));
+                }
+                let (authorization, clawback_enabled) = existing_trustline_state(raw)?;
                 ensure_native_capacity(
                     &account,
                     ledger.base_reserve_in_stroops,
                     ledger.base_fee_in_stroops,
                     0,
                 )?;
-                (TrustlineOperation::SetLimit, limit)
+                (
+                    TrustlineOperation::SetLimit,
+                    limit,
+                    Some(authorization),
+                    Some(clawback_enabled),
+                )
             }
             TrustlineAction::Remove => {
                 let raw = existing
@@ -139,13 +180,14 @@ impl FresnicaClient {
                             .to_owned(),
                     );
                 }
+                ensure_not_used_by_liquidity_pool(self.horizon(), &account, &asset)?;
                 ensure_native_capacity(
                     &account,
                     ledger.base_reserve_in_stroops,
                     ledger.base_fee_in_stroops,
                     0,
                 )?;
-                (TrustlineOperation::Remove, 0)
+                (TrustlineOperation::Remove, 0, None, None)
             }
         };
 
@@ -166,6 +208,8 @@ impl FresnicaClient {
             source: wallet.address.clone(),
             asset: asset.display(),
             limit: (operation != TrustlineOperation::Remove).then(|| format_stroops(limit)),
+            authorization,
+            clawback_enabled,
             fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
             network: wallet.network.clone(),
         };
@@ -288,6 +332,89 @@ fn ensure_native_capacity(
     Ok(())
 }
 
+fn initial_trustline_state(issuer: &Value) -> Result<(TrustlineAuthorization, bool), String> {
+    let flags = issuer
+        .get("flags")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Horizon returned malformed issuer flags".to_owned())?;
+    let auth_required = flags
+        .get("auth_required")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Horizon returned malformed issuer authorization flags".to_owned())?;
+    let clawback_enabled = flags
+        .get("auth_clawback_enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Horizon returned malformed issuer clawback flags".to_owned())?;
+    Ok((
+        if auth_required {
+            TrustlineAuthorization::Unauthorized
+        } else {
+            TrustlineAuthorization::Full
+        },
+        clawback_enabled,
+    ))
+}
+
+fn existing_trustline_state(raw: &Value) -> Result<(TrustlineAuthorization, bool), String> {
+    let fully_authorized = raw
+        .get("is_authorized")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Horizon returned malformed trustline authorization state".to_owned())?;
+    let maintain_liabilities = raw
+        .get("is_authorized_to_maintain_liabilities")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Horizon returned malformed trustline authorization state".to_owned())?;
+    let clawback_enabled = raw
+        .get("is_clawback_enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Horizon returned malformed trustline clawback state".to_owned())?;
+    let authorization = if fully_authorized {
+        TrustlineAuthorization::Full
+    } else if maintain_liabilities {
+        TrustlineAuthorization::MaintainLiabilities
+    } else {
+        TrustlineAuthorization::Unauthorized
+    };
+    Ok((authorization, clawback_enabled))
+}
+
+fn ensure_not_used_by_liquidity_pool(
+    horizon: &HorizonClient,
+    account: &Value,
+    asset: &IssuedAsset,
+) -> Result<(), String> {
+    let balances = account
+        .get("balances")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+    for raw in balances {
+        if text(raw, "asset_type") != Some("liquidity_pool_shares") {
+            continue;
+        }
+        let pool_id = text(raw, "liquidity_pool_id")
+            .ok_or_else(|| "Horizon returned malformed liquidity-pool balance".to_owned())?;
+        let pool = horizon.get_liquidity_pool(pool_id)?;
+        if liquidity_pool_uses_asset(&pool, asset)? {
+            return Err(format!(
+                "Trustline cannot be removed while liquidity pool {pool_id} uses {}",
+                asset.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn liquidity_pool_uses_asset(pool: &Value, asset: &IssuedAsset) -> Result<bool, String> {
+    let reserves = pool
+        .get("reserves")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Horizon returned malformed liquidity-pool reserves".to_owned())?;
+    let identity = asset.display();
+    Ok(reserves
+        .iter()
+        .any(|reserve| text(reserve, "asset") == Some(identity.as_str())))
+}
+
 fn parse_limit(value: &str) -> Result<i64, String> {
     parse_stroops(value, true).map_err(|_| {
         "Trustline limit must be greater than zero with at most 7 decimal places".to_owned()
@@ -337,5 +464,44 @@ mod tests {
         });
         let raw = find_trustline(&account, &asset).unwrap();
         assert_ne!(balance_stroops(raw, "balance").unwrap(), 0);
+    }
+
+    #[test]
+    fn issuer_flags_define_initial_trustline_state() {
+        let issuer = serde_json::json!({
+            "flags": {
+                "auth_required": true,
+                "auth_clawback_enabled": true
+            }
+        });
+        assert_eq!(
+            initial_trustline_state(&issuer).unwrap(),
+            (TrustlineAuthorization::Unauthorized, true)
+        );
+    }
+
+    #[test]
+    fn existing_full_authorization_takes_precedence_over_maintain_flag() {
+        let raw = serde_json::json!({
+            "is_authorized": true,
+            "is_authorized_to_maintain_liabilities": true,
+            "is_clawback_enabled": false
+        });
+        assert_eq!(
+            existing_trustline_state(&raw).unwrap(),
+            (TrustlineAuthorization::Full, false)
+        );
+    }
+
+    #[test]
+    fn pool_reserves_block_removal_of_referenced_asset() {
+        let asset = IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let pool = serde_json::json!({
+            "reserves": [
+                {"asset": "native", "amount": "10.0000000"},
+                {"asset": format!("USD:{ISSUER}"), "amount": "20.0000000"}
+            ]
+        });
+        assert!(liquidity_pool_uses_asset(&pool, &asset).unwrap());
     }
 }

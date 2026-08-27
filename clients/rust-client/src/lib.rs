@@ -49,8 +49,8 @@ pub use transaction::{
     sign_and_submit, sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
 };
 pub use trustline::{
-    PreparedTrustline, TrustlineAction, TrustlineOperation, TrustlineRequest, TrustlineReview,
-    DEFAULT_TRUSTLINE_LIMIT,
+    PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,
+    TrustlineRequest, TrustlineReview, DEFAULT_TRUSTLINE_LIMIT,
 };
 pub use wallet::{
     attach_mnemonic_record, attach_secret_record, create_mnemonic_record, detach_signer_record,

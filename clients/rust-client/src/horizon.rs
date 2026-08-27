@@ -33,6 +33,13 @@ impl HorizonClient {
         )
     }
 
+    pub fn get_liquidity_pool(&self, liquidity_pool_id: &str) -> Result<Value, String> {
+        self.get_json(
+            &format!("/liquidity_pools/{liquidity_pool_id}"),
+            &format!("Liquidity pool not found: {liquidity_pool_id}"),
+        )
+    }
+
     pub fn account_exists(&self, address: &str) -> Result<bool, String> {
         let url = format!("{}/accounts/{address}", self.base_url);
         match ureq::get(&url).call() {

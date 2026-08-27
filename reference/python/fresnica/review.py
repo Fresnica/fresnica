@@ -48,3 +48,5 @@ class TrustlineReview:
     limit: str | None
     fee: str
     network: str
+    authorization: str | None = None
+    clawback_enabled: bool | None = None

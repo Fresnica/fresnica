@@ -31,6 +31,8 @@ class TrustlineService:
             raise TransactionError(
                 f"Trustline already exists for {_asset_identity(asset)}; use trust limit to change its limit"
             )
+        issuer = self._issuer_account(asset)
+        authorization, clawback_enabled = _initial_trustline_state(issuer)
         self._ensure_native_capacity(
             account,
             base_reserve,
@@ -44,6 +46,8 @@ class TrustlineService:
             base_fee_stroops=base_fee,
             action="add",
             limit=limit_value,
+            authorization=authorization,
+            clawback_enabled=clawback_enabled,
         )
 
     def prepare_limit(self, wallet_name: str, wallet, asset, limit):
@@ -63,6 +67,8 @@ class TrustlineService:
             raise InvalidAmountError(
                 f"Trustline limit cannot be below current balance plus buying liabilities ({committed})"
             )
+        self._ensure_issuer_exists(asset)
+        authorization, clawback_enabled = _existing_trustline_state(raw)
         self._ensure_native_capacity(account, base_reserve, base_fee)
         return self.transaction_builder.build_trustline(
             wallet_name=wallet_name,
@@ -71,6 +77,8 @@ class TrustlineService:
             base_fee_stroops=base_fee,
             action="limit",
             limit=limit_value,
+            authorization=authorization,
+            clawback_enabled=clawback_enabled,
         )
 
     def prepare_remove(self, wallet_name: str, wallet, asset):
@@ -88,6 +96,7 @@ class TrustlineService:
             raise TransactionError(
                 "Trustline cannot be removed while balance or liabilities are non-zero"
             )
+        self._ensure_not_used_by_liquidity_pool(account, asset)
         self._ensure_native_capacity(account, base_reserve, base_fee)
         return self.transaction_builder.build_trustline(
             wallet_name=wallet_name,
@@ -134,6 +143,27 @@ class TrustlineService:
         if free < required:
             raise InsufficientBalanceError("XLM", required, max(free, Decimal("0")))
 
+    def _ensure_issuer_exists(self, asset: Asset) -> None:
+        if not self.balance_service.adapter.account_exists(asset.issuer):
+            raise TransactionError(f"Asset issuer account does not exist: {asset.issuer}")
+
+    def _issuer_account(self, asset: Asset) -> dict:
+        self._ensure_issuer_exists(asset)
+        return self.balance_service.adapter.get_account(asset.issuer)
+
+    def _ensure_not_used_by_liquidity_pool(self, account: dict, asset: Asset) -> None:
+        for raw in account.get("balances", []):
+            if raw.get("asset_type") != "liquidity_pool_shares":
+                continue
+            pool_id = raw.get("liquidity_pool_id")
+            if not isinstance(pool_id, str) or not pool_id:
+                raise TransactionError("Horizon returned malformed liquidity-pool balance")
+            pool = self.balance_service.adapter.get_liquidity_pool(pool_id)
+            if _liquidity_pool_uses_asset(pool, asset):
+                raise TransactionError(
+                    f"Trustline cannot be removed while liquidity pool {pool_id} uses {_asset_identity(asset)}"
+                )
+
     @staticmethod
     def _ensure_signing_wallet(wallet) -> None:
         if not wallet.can_sign():
@@ -179,6 +209,51 @@ def _find_native(account: dict) -> dict | None:
         if raw.get("asset_type") == "native":
             return raw
     return None
+
+
+def _initial_trustline_state(issuer: dict) -> tuple[str, bool]:
+    flags = issuer.get("flags")
+    if not isinstance(flags, dict):
+        raise TransactionError("Horizon returned malformed issuer flags")
+    auth_required = flags.get("auth_required")
+    clawback_enabled = flags.get("auth_clawback_enabled")
+    if not isinstance(auth_required, bool):
+        raise TransactionError("Horizon returned malformed issuer authorization flags")
+    if not isinstance(clawback_enabled, bool):
+        raise TransactionError("Horizon returned malformed issuer clawback flags")
+    return ("unauthorized" if auth_required else "full", clawback_enabled)
+
+
+def _existing_trustline_state(raw: dict) -> tuple[str, bool]:
+    fully_authorized = raw.get("is_authorized")
+    maintain_liabilities = raw.get("is_authorized_to_maintain_liabilities")
+    clawback_enabled = raw.get("is_clawback_enabled")
+    if not isinstance(fully_authorized, bool) or not isinstance(
+        maintain_liabilities, bool
+    ):
+        raise TransactionError("Horizon returned malformed trustline authorization state")
+    if not isinstance(clawback_enabled, bool):
+        raise TransactionError("Horizon returned malformed trustline clawback state")
+    if fully_authorized:
+        authorization = "full"
+    elif maintain_liabilities:
+        authorization = "maintain_liabilities"
+    else:
+        authorization = "unauthorized"
+    return authorization, clawback_enabled
+
+
+def _liquidity_pool_uses_asset(pool: dict, asset: Asset) -> bool:
+    reserves = pool.get("reserves")
+    if not isinstance(reserves, list):
+        raise TransactionError("Horizon returned malformed liquidity-pool reserves")
+    identity = _asset_identity(asset)
+    for reserve in reserves:
+        if not isinstance(reserve, dict) or not isinstance(reserve.get("asset"), str):
+            raise TransactionError("Horizon returned malformed liquidity-pool reserve")
+        if reserve["asset"] == identity:
+            return True
+    return False
 
 
 def _asset_identity(asset: Asset) -> str:

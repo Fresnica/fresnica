@@ -1377,6 +1377,25 @@ impl App {
         if let Some(limit) = &review.limit {
             lines.insert(3, Line::from(format!("Limit:     {limit}")));
         }
+        if let Some(authorization) = review.authorization {
+            lines.insert(
+                lines.len().saturating_sub(2),
+                Line::from(format!("Auth:      {}", authorization.label())),
+            );
+        }
+        if let Some(clawback_enabled) = review.clawback_enabled {
+            lines.insert(
+                lines.len().saturating_sub(2),
+                Line::from(format!(
+                    "Clawback:  {}",
+                    if clawback_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                )),
+            );
+        }
         lines.push(Line::from(""));
         lines.push(Line::from("Press y/Enter to continue to signing."));
         let area = popup_area(frame.area());

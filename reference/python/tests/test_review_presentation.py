@@ -1,4 +1,4 @@
-from fresnica.review import OfferReview, TransactionReview
+from fresnica.review import OfferReview, TransactionReview, TrustlineReview
 from fresnica.review_presentation import project_review, review_text
 
 
@@ -175,3 +175,25 @@ def test_cancel_with_pair_context_keeps_user_buy_orientation():
     assert fields["Pair"] == "XRP:GXRP / USDC:GUSDC"
     assert fields["Remaining"] == "10 XRP:GXRP"
     assert fields["Max spend"] == "3.25 USDC:GUSDC"
+
+
+def test_trustline_review_surfaces_authorization_and_clawback_state():
+    review = TrustlineReview(
+        wallet_name="main",
+        source="GSOURCE",
+        action="add",
+        asset="USD:GISSUER",
+        limit="1000",
+        fee="0.00001",
+        network="mainnet",
+        authorization="unauthorized",
+        clawback_enabled=True,
+    )
+
+    presentation = project_review(review)
+    fields = _fields(presentation)
+
+    assert fields["Authorization"] == "unauthorized"
+    assert fields["Clawback"] == "enabled"
+    assert any("authorization is required" in warning for warning in presentation.warnings)
+    assert any("clawback enabled" in warning for warning in presentation.warnings)

@@ -66,6 +66,8 @@ class TransactionBuilderService:
         base_fee_stroops: int,
         action: str,
         limit: Decimal | None = None,
+        authorization: str | None = None,
+        clawback_enabled: bool | None = None,
     ) -> PreparedTransaction:
         operation_limit = (
             _amount_text(limit)
@@ -91,6 +93,8 @@ class TransactionBuilderService:
             limit=review_limit,
             fee=_amount_text(fee_xlm),
             network=self.adapter.network.name,
+            authorization=authorization,
+            clawback_enabled=clawback_enabled,
         )
         return PreparedTransaction(envelope=envelope, review=review)
 

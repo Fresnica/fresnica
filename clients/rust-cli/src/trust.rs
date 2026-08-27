@@ -38,6 +38,19 @@ fn render_review(review: &TrustlineReview) {
     if let Some(limit) = &review.limit {
         println!("Limit:     {limit}");
     }
+    if let Some(authorization) = review.authorization {
+        println!("Auth:      {}", authorization.label());
+    }
+    if let Some(clawback_enabled) = review.clawback_enabled {
+        println!(
+            "Clawback:  {}",
+            if clawback_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+    }
     println!("Fee:       {} XLM", review.fee_xlm);
     println!("Network:   {}", review.network);
 }
