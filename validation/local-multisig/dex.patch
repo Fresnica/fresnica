@@ -1,0 +1,42 @@
+diff --git a/clients/rust-client/src/dex.rs b/clients/rust-client/src/dex.rs
+index ba1029e..b82f265 100644
+--- a/clients/rust-client/src/dex.rs
++++ b/clients/rust-client/src/dex.rs
+@@ -9,8 +9,8 @@ use stellar_xdr::{
+ 
+ use crate::{
+     account_sequence, balance_stroops, build_operation_envelope, format_stroops,
+-    minimum_balance_stroops, parse_stroops, resolve_signing_wallet, sign_and_submit,
+-    FresnicaClient, TransactionSubmission, WalletRecord, DEFAULT_TRUSTLINE_LIMIT, STROOPS_PER_XLM,
++    minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
++    TransactionSubmission, WalletRecord, DEFAULT_TRUSTLINE_LIMIT, STROOPS_PER_XLM,
+ };
+ 
+ const INT32_MAX: i64 = i32::MAX as i64;
+@@ -496,7 +496,7 @@ impl FresnicaClient {
+         allow_trustline: bool,
+     ) -> Result<PreparedOffer, String> {
+         let wallet =
+-            resolve_signing_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
++            resolve_write_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
+         let base = OfferAsset::parse(base_text)?;
+         let counter = OfferAsset::parse(counter_text)?;
+         ensure_pair(&base, &counter)?;
+@@ -616,7 +616,7 @@ impl FresnicaClient {
+     ) -> Result<PreparedOffer, String> {
+         validate_offer_id(offer_id)?;
+         let wallet =
+-            resolve_signing_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
++            resolve_write_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
+         let base = OfferAsset::parse(base_text)?;
+         let counter = OfferAsset::parse(counter_text)?;
+         ensure_pair(&base, &counter)?;
+@@ -708,7 +708,7 @@ impl FresnicaClient {
+     ) -> Result<PreparedOffer, String> {
+         validate_offer_id(offer_id)?;
+         let wallet =
+-            resolve_signing_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
++            resolve_write_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
+         let raw_offer = self.horizon().get_offer(offer_id)?;
+         ensure_offer_owner(&raw_offer, &wallet)?;
+         let selling = OfferAsset::from_horizon(
