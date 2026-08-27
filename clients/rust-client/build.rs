@@ -32,6 +32,7 @@ fn main() {
         "signing-coordination.patch",
         "transaction.patch",
         "trustline.patch",
+        "test-xdr-fix.patch",
     ] {
         let patch = patches.join(name);
         println!("cargo:rerun-if-changed={}", patch.display());
