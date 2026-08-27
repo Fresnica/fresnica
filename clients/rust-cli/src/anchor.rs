@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::Path;
 
@@ -7,19 +7,20 @@ use serde_json::Value as JsonValue;
 use zeroize::Zeroizing;
 
 use crate::send::review_and_submit_payment;
-use crate::transaction_flow::{resolve_local_signing_wallet, sign_transaction_xdr_with_wallet};
+use crate::transaction_flow::{network_passphrase, parse_transaction_xdr};
 use fresnica_client::{
     anchor_status_requires_sep10, anchor_transaction_text as transaction_text,
     anchor_transfer_requires_sep10,
     anchor_withdrawal_payment_from_transaction as withdrawal_payment_from_transaction,
-    ensure_direct_sep10_authorization, exchange_anchor_sep10_challenge, fetch_anchor_transaction,
-    get_anchor_customer, prepare_anchor_sep10_challenge, put_anchor_customer,
+    exchange_anchor_sep10_challenge, fetch_anchor_transaction, get_anchor_customer,
+    prepare_anchor_sep10_challenge, put_anchor_customer, satisfied_ed25519_conditions,
     select_anchor_status_protocol as select_status_protocol,
-    select_anchor_transfer_protocol as select_transfer_protocol, start_anchor_sep24_transfer,
-    start_anchor_sep6_transfer, AnchorAsset as IssuedAsset, AnchorCapabilities, AnchorCustomerFile,
-    AnchorCustomerQuery, AnchorCustomerSnapshot, AnchorCustomerUpdate, AnchorProtocol,
+    select_anchor_transfer_protocol as select_transfer_protocol, sep10_authorization_plan,
+    sign_needed_local_ed25519, start_anchor_sep24_transfer, start_anchor_sep6_transfer,
+    AnchorAsset as IssuedAsset, AnchorCapabilities, AnchorCustomerFile, AnchorCustomerQuery,
+    AnchorCustomerSnapshot, AnchorCustomerUpdate, AnchorProtocol,
     AnchorSep24InteractiveResult as Sep24InteractiveResult, AnchorTransferKind, FresnicaClient,
-    WalletRecord,
+    LedgerSignerCondition, LedgerSignerKind, WalletRecord,
 };
 
 pub fn command_anchor(client: &FresnicaClient, arguments: &[String]) -> Result<(), String> {
@@ -126,7 +127,7 @@ fn command_auth(client: &FresnicaClient, arguments: &[String]) -> Result<(), Str
     }
 
     let discovery = client.discover_anchor(&arguments[0])?;
-    let record = resolve_local_signing_wallet(client.storage(), client.network(), wallet)?;
+    let record = client.resolve_wallet(wallet)?;
     let token = authenticate_anchor_sep10(
         client,
         &record,
@@ -777,19 +778,29 @@ fn authenticate_anchor_sep10(
     home_domain: &str,
     capabilities: &AnchorCapabilities,
 ) -> Result<Zeroizing<String>, String> {
-    if record.watch_only() || record.secret.is_none() {
-        return Err(format!(
-            "wallet \"{}\" is watch-only; this anchor flow requires SEP-10 signing",
-            record.name
-        ));
-    }
     let ledger_account = client.ledger_account(&record.address)?;
-    ensure_direct_sep10_authorization(ledger_account.as_ref(), &record.address)?;
+    let authorization = sep10_authorization_plan(ledger_account.as_ref(), &record.address)?;
     let challenge =
         prepare_anchor_sep10_challenge(network, &record.address, home_domain, capabilities)?;
-    let signed_xdr =
-        sign_transaction_xdr_with_wallet(record, network, challenge.transaction_xdr().to_vec())?;
-    exchange_anchor_sep10_challenge(network, &record.address, &challenge, signed_xdr)
+    let mut envelope = parse_transaction_xdr(challenge.transaction_xdr())?;
+    let mut satisfied =
+        satisfied_ed25519_conditions(&authorization, &envelope, network_passphrase(network)?)?;
+    satisfied.remove(&LedgerSignerCondition {
+        kind: LedgerSignerKind::Ed25519PublicKey,
+        key: challenge.server_signing_key().to_owned(),
+    });
+    let excluded = BTreeSet::from([challenge.server_signing_key().to_owned()]);
+    let passcode = crate::prompt_hidden("Fresnica passcode: ")?;
+    sign_needed_local_ed25519(
+        client.storage(),
+        &authorization,
+        &satisfied,
+        &excluded,
+        network,
+        &mut envelope,
+        passcode.as_str(),
+    )?;
+    exchange_anchor_sep10_challenge(network, &challenge, &authorization, &envelope)
 }
 
 fn render_sep24_result(

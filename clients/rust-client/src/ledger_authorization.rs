@@ -177,44 +177,54 @@ impl LedgerAuthorizationPlan {
     }
 }
 
+pub fn satisfied_ed25519_conditions(
+    plan: &LedgerAuthorizationPlan,
+    envelope: &TransactionEnvelope,
+    network_passphrase: &str,
+) -> Result<BTreeSet<LedgerSignerCondition>, String> {
+    let mut satisfied = BTreeSet::new();
+    for condition in signer_conditions(plan) {
+        if condition.kind == LedgerSignerKind::Ed25519PublicKey
+            && transaction_envelope_has_valid_signature(
+                envelope,
+                network_passphrase,
+                &condition.key,
+            )
+            .map_err(|error| format!("Unable to verify existing transaction signature: {error}"))?
+        {
+            satisfied.insert(condition);
+        }
+    }
+    Ok(satisfied)
+}
+
 pub fn satisfied_transaction_conditions(
     plan: &LedgerAuthorizationPlan,
     envelope: &TransactionEnvelope,
     network_passphrase: &str,
 ) -> Result<BTreeSet<LedgerSignerCondition>, String> {
+    let mut satisfied = satisfied_ed25519_conditions(plan, envelope, network_passphrase)?;
     let hash = transaction_hash(envelope, network_passphrase)
         .map_err(|error| format!("Unable to hash transaction for ledger authorization: {error}"))?;
-    let mut satisfied = BTreeSet::new();
-    let mut seen = BTreeSet::new();
-
-    for signer in plan
-        .requirements
-        .iter()
-        .flat_map(|requirement| &requirement.signers)
-    {
-        let condition = &signer.condition;
-        if !seen.insert(condition.clone()) {
-            continue;
-        }
-        let matches = match condition.kind {
-            LedgerSignerKind::Ed25519PublicKey => transaction_envelope_has_valid_signature(
-                envelope,
-                network_passphrase,
-                &condition.key,
+    for condition in signer_conditions(plan) {
+        if condition.kind == LedgerSignerKind::PreauthorizedTransaction
+            && matches!(
+                SignerKey::from_str(&condition.key),
+                Ok(SignerKey::PreAuthTx(value)) if value.0 == hash
             )
-            .map_err(|error| format!("Unable to verify existing transaction signature: {error}"))?,
-            LedgerSignerKind::PreauthorizedTransaction => match SignerKey::from_str(&condition.key)
-            {
-                Ok(SignerKey::PreAuthTx(value)) => value.0 == hash,
-                _ => false,
-            },
-            LedgerSignerKind::HashX | LedgerSignerKind::Ed25519SignedPayload => false,
-        };
-        if matches {
-            satisfied.insert(condition.clone());
+        {
+            satisfied.insert(condition);
         }
     }
     Ok(satisfied)
+}
+
+fn signer_conditions(plan: &LedgerAuthorizationPlan) -> BTreeSet<LedgerSignerCondition> {
+    plan.requirements
+        .iter()
+        .flat_map(|requirement| &requirement.signers)
+        .map(|signer| signer.condition.clone())
+        .collect()
 }
 
 pub fn plan_classic_ledger_authorization(

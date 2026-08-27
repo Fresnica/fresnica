@@ -2,9 +2,7 @@ use std::io::{self, Write};
 
 use fresnica_client::{
     resolve_local_signing_wallet as client_resolve_local_signing_wallet,
-    sign_and_submit as client_sign_and_submit,
-    sign_transaction_xdr_with_passcode as client_sign_transaction_xdr_with_passcode, HorizonClient,
-    WalletRecord, WalletStorage,
+    sign_and_submit as client_sign_and_submit, HorizonClient, WalletRecord, WalletStorage,
 };
 use stellar_xdr::TransactionEnvelope;
 
@@ -57,18 +55,4 @@ pub fn sign_and_submit(
         println!("Ledger:    {ledger}");
     }
     Ok(())
-}
-
-pub(crate) fn sign_transaction_xdr_with_wallet(
-    record: &WalletRecord,
-    network: &str,
-    transaction_xdr: Vec<u8>,
-) -> Result<Vec<u8>, String> {
-    let passcode = crate::prompt_hidden("Fresnica passcode: ")?;
-    client_sign_transaction_xdr_with_passcode(
-        record,
-        network,
-        transaction_xdr,
-        passcode.as_str().to_owned(),
-    )
 }

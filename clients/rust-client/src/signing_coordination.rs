@@ -21,9 +21,40 @@ pub fn sign_with_local_ed25519(
 ) -> Result<(), String> {
     let network_passphrase = network_passphrase(network)?;
     let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase)?;
+    sign_needed_local_ed25519(
+        storage,
+        plan,
+        &satisfied,
+        &BTreeSet::new(),
+        network,
+        envelope,
+        passcode,
+    )?;
+
+    let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase)?;
+    if plan.is_satisfiable_by(&satisfied) {
+        Ok(())
+    } else {
+        Err("Signing Coordination did not satisfy ledger authorization".to_owned())
+    }
+}
+
+pub fn sign_needed_local_ed25519(
+    storage: &WalletStorage,
+    plan: &LedgerAuthorizationPlan,
+    satisfied: &BTreeSet<LedgerSignerCondition>,
+    excluded_keys: &BTreeSet<String>,
+    network: &str,
+    envelope: &mut TransactionEnvelope,
+    passcode: &str,
+) -> Result<(), String> {
     let records = local_signing_records(storage, network)?;
-    let local_signers = records.keys().cloned().collect();
-    let selected = select_local_ed25519_signers(plan, &satisfied, &local_signers)?;
+    let local_signers = records
+        .keys()
+        .filter(|key| !excluded_keys.contains(*key))
+        .cloned()
+        .collect();
+    let selected = select_local_ed25519_signers(plan, satisfied, &local_signers)?;
 
     for key in selected {
         let record = records
@@ -38,13 +69,7 @@ pub fn sign_with_local_ed25519(
             passcode.to_owned(),
         )?)?;
     }
-
-    let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase)?;
-    if plan.is_satisfiable_by(&satisfied) {
-        Ok(())
-    } else {
-        Err("Signing Coordination did not satisfy ledger authorization".to_owned())
-    }
+    Ok(())
 }
 
 fn local_signing_records(

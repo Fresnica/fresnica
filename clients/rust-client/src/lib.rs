@@ -21,8 +21,8 @@ pub use anchor::{
 pub use anchor_protocol::{
     anchor_sep6_requires_auth, anchor_status_requires_sep10, anchor_transaction_text,
     anchor_transfer_requires_sep10, anchor_withdrawal_payment_from_transaction,
-    ensure_direct_sep10_authorization, exchange_anchor_sep10_challenge, fetch_anchor_transaction,
-    prepare_anchor_sep10_challenge, select_anchor_status_protocol, select_anchor_transfer_protocol,
+    exchange_anchor_sep10_challenge, fetch_anchor_transaction, prepare_anchor_sep10_challenge,
+    select_anchor_status_protocol, select_anchor_transfer_protocol, sep10_authorization_plan,
     start_anchor_sep24_transfer, start_anchor_sep6_transfer, AnchorAsset, AnchorCapabilities,
     AnchorDiscovery, AnchorProtocol, AnchorSep10Challenge, AnchorSep24InteractiveResult,
     AnchorTransferKind, AnchorWithdrawalPayment,
@@ -39,16 +39,19 @@ pub use horizon::{
 };
 pub use ledger_authorization::{
     load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
-    satisfied_transaction_conditions, AccountAuthorizationRequirement, AuthorizationScope,
-    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, LedgerAccountAuthorization,
-    LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    satisfied_ed25519_conditions, satisfied_transaction_conditions,
+    AccountAuthorizationRequirement, AuthorizationScope, AuthorizationThreshold, AuthorizationUse,
+    ClassicOperationKind, LedgerAccountAuthorization, LedgerAuthorizationPlan,
+    LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
     PreparedPayment,
 };
 pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
-pub use signing_coordination::{select_local_ed25519_signers, sign_with_local_ed25519};
+pub use signing_coordination::{
+    select_local_ed25519_signers, sign_needed_local_ed25519, sign_with_local_ed25519,
+};
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
