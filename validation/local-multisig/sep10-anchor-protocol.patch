@@ -1,0 +1,311 @@
+diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
+index 8f5d48e..5525708 100644
+--- a/clients/rust-client/src/anchor_protocol.rs
++++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -3,6 +3,7 @@ use std::str::FromStr;
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ use base64::{engine::general_purpose::STANDARD, Engine as _};
++use fresnica_core::transaction_envelope_xdr;
+ use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value as JsonValue;
+@@ -15,6 +16,10 @@ use ureq::unversioned::multipart::Form;
+ use url::Url;
+ use zeroize::Zeroizing;
+ 
++use crate::ledger_authorization::{
++    satisfied_ed25519_conditions, AccountAuthorizationRequirement, LedgerAccountAuthorization,
++    LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
++};
+ use crate::payment::PaymentMemo;
+ use crate::service::FresnicaClient;
+ use crate::transaction::{
+@@ -139,6 +144,10 @@ impl AnchorSep10Challenge {
+     pub fn transaction_xdr(&self) -> &[u8] {
+         &self.transaction_xdr
+     }
++
++    pub fn server_signing_key(&self) -> &str {
++        &self.server_signing_key
++    }
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+@@ -896,49 +905,47 @@ struct Sep10TokenResponse {
+     token: String,
+ }
+ 
+-pub fn ensure_direct_sep10_authorization(
++pub fn sep10_authorization_plan(
+     ledger_account: Option<&JsonValue>,
+     account_id: &str,
+-) -> Result<(), String> {
+-    let Some(account) = ledger_account else {
+-        // SEP-10 explicitly allows an unactivated Client Account to prove control
+-        // with exactly one valid master-key signature.
+-        return Ok(());
++) -> Result<LedgerAuthorizationPlan, String> {
++    let requirement = match ledger_account {
++        Some(raw) => {
++            let account = LedgerAccountAuthorization::from_horizon(raw).map_err(|error| {
++                format!("Unable to interpret SEP-10 ledger authorization: {error}")
++            })?;
++            if account.account_id != account_id {
++                return Err(
++                    "Horizon account authorization belongs to a different account".to_owned(),
++                );
++            }
++            AccountAuthorizationRequirement {
++                account_id: account.account_id,
++                required_weight: account.medium_threshold.max(1),
++                uses: Vec::new(),
++                signers: account.signers,
++            }
++        }
++        None => {
++            AccountId::from_str(account_id)
++                .map_err(|_| "SEP-10 Client Account must be a Classic G address".to_owned())?;
++            AccountAuthorizationRequirement {
++                account_id: account_id.to_owned(),
++                required_weight: 1,
++                uses: Vec::new(),
++                signers: vec![WeightedLedgerSigner {
++                    condition: LedgerSignerCondition {
++                        kind: LedgerSignerKind::Ed25519PublicKey,
++                        key: account_id.to_owned(),
++                    },
++                    weight: 1,
++                }],
++            }
++        }
+     };
+-
+-    let observed_account = account
+-        .get("account_id")
+-        .and_then(JsonValue::as_str)
+-        .ok_or_else(|| "Horizon account authorization is missing account_id".to_owned())?;
+-    if observed_account != account_id {
+-        return Err("Horizon account authorization belongs to a different account".to_owned());
+-    }
+-
+-    let medium_threshold = account
+-        .get("thresholds")
+-        .and_then(|value| value.get("med_threshold"))
+-        .and_then(JsonValue::as_u64)
+-        .filter(|value| *value <= u64::from(u8::MAX))
+-        .ok_or_else(|| "Horizon account authorization is missing med_threshold".to_owned())?;
+-    let required_weight = medium_threshold.max(1);
+-    let signers = account
+-        .get("signers")
+-        .and_then(JsonValue::as_array)
+-        .ok_or_else(|| "Horizon account authorization is missing signers".to_owned())?;
+-    let master_weight = signers
+-        .iter()
+-        .find(|signer| signer.get("key").and_then(JsonValue::as_str) == Some(account_id))
+-        .and_then(|signer| signer.get("weight"))
+-        .and_then(JsonValue::as_u64)
+-        .filter(|value| *value <= u64::from(u8::MAX))
+-        .unwrap_or(0);
+-
+-    if master_weight < required_weight {
+-        return Err(format!(
+-            "SEP-10 direct signing is unsupported for this account: medium threshold requires weight {required_weight}, but the account master key contributes {master_weight}; use Ledger Authorization + Signing Coordination"
+-        ));
+-    }
+-    Ok(())
++    Ok(LedgerAuthorizationPlan {
++        requirements: vec![requirement],
++    })
+ }
+ 
+ pub fn prepare_anchor_sep10_challenge(
+@@ -983,28 +990,39 @@ pub fn prepare_anchor_sep10_challenge(
+ 
+ pub fn exchange_anchor_sep10_challenge(
+     network: &str,
+-    account: &str,
+     challenge: &AnchorSep10Challenge,
+-    signed_xdr: Vec<u8>,
++    authorization: &LedgerAuthorizationPlan,
++    signed_envelope: &TransactionEnvelope,
+ ) -> Result<Zeroizing<String>, String> {
+     let verified_envelope = parse_transaction_xdr(&challenge.transaction_xdr)?;
+-    let signed_envelope = parse_transaction_xdr(&signed_xdr)?;
+     let (TransactionEnvelope::Tx(verified), TransactionEnvelope::Tx(signed)) =
+-        (&verified_envelope, &signed_envelope)
++        (&verified_envelope, signed_envelope)
+     else {
+         return Err("SEP-10 challenge must use a classic transaction envelope".to_owned());
+     };
+     if signed.tx != verified.tx {
+         return Err("signed SEP-10 transaction does not match the verified challenge".to_owned());
+     }
+-    if !has_valid_transaction_signature(&signed_envelope, network, &challenge.server_signing_key)? {
++    if !has_valid_transaction_signature(signed_envelope, network, &challenge.server_signing_key)? {
+         return Err(
+             "signed SEP-10 challenge no longer contains the verified server signature".to_owned(),
+         );
+     }
+-    if !has_valid_transaction_signature(&signed_envelope, network, account)? {
+-        return Err("signed SEP-10 challenge does not contain a valid client signature".to_owned());
++
++    let mut satisfied =
++        satisfied_ed25519_conditions(authorization, signed_envelope, network_passphrase(network)?)?;
++    satisfied.remove(&LedgerSignerCondition {
++        kind: LedgerSignerKind::Ed25519PublicKey,
++        key: challenge.server_signing_key.clone(),
++    });
++    if !authorization.is_satisfiable_by(&satisfied) {
++        return Err(
++            "signed SEP-10 challenge does not satisfy client ledger authorization".to_owned(),
++        );
+     }
++
++    let signed_xdr = transaction_envelope_xdr(signed_envelope)
++        .map_err(|error| format!("Unable to encode signed SEP-10 challenge: {error}"))?;
+     exchange_sep10_challenge(&challenge.web_auth_endpoint, &STANDARD.encode(signed_xdr))
+ }
+ 
+@@ -1417,8 +1435,11 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn direct_sep10_authorization_allows_unactivated_and_sufficient_master_key() {
+-        assert!(ensure_direct_sep10_authorization(None, ISSUER).is_ok());
++    fn sep10_authorization_plan_handles_unactivated_and_medium_threshold_accounts() {
++        let unactivated = sep10_authorization_plan(None, ISSUER).unwrap();
++        assert_eq!(unactivated.requirements[0].required_weight, 1);
++        assert_eq!(unactivated.requirements[0].signers.len(), 1);
++        assert_eq!(unactivated.requirements[0].signers[0].condition.key, ISSUER);
+ 
+         let default_account = serde_json::json!({
+             "account_id": ISSUER,
+@@ -1427,50 +1448,39 @@ mod tests {
+                 {"key": ISSUER, "weight": 1, "type": "ed25519_public_key"}
+             ]
+         });
+-        assert!(ensure_direct_sep10_authorization(Some(&default_account), ISSUER).is_ok());
++        let default_plan = sep10_authorization_plan(Some(&default_account), ISSUER).unwrap();
++        assert_eq!(default_plan.requirements[0].required_weight, 1);
+ 
+         let account = serde_json::json!({
+             "account_id": ISSUER,
+-            "thresholds": {"low_threshold": 0, "med_threshold": 2, "high_threshold": 2},
++            "thresholds": {"low_threshold": 1, "med_threshold": 2, "high_threshold": 2},
+             "signers": [
+-                {"key": ISSUER, "weight": 2, "type": "ed25519_public_key"},
++                {"key": ISSUER, "weight": 1, "type": "ed25519_public_key"},
+                 {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 1, "type": "ed25519_public_key"}
+             ]
+         });
+-        assert!(ensure_direct_sep10_authorization(Some(&account), ISSUER).is_ok());
+-    }
+-
+-    #[test]
+-    fn direct_sep10_authorization_rejects_insufficient_or_disabled_master_key() {
+-        for master_weight in [0, 1] {
+-            let account = serde_json::json!({
+-                "account_id": ISSUER,
+-                "thresholds": {"med_threshold": 2},
+-                "signers": [
+-                    {"key": ISSUER, "weight": master_weight, "type": "ed25519_public_key"},
+-                    {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 2, "type": "ed25519_public_key"}
+-                ]
+-            });
+-            let error = ensure_direct_sep10_authorization(Some(&account), ISSUER).unwrap_err();
+-            assert!(error.contains("use Ledger Authorization + Signing Coordination"));
+-        }
++        let plan = sep10_authorization_plan(Some(&account), ISSUER).unwrap();
++        assert_eq!(plan.requirements[0].required_weight, 2);
++        assert_eq!(plan.requirements[0].signers.len(), 2);
+     }
+ 
+     #[test]
+-    fn direct_sep10_authorization_fails_closed_on_malformed_or_wrong_account_state() {
++    fn sep10_authorization_plan_fails_closed_on_malformed_or_wrong_account_state() {
+         let malformed = serde_json::json!({"account_id": ISSUER, "signers": []});
+         assert_eq!(
+-            ensure_direct_sep10_authorization(Some(&malformed), ISSUER).unwrap_err(),
+-            "Horizon account authorization is missing med_threshold"
++            sep10_authorization_plan(Some(&malformed), ISSUER).unwrap_err(),
++            "Unable to interpret SEP-10 ledger authorization: Horizon account authorization is missing thresholds"
+         );
+ 
+         let wrong = serde_json::json!({
+             "account_id": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I",
+-            "thresholds": {"med_threshold": 1},
+-            "signers": []
++            "thresholds": {"low_threshold": 1, "med_threshold": 1, "high_threshold": 1},
++            "signers": [
++                {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 1, "type": "ed25519_public_key"}
++            ]
+         });
+         assert_eq!(
+-            ensure_direct_sep10_authorization(Some(&wrong), ISSUER).unwrap_err(),
++            sep10_authorization_plan(Some(&wrong), ISSUER).unwrap_err(),
+             "Horizon account authorization belongs to a different account"
+         );
+     }
+@@ -1640,8 +1650,11 @@ mod tests {
+         .to_xdr(Limits::none())
+         .unwrap();
+ 
++        let substituted = parse_transaction_xdr(&substituted).unwrap();
++        let authorization = sep10_authorization_plan(None, ISSUER).unwrap();
+         assert_eq!(
+-            exchange_anchor_sep10_challenge(TESTNET, ISSUER, &challenge, substituted).unwrap_err(),
++            exchange_anchor_sep10_challenge(TESTNET, &challenge, &authorization, &substituted)
++                .unwrap_err(),
+             "signed SEP-10 transaction does not match the verified challenge"
+         );
+     }
+@@ -1664,10 +1677,46 @@ mod tests {
+             server_signing_key: SERVER_PUBLIC.to_owned(),
+         };
+ 
++        let signed_envelope = parse_transaction_xdr(&transaction_xdr).unwrap();
++        let authorization = sep10_authorization_plan(None, ISSUER).unwrap();
++        assert_eq!(
++            exchange_anchor_sep10_challenge(TESTNET, &challenge, &authorization, &signed_envelope)
++                .unwrap_err(),
++            "signed SEP-10 challenge does not satisfy client ledger authorization"
++        );
++    }
++
++    #[test]
++    fn sep10_exchange_excludes_server_signature_from_client_weight() {
++        let transaction_xdr = verify_sep10_challenge(
++            signed_valid_challenge(),
++            TESTNET,
++            ISSUER,
++            SERVER_PUBLIC,
++            HOME_DOMAIN,
++            WEB_AUTH_ENDPOINT,
++            NOW,
++        )
++        .unwrap();
++        let challenge = AnchorSep10Challenge {
++            transaction_xdr: transaction_xdr.clone(),
++            web_auth_endpoint: WEB_AUTH_ENDPOINT.to_owned(),
++            server_signing_key: SERVER_PUBLIC.to_owned(),
++        };
++        let ledger_account = serde_json::json!({
++            "account_id": ISSUER,
++            "thresholds": {"low_threshold": 1, "med_threshold": 1, "high_threshold": 1},
++            "signers": [
++                {"key": SERVER_PUBLIC, "weight": 1, "type": "ed25519_public_key"}
++            ]
++        });
++        let authorization = sep10_authorization_plan(Some(&ledger_account), ISSUER).unwrap();
++        let signed_envelope = parse_transaction_xdr(&transaction_xdr).unwrap();
++
+         assert_eq!(
+-            exchange_anchor_sep10_challenge(TESTNET, ISSUER, &challenge, transaction_xdr)
++            exchange_anchor_sep10_challenge(TESTNET, &challenge, &authorization, &signed_envelope)
+                 .unwrap_err(),
+-            "signed SEP-10 challenge does not contain a valid client signature"
++            "signed SEP-10 challenge does not satisfy client ledger authorization"
+         );
+     }
+ 
