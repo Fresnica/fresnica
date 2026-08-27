@@ -256,6 +256,62 @@ where
     );
 
     replace_if_needed(
+        "src/ledger_authorization.rs",
+        "use stellar_xdr::{\n    AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, TransactionEnvelope,\n};\n\nuse crate::horizon::HorizonClient;",
+        "use stellar_xdr::{\n    AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, SignerKey,\n    TransactionEnvelope,\n};\n\nuse crate::horizon::HorizonClient;",
+    );
+    replace_if_needed(
+        "src/ledger_authorization.rs",
+        r#"            let key = json_string(signer, "key", "Horizon signer")?.to_owned();
+            let kind = match json_string(signer, "type", "Horizon signer")? {
+                "ed25519_public_key" => LedgerSignerKind::Ed25519PublicKey,
+                "preauth_tx" => LedgerSignerKind::PreauthorizedTransaction,
+                "sha256_hash" => LedgerSignerKind::HashX,
+                "ed25519_signed_payload" => LedgerSignerKind::Ed25519SignedPayload,
+                other => return Err(format!("unsupported Horizon signer type: {other}")),
+            };
+            if kind == LedgerSignerKind::Ed25519PublicKey {
+                AccountId::from_str(&key)
+                    .map_err(|_| "Horizon Ed25519 signer has an invalid key".to_owned())?;
+            }
+"#,
+        r#"            let key = json_string(signer, "key", "Horizon signer")?.to_owned();
+            let signer_type = json_string(signer, "type", "Horizon signer")?;
+            let expected_kind = match signer_type {
+                "ed25519_public_key" => LedgerSignerKind::Ed25519PublicKey,
+                "preauth_tx" => LedgerSignerKind::PreauthorizedTransaction,
+                "sha256_hash" => LedgerSignerKind::HashX,
+                "ed25519_signed_payload" => LedgerSignerKind::Ed25519SignedPayload,
+                other => return Err(format!("unsupported Horizon signer type: {other}")),
+            };
+            let actual_kind = match SignerKey::from_str(&key)
+                .map_err(|_| "Horizon signer has an invalid StrKey".to_owned())?
+            {
+                SignerKey::Ed25519(_) => LedgerSignerKind::Ed25519PublicKey,
+                SignerKey::PreAuthTx(_) => LedgerSignerKind::PreauthorizedTransaction,
+                SignerKey::HashX(_) => LedgerSignerKind::HashX,
+                SignerKey::Ed25519SignedPayload(_) => LedgerSignerKind::Ed25519SignedPayload,
+            };
+            if actual_kind != expected_kind {
+                return Err(format!(
+                    "Horizon signer type {signer_type} does not match signer key"
+                ));
+            }
+            let kind = expected_kind;
+"#,
+    );
+    replace_if_needed(
+        "src/ledger_authorization.rs",
+        "TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "TA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUPUI",
+    );
+    replace_if_needed(
+        "src/ledger_authorization.rs",
+        "XAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "XA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVLRR",
+    );
+
+    replace_if_needed(
         "src/lib.rs",
         "pub use ledger_authorization::{\n    plan_classic_ledger_authorization, AccountAuthorizationRequirement, AuthorizationScope,",
         "pub use ledger_authorization::{\n    ensure_local_ed25519_signer_can_satisfy, load_classic_ledger_authorization_plan,\n    plan_classic_ledger_authorization, AccountAuthorizationRequirement, AuthorizationScope,",
