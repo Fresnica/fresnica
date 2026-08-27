@@ -84,7 +84,7 @@ A conforming implementation must reject before token exchange when:
 
 A product must never ask a protected signer to sign arbitrary server-provided XDR before SEP-10 verification.
 
-Classic `G...` authentication does not imply "the master key alone always signs". Where the account's current ledger signer/threshold configuration requires delegated or multisig authorization, the verified challenge must flow through Ledger Authorization + Signing Coordination. The current Rust direct-account-signature path is a reference scope; unsupported delegated/multisig SEP-10 must fail explicitly rather than pretend one local signature is sufficient.
+Classic `G...` authentication does not imply "the master key alone always signs". Where the account's current ledger signer/threshold configuration requires multisig authorization, the verified challenge must flow through Ledger Authorization + Signing Coordination. The Rust reference now coordinates enough local software Ed25519 signers to meet the current medium threshold; Hash-X, signed-payload and external/provider signer conditions remain unsupported and fail explicitly.
 
 Authorization tokens are session material, not wallet truth. They must not be logged, printed as normal output, persisted as ordinary wallet state or passed through command-line arguments.
 
@@ -195,7 +195,7 @@ This is especially useful for Mobile because SEP-24 browser handoff, SEP-6 requi
 
 The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements most of the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
 
-The Rust and RefPython references now require exact-case SEP-1 `code + issuer` identity and reject automatic HTTP redirects for Anchor protocol requests, preserving the endpoint security boundary rather than following a redirected target implicitly. The Rust CLI also checks current Horizon signer/medium-threshold state before direct SEP-10 signing: an unactivated account may use the SEP-10 master-key proof, while an activated account is rejected before signing when its master weight cannot satisfy the medium threshold alone. RefPython rejects an attached local signer whose key differs from the Classic account identity. Neither reference collects additional ledger signatures yet, so delegated/multisig coordination remains a known gap and the direct-Classic path must not be described as general ledger-authorization support.
+The Rust and RefPython references require exact-case SEP-1 `code + issuer` identity and reject automatic HTTP redirects for Anchor protocol requests, preserving the endpoint security boundary rather than following a redirected target implicitly. Rust Classic SEP-10 now builds a Ledger Authorization plan from current Horizon state and uses Signing Coordination to collect only the needed local software Ed25519 signatures. Activated accounts use the medium threshold and still require at least one actual client signature when that threshold is zero; unactivated accounts use the SEP-10 master-key proof; the anchor server key is explicitly excluded from client weight. RefPython still rejects an attached local signer whose key differs from the Classic account identity. Hash-X, signed-payload and external/provider signer collection remain deferred, so this is not general delegated-signing support.
 
 Current deferred areas:
 

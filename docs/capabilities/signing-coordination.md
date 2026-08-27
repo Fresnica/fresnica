@@ -45,6 +45,12 @@ A product may support passcode signing, system-auth-assisted signing or both. Th
 
 Stale system-auth registrations/unlock keys must fail safely after re-protection or passcode rotation.
 
+## Current Rust reference
+
+The Rust reference coordinates only the local software Ed25519 signatures still required by a Ledger Authorization plan and stops as soon as the plan is satisfied. A source Account may be watch-only while separate same-network signer records supply authority. Normal transaction submission also recognizes existing valid Ed25519 signatures and a matching preauthorized-transaction condition before selecting more local signers.
+
+Classic SEP-10 reuses the same local Ed25519 coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Hash-X, signed-payload and external/provider collection remain unsupported.
+
 ## External signer authorization
 
 Hardware/provider confirmation belongs to the provider/platform implementation. Signing Coordination still binds the provider result to the expected signer and transaction through SDK/Core verification.
