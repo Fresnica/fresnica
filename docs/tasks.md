@@ -55,6 +55,7 @@
 - [x] Route the Rust reference shared submit path through fresh Horizon Ledger Authorization and coordinate only the local software Ed25519 signatures still required after existing signatures/preauth conditions are evaluated
 - [ ] Extend the proven Rust local-Ed25519 Ledger Authorization path to provider-backed Hash-X/signed-payload/external signer conditions before claiming general Classic multisig/delegated signing support
 - [x] Define portable Backup/Restore v2 around backup-local Account/Signer graph references and revalidation-before-activation: explicit target-network confirmation, Core signer re-protection/identity verification, direct-master activation, pending delegated/provider relationships, and non-authoritative Recovery Source hints
+- [x] Make portable restore activation callback-driven rather than accepting a caller-supplied validated-reference list; the host receives exact Account/network + signer key + pending reason and unresolved relationships stay inactive
 
 ## Runtime
 

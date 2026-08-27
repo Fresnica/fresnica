@@ -305,7 +305,7 @@ test("restore rejects a protected signer whose envelope does not match its decla
   );
 });
 
-test("commit persists safe references and only host-validated pending relationships", async () => {
+test("commit activates only pending relationships that the host validates", async () => {
   const staged = await stagePortableRestore(new FakeCore(), ids(), {
     backup: portableBackup(),
     backupPasscode: "old",
@@ -313,36 +313,56 @@ test("commit persists safe references and only host-validated pending relationsh
     targetNetworks: targetNetworks(),
   });
   const store = new MemoryStore();
-  const validated = staged.pendingReferences
-    .filter((reference) => reference.reason === "ledger-authorization-required")
-    .map(({ accountId, signerId }) => ({ accountId, signerId }));
+  const checked: unknown[] = [];
 
-  await commitPortableRestore(store, staged, validated);
+  await commitPortableRestore(store, staged, async (account, signerPublicKey, reason) => {
+    checked.push([account.address, account.network, signerPublicKey, reason]);
+    return reason === "ledger-authorization-required";
+  });
 
-  assert.equal(store.accounts.size, 4);
-  assert.equal(store.signers.size, 2);
+  assert.deepEqual(checked, [
+    ["GDELEGATEDACCOUNT", "mainnet", "GDELEGATED", "ledger-authorization-required"],
+    ["CCONTRACT", "testnet", "GDELEGATED", "provider-authorization-required"],
+  ]);
   assert.deepEqual(store.references, [
     { accountId: "account-1", signerId: "signer-1" },
     { accountId: "account-2", signerId: "signer-2" },
   ]);
-  assert.equal(
-    store.references.some((reference) => reference.accountId === "account-3"),
-    false,
-  );
 });
 
-test("commit rejects a pending relationship that was not produced by staging", async () => {
+test("commit keeps pending relationships inactive without a host validator", async () => {
   const staged = await stagePortableRestore(new FakeCore(), ids(), {
     backup: portableBackup(),
     backupPasscode: "old",
     appPasscode: "new",
     targetNetworks: targetNetworks(),
   });
+  const store = new MemoryStore();
+
+  await commitPortableRestore(store, staged);
+
+  assert.deepEqual(store.references, [{ accountId: "account-1", signerId: "signer-1" }]);
+});
+
+test("commit rejects an inconsistent pending staging graph before persistence", async () => {
+  const staged = await stagePortableRestore(new FakeCore(), ids(), {
+    backup: portableBackup(),
+    backupPasscode: "old",
+    appPasscode: "new",
+    targetNetworks: targetNetworks(),
+  });
+  const tampered = {
+    ...staged,
+    pendingReferences: [
+      { ...staged.pendingReferences[0]!, signerId: "missing-signer" },
+    ],
+  };
+  const store = new MemoryStore();
 
   await assert.rejects(
-    commitPortableRestore(new MemoryStore(), staged, [
-      { accountId: "account-4", signerId: "signer-1" },
-    ]),
+    commitPortableRestore(store, tampered, async () => true),
     (error: unknown) => error instanceof PortableBackupError && error.code === "invalid-reference",
   );
+  assert.equal(store.accounts.size, 0);
+  assert.equal(store.signers.size, 0);
 });

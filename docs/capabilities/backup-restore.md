@@ -86,7 +86,7 @@ Restore staging follows these rules:
 4. A Classic Account whose address equals the verified Ed25519 signer key may activate that direct master-key relationship immediately.
 5. A different Classic signer remains pending until current ledger authorization validates the relationship on the confirmed target network. Contract/provider relationships likewise remain pending for their provider-specific authorization path.
 6. Recovery Source grouping is restored only as an untrusted hint until a later capability can independently validate that grouping. It is not signer authority.
-7. Active records and validated references are committed atomically. Unvalidated references are not silently attached.
+7. Commit does not accept a caller-supplied list of supposedly validated relationships. Instead, the host validator receives the exact staged Account (including the confirmed target network), signer public key and pending reason; only relationships it validates are attached in the atomic transaction. Without a validator, pending relationships remain inactive.
 
 Reference evidence:
 

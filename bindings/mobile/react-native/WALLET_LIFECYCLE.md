@@ -91,9 +91,12 @@ local to the backup (`a1`, `s1`, ...), and stored networks are only suggestions.
 Restore must receive an explicit target network for every account. Protected signer envelopes are
 validated and freshly re-encrypted by Core through `reprotect(oldPasscode, newPasscode,
 expectedSignerPublicKey)` before they can be persisted. Direct Classic master-key references can be
-activated from identity equality; delegated Classic and contract/provider references remain pending
-until the host validates their authorization. Recovery-source grouping is returned as a pending
-hint and is not persisted as signer authority by this layer.
+activated from identity equality; delegated Classic and contract/provider references remain pending.
+`commitPortableRestore` asks the host to validate each pending relationship using the exact restored
+Account (including the confirmed target network), signer public key and pending reason; only a `true`
+result is attached in the atomic store transaction. With no validator, pending relationships remain
+inactive. Recovery-source grouping is returned as a pending hint and is not persisted as signer
+authority by this layer.
 
 This keeps backup crypto in Rust Core and keeps the React Native layer limited to graph validation,
 staging and one atomic store transaction.

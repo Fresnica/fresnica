@@ -283,17 +283,28 @@ export async function stagePortableRestore(
   };
 }
 
+export type PortableRestoreReferenceValidator = (
+  account: AccountRecord,
+  signerPublicKey: string,
+  reason: PendingReferenceReason,
+) => Promise<boolean>;
+
 export async function commitPortableRestore(
   store: WalletStore,
   staged: StagedPortableRestore,
-  validatedPendingReferences: readonly AccountSignerReference[] = [],
+  validatePendingReference?: PortableRestoreReferenceValidator,
 ): Promise<void> {
-  const pending = new Set(
-    staged.pendingReferences.map((reference) => relationKey(reference.accountId, reference.signerId)),
-  );
-  for (const reference of validatedPendingReferences) {
-    if (!pending.has(relationKey(reference.accountId, reference.signerId))) {
-      throw new PortableBackupError("invalid-reference", "Validated restore reference is not pending");
+  const accounts = new Map(staged.accounts.map((account) => [account.id, account]));
+  const signers = new Map(staged.signers.map((signer) => [signer.id, signer]));
+  const validatedPendingReferences: AccountSignerReference[] = [];
+  for (const pending of staged.pendingReferences) {
+    const account = accounts.get(pending.accountId);
+    const signer = signers.get(pending.signerId);
+    if (account === undefined || signer === undefined) {
+      throw new PortableBackupError("invalid-reference", "Pending restore reference is inconsistent");
+    }
+    if (await validatePendingReference?.(account, signer.signerPublicKey, pending.reason)) {
+      validatedPendingReferences.push({ accountId: account.id, signerId: signer.id });
     }
   }
 
