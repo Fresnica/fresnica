@@ -47,9 +47,9 @@ Stale system-auth registrations/unlock keys must fail safely after re-protection
 
 ## Current Rust reference
 
-The Rust reference coordinates only the local software Ed25519 signatures still required by a Ledger Authorization plan and stops as soon as the plan is satisfied. A source Account may be watch-only while separate same-network signer records supply authority. Normal transaction submission also recognizes existing valid Ed25519 signatures and a matching preauthorized-transaction condition before selecting more local signers.
+The Rust reference coordinates only the local software Ed25519 signatures still required by a Ledger Authorization plan and stops as soon as the plan is satisfied. A source Account may be watch-only while separate same-network signer records supply authority. Normal transaction submission also recognizes already-valid Ed25519, matching preauthorized-transaction, Hash-X and signed-payload conditions before selecting more local signers.
 
-Classic SEP-10 reuses the same local Ed25519 coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Hash-X, signed-payload and external/provider collection remain unsupported.
+Classic SEP-10 reuses the same local Ed25519 coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Fresnica still does not collect Hash-X, signed-payload or other external/provider authorization material itself.
 
 ## External signer authorization
 
