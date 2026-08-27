@@ -52,6 +52,7 @@
 - [ ] Route SEP-10 delegated/multisig requirements through reusable Ledger Authorization + Signing Coordination and collect the additional required signatures
 - [x] Add cross-language asset-identity vectors for protocol-valid case-sensitive issued codes, including values that high-level SDK convenience constructors may normalize
 - [x] Add the first reusable Rust Ledger Authorization planning slice for normalized typed Horizon signers/thresholds, transaction + operation sources, weighted availability and fail-closed unsupported semantics
+- [x] Route the Rust reference shared submit path through a fresh Horizon Ledger Authorization plan and fail closed when the selected local Ed25519 signer cannot satisfy every source requirement by itself
 - [ ] Add a real Ledger Authorization implementation/evidence set before claiming general Classic multisig/delegated signing support
 - [ ] Define a next-generation portable Backup/Restore format/activation path before Mobile adoption; authenticate or independently revalidate security-significant account/signer/network relationship metadata rather than copying terminal v1 wholesale
 

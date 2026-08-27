@@ -20,6 +20,9 @@ use stellar_xdr::{
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::ledger_authorization::{
+    ensure_local_ed25519_signer_can_satisfy, load_classic_ledger_authorization_plan,
+};
 use crate::{
     HorizonClient, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
     TESTNET_HORIZON_URL,
@@ -238,6 +241,8 @@ pub fn sign_and_submit(
     passcode: String,
 ) -> Result<TransactionSubmission, String> {
     ensure_transaction_not_expired(envelope)?;
+    let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
+    ensure_local_ed25519_signer_can_satisfy(&authorization, &record.address)?;
     let network_passphrase = network_passphrase(network)?;
     let unsigned_xdr = transaction_envelope_xdr(envelope)
         .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
