@@ -1,5 +1,5 @@
 diff --git a/core/rust/src/transaction.rs b/core/rust/src/transaction.rs
-index 8af2091..0c5b769 100644
+index 8af2091..111dd5a 100644
 --- a/core/rust/src/transaction.rs
 +++ b/core/rust/src/transaction.rs
 @@ -2,7 +2,8 @@ use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey};
@@ -78,7 +78,7 @@ index 8af2091..0c5b769 100644
 +        SignerKey::Ed25519SignedPayload(signed) => {
 +            let verifying_key = VerifyingKey::from_bytes(&signed.ed25519.0)
 +                .map_err(|_| SignerError::InvalidPublicKey)?;
-+            let payload = signed.payload.0.as_slice();
++            let payload = signed.payload.as_slice();
 +            let public_hint = signature_hint(&signed.ed25519.0);
 +            let payload_hint = signature_hint(payload);
 +            let hint = SignatureHint(core::array::from_fn(|index| {
@@ -104,7 +104,7 @@ index 8af2091..0c5b769 100644
 +    if bytes.len() < hint.len() {
 +        hint[..bytes.len()].copy_from_slice(bytes);
 +    } else {
-+        hint.copy_from_slice(&bytes[bytes.len() - hint.len()..]);
++        hint.copy_from_slice(&bytes[bytes.len() - 4..]);
 +    }
 +    SignatureHint(hint)
  }
