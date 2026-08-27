@@ -1,0 +1,35 @@
+diff --git a/clients/rust-client/src/ledger_authorization.rs b/clients/rust-client/src/ledger_authorization.rs
+index a726be6..93c7484 100644
+--- a/clients/rust-client/src/ledger_authorization.rs
++++ b/clients/rust-client/src/ledger_authorization.rs
+@@ -525,7 +525,7 @@ mod tests {
+         let envelope = build_operation_envelope(
+             ACCOUNT_A,
+             vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+-                data_name: String64::try_from("auth").unwrap(),
++                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
+                 data_value: None,
+             })],
+             1,
+@@ -554,7 +554,7 @@ mod tests {
+         let mut envelope = build_operation_envelope(
+             ACCOUNT_B,
+             vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+-                data_name: String64::try_from("auth").unwrap(),
++                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
+                 data_value: None,
+             })],
+             1,
+diff --git a/clients/rust-client/src/signing_coordination.rs b/clients/rust-client/src/signing_coordination.rs
+index 7e40be6..f0af66f 100644
+--- a/clients/rust-client/src/signing_coordination.rs
++++ b/clients/rust-client/src/signing_coordination.rs
+@@ -209,7 +209,7 @@ mod tests {
+         let mut envelope = build_operation_envelope(
+             ACCOUNT,
+             vec![OperationBody::ManageData(ManageDataOp {
+-                data_name: String64::try_from("auth").unwrap(),
++                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
+                 data_value: None,
+             })],
+             1,
