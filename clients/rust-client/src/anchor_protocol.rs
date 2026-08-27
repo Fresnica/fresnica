@@ -1465,7 +1465,7 @@ mod tests {
         );
 
         let wrong = serde_json::json!({
-            "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            "account_id": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I",
             "thresholds": {"med_threshold": 1},
             "signers": []
         });
