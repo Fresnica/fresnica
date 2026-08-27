@@ -1,0 +1,100 @@
+32' ? 'gradlew.bat' : 'gradlew'));
+-  assert.deepEqual(invocation.args.slice(-2), ['clean', 'assembleRelease']);
++  assert.deepEqual(invocation.args.slice(-2), [
++    ':fresnicaReactNativeAdapter:clean',
++    ':fresnicaReactNativeAdapter:assembleRelease',
++  ]);
++  assert.deepEqual(invocation.args.slice(0, 2), ['-p', path.join(projectDir, 'android')]);
++  assert.ok(invocation.args.includes('--init-script'));
++  assert.ok(invocation.args.some((arg) => arg.startsWith('-PfresnicaAdapterProjectDir=')));
+   assert.ok(invocation.args.includes(`-PfresnicaNativeSdkAar=${nativeSdkAar}`));
+   assert.ok(invocation.args.includes('-PfresnicaReactNativeVersion=0.74.2'));
++  assert.ok(invocation.args.includes('-PfresnicaCompileSdk=35'));
+ });
+ 
+ 
+@@ -34,7 +42,7 @@ test('Android one-time build emits adapter AAR plus compatibility manifest', asy
+   await writeFile(nativeSdkAar, 'native-sdk');
+   await writeFile(
+     fakeGradle,
+-    '#!/bin/sh\nset -eu\n[ "$1" = "-p" ]\nmkdir -p "$2/build/outputs/aar"\nprintf adapter-binary > "$2/build/outputs/aar/fresnica-react-native-adapter-release.aar"\n',
++    '#!/bin/sh\nset -eu\nadapter=\"\"\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    -PfresnicaAdapterProjectDir=*) adapter=${arg#*=} ;;\n  esac\ndone\n[ -n \"$adapter\" ]\nmkdir -p \"$adapter/build/outputs/aar\"\nprintf adapter-binary > \"$adapter/build/outputs/aar/fresnica-react-native-adapter-release.aar\"\n',
+   );
+   await chmod(fakeGradle, 0o755);
+ 
+diff --git a/adapters/react-native/tooling/test/source-boundary.test.mjs b/adapters/react-native/tooling/test/source-boundary.test.mjs
+index 00b8c2a..5966186 100644
+--- a/adapters/react-native/tooling/test/source-boundary.test.mjs
++++ b/adapters/react-native/tooling/test/source-boundary.test.mjs
+@@ -50,6 +50,21 @@ test('Android adapter targets Native SDK and preserves the reviewed JS surface',
+   }
+ });
+ 
++
++test('Android adapter source borrows the consumer build instead of pinning a toolchain', async () => {
++  const [build, init] = await Promise.all([
++    readFile(path.join(ADAPTER_DIR, 'android/build.gradle'), 'utf8'),
++    readFile(path.join(ADAPTER_DIR, 'android/include.init.gradle'), 'utf8'),
++  ]);
++  assert.match(build, /apply plugin: 'com\.android\.library'/);
++  assert.doesNotMatch(build, /com\.android\.library['"]?\s+version|org\.jetbrains\.kotlin\.android['"]?\s+version/);
++  assert.doesNotMatch(build, /^repositories\s*\{/m, 'adapter module must use the consumer repository policy');
++  assert.match(build, /rootProject\.ext\.has\('compileSdkVersion'\)/);
++  assert.match(build, /Fresnica intentionally does not select a Kotlin plugin version/);
++  assert.match(init, /settings\.include\(adapterPath\)/);
++  assert.match(init, /projectDir = new File\(adapterProjectDir\)/);
++});
++
+ test('Apple adapter targets Native SDK and preserves the reviewed bridge surface', async () => {
+   const [source, shim] = await Promise.all([
+     readFile(path.join(ADAPTER_DIR, 'apple/FresnicaCoreModule.swift'), 'utf8'),
+diff --git a/docs/decisions/architecture.md b/docs/decisions/architecture.md
+index 444ce9f..64142c4 100644
+--- a/docs/decisions/architecture.md
++++ b/docs/decisions/architecture.md
+@@ -16,7 +16,7 @@ This file records design decisions that materially change Fresnica behavior or b
+ 
+ **HD mnemonic accounts:** the first mnemonic signer normally uses index 0. `derive_mnemonic_signer` authenticates an existing mnemonic-backed protected source and derives an explicit later index inside Core, returning a new protected signer envelope without returning the mnemonic to Mobile/JavaScript. A secret-backed source is rejected. Mobile may group related signers under a Recovery Source for backup/UX purposes; **Account != Signer != Recovery Source**.
+ 
+-**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). The final Mobile handoff baseline is v0.2.1; it keeps the same API constants and adapter source while correcting device-domain failure/cleanup atomicity and aligning the handoff documentation.
++**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). Native SDK v0.2.1 kept those API constants while correcting device-domain failure/cleanup atomicity. The current RN adapter source is 0.2.1; that patch changes consumer-build integration only and does not change the Native Binding/API surface.
+ 
+ See [Mobile System Authentication](../platforms/mobile/system-auth.md), [Mobile / Rust Core Vault Contract](../platforms/mobile/security-vault-contract.md), [Wallet Protection Model](../core/protection.md), and [Mobile SDK Usage](../platforms/mobile/sdk-usage.md).
+ 
+diff --git a/docs/handoff.md b/docs/handoff.md
+index 10d5023..da2ec43 100644
+--- a/docs/handoff.md
++++ b/docs/handoff.md
+@@ -42,7 +42,7 @@ Native SDK release       native-sdk-v0.2.1
+ Native Binding API       2
+ Universal SDK API        3
+ Core Client API          3
+-RN adapter source        0.2.0
++RN adapter source        0.2.1
+ ```
+ 
+ Key validated delivery paths include:
+diff --git a/docs/platforms/mobile/bindings.md b/docs/platforms/mobile/bindings.md
+index 154aea2..badceb5 100644
+--- a/docs/platforms/mobile/bindings.md
++++ b/docs/platforms/mobile/bindings.md
+@@ -53,7 +53,7 @@ Native package version:       0.2.1
+ NATIVE_BINDING_API_VERSION:   2
+ SDK_API_VERSION:              3
+ CLIENT_API_VERSION:           3
+-RN adapter source version:    0.2.0
++RN adapter source version:    0.2.1
+ ```
+ 
+ Mobile must pin an exact pre-1.0 Native SDK release and record the adapter manifest. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.
+diff --git a/docs/platforms/mobile/framework-adapter.md b/docs/platforms/mobile/framework-adapter.md
+index 6037707..398fc61 100644
+--- a/docs/platforms/mobile/framework-adapter.md
++++ b/docs/platforms/mobile/framework-adapter.md
+@@ -58,6 +58,14 @@ Consumer project
+ - linking the Native SDK and generated adapter binaries into normal app builds;
+ - application state, persistence, navigation, screens, network behavior and product orchestration.
+ 
++### Toolchain-neutral adapter rule
++
++The framework adapter must consume the application's toolchain rather than bring its own. In particular, canonical adapter source must not pin the consumer's Gradle, Android Gradle Plugin, Kotlin plugin, JDK, CocoaPods, or Xcode version merely
