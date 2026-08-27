@@ -16,7 +16,7 @@ This file records design decisions that materially change Fresnica behavior or b
 
 **HD mnemonic accounts:** the first mnemonic signer normally uses index 0. `derive_mnemonic_signer` authenticates an existing mnemonic-backed protected source and derives an explicit later index inside Core, returning a new protected signer envelope without returning the mnemonic to Mobile/JavaScript. A secret-backed source is rejected. Mobile may group related signers under a Recovery Source for backup/UX purposes; **Account != Signer != Recovery Source**.
 
-**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). The final Mobile handoff baseline is v0.2.1; it keeps the same API constants and adapter source while correcting device-domain failure/cleanup atomicity and aligning the handoff documentation.
+**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). Native SDK v0.2.1 kept those API constants while correcting device-domain failure/cleanup atomicity. The current RN adapter source is 0.2.1; that patch changes consumer-build integration only and does not change the Native Binding/API surface.
 
 See [Mobile System Authentication](../platforms/mobile/system-auth.md), [Mobile / Rust Core Vault Contract](../platforms/mobile/security-vault-contract.md), [Wallet Protection Model](../core/protection.md), and [Mobile SDK Usage](../platforms/mobile/sdk-usage.md).
 

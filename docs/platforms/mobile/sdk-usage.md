@@ -14,7 +14,7 @@ Status: **Mobile integration baseline — Native SDK v0.2.1**.
 - Native Binding API: `2`
 - Universal SDK API: `3`
 - Core Client API: `3`
-- React Native adapter source: `0.2.0`
+- React Native adapter source: `0.2.1`
 - Android: `minSdk 26`, `armeabi-v7a`, `x86`, `x86_64`, `arm64-v8a`
 - Apple: iOS `13.4+`, macOS `12.0+`
 - React Native real-consumer validation baseline: RN `0.87` with CocoaPods on macOS/Xcode
@@ -153,7 +153,7 @@ SDK-owned Keychain/LocalAuthentication signing support is already compiled into 
 
 ## 7. 一次性构建 Android React Native adapter
 
-Use the canonical adapter source from the same Fresnica source/tag as the pinned SDK:
+Use a pinned canonical adapter source version/commit whose contract names the consumed Native SDK / Binding API:
 
 ```text
 adapters/react-native
@@ -186,6 +186,10 @@ androidx.core:core:1.12.0
 net.java.dev.jna:jna:5.12.1@aar
 androidx.annotation:annotation:1.8.2
 ```
+
+The adapter build does not select Gradle, AGP, Kotlin, JDK, repository, or `compileSdk` versions for Mobile. It invokes Mobile's own `android/gradlew` and temporarily adds the adapter source as a subproject, so Mobile's Android build remains authoritative. Fresnica CI publishes tested combinations only as compatibility evidence; they are not consumer requirements.
+
+If the Mobile root build exposes the normal React Native `rootProject.ext.compileSdkVersion`, it is reused automatically. Projects with a different configuration layout can pass their own value with `--android-compile-sdk <N>`. This flag does not express a Fresnica-required SDK level; Fresnica's actual Android floor remains `minSdk 26`.
 
 The canonical Android package class is:
 
@@ -241,7 +245,13 @@ bash adapters/react-native/apple/validate-consumer.sh /path/to/fresnica-mobile
 
 It validates the adapter against the consumer's actual CocoaPods-installed React Native headers/frameworks rather than reconstructing RN header layouts manually.
 
-## 9. Normal CI 只检查 compatibility，不重建 adapter
+## 9. 最差情况下从源码构建
+
+正常集成优先使用官方 Native SDK 二进制，再在 Mobile 自己的 framework/toolchain 环境中编译 adapter。若特定平台环境暴露了真实的 Native SDK 二进制兼容问题，使用者仍可从 Fresnica 源码构建 Rust Core / Native SDK，再用同一套 consumer-owned adapter 流程编译 adapter。
+
+这是兼容性逃生路径，不应进入普通 App build。真正需要保持稳定的是 Native Binding/API contract，而不是某个 Gradle/AGP 小版本。
+
+## 10. Normal CI 只检查 compatibility，不重建 adapter
 
 After the Android and Apple adapter binaries are stored, normal Mobile CI should run:
 
@@ -268,7 +278,7 @@ Rebuild it only when a real compatibility boundary changes, such as:
 
 Normal screen, Realm, navigation or business-logic changes do not require an adapter rebuild.
 
-## 10. 第一个 smoke test
+## 11. 第一个 smoke test
 
 The React Native module name is:
 
@@ -302,7 +312,7 @@ React Native
   -> result back to JS
 ```
 
-## 11. React Native 暴露的高层能力
+## 12. React Native 暴露的高层能力
 
 The canonical adapter exposes:
 
@@ -376,7 +386,7 @@ deriveMnemonicSigner(
 
 Core authenticates the source envelope and derives the new index internally. The mnemonic does not cross back into JavaScript. Each returned signer gets a fresh independent protected envelope; Mobile may group them under one Recovery Source for backup/UX purposes.
 
-## 12. Error contract
+## 13. Error contract
 
 Core/SDK errors use stable categories:
 
@@ -394,7 +404,7 @@ Framework/native authorization may additionally surface errors such as system-au
 
 Product code should branch on stable error codes, not parse human-readable error messages.
 
-## 13. Mobile persistence model
+## 14. Mobile persistence model
 
 Mobile owns Realm/persistence. Preserve this conceptual graph:
 
@@ -427,7 +437,7 @@ Mandatory invariants:
 9. Reveal/Export always requires a fresh Fresnica app passcode.
 10. Global passcode rotation stages every re-protected signer first, commits all envelopes atomically, marks previous system-auth registrations stale for the new envelope generation, then replaces wrapped unlock-key records in the existing System Auth Domain; this post-commit registration does not require another biometric prompt.
 
-## 14. Mobile 推荐迁移顺序
+## 15. Mobile 推荐迁移顺序
 
 After the smoke test succeeds:
 
@@ -444,7 +454,7 @@ After the smoke test succeeds:
 
 Do not copy the donor TypeScript class names blindly. Preserve the behavior and security invariants while integrating with the actual Mobile project structure.
 
-## 15. Ownership boundary after Mobile starts
+## 16. Ownership boundary after Mobile starts
 
 `fresnica` continues to own:
 
@@ -468,7 +478,7 @@ Do not copy the donor TypeScript class names blindly. Preserve the behavior and 
 
 Mobile should upgrade by pinning a newer Native SDK release and rebuilding the framework adapter only when its compatibility manifest says a rebuild is required. It should not fork Core into the application repository.
 
-## 16. 开工验收
+## 17. 开工验收
 
 Mobile integration baseline is considered established when its CI proves:
 

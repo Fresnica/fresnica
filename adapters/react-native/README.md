@@ -74,6 +74,39 @@ The adapter AAR is compiled against, but does not embed, React Native or the Fre
 
 The current Android adapter build expects the host to provide the same external runtime dependencies used by the Native SDK / adapter boundary, including JNA, AndroidX annotation, AndroidX biometric and AndroidX core.
 
+### Android toolchain ownership
+
+The adapter source does **not** choose a Gradle, Android Gradle Plugin, Kotlin plugin, JDK, repository policy, or `compileSdk` version for the consumer. The build tool invokes the consumer project's `android/gradlew` and temporarily injects the adapter as a subproject of that Android build. The consumer therefore owns plugin resolution and repositories.
+
+Fresnica only declares real adapter requirements: AndroidX, `minSdk 26`, the exact React Native version being compiled against, the Native SDK AAR, and the host dependencies listed in the compatibility manifest. On pre-AGP-9 builds the adapter uses the Kotlin Android plugin already provided by the consumer build; on AGP 9+ it uses AGP built-in Kotlin unless the consumer has explicitly disabled it. Fresnica does not select the Kotlin plugin version.
+
+Standard React Native projects expose `rootProject.ext.compileSdkVersion`; the adapter reuses it. If a consumer organizes Android configuration differently, pass its own value explicitly:
+
+```sh
+node adapters/react-native/tooling/fresnica-adapter.mjs \
+  build react-native \
+  --platform android \
+  --project /path/to/mobile \
+  --native-android-aar /path/to/fresnica-native-sdk.aar \
+  --android-compile-sdk 35 \
+  --out /path/to/mobile/vendor/fresnica/adapter/react-native
+```
+
+`--android-compile-sdk` is a consumer value, not a Fresnica-required version.
+
+Fresnica CI deliberately exercises more than one consumer-owned Android toolchain. These combinations are **tested examples, not requirements**:
+
+- Gradle 8.11.1 + AGP 8.9.2 + consumer-provided Kotlin plugin;
+- Gradle 9.4.1 + AGP 9.2.1 + AGP built-in Kotlin.
+
+A consumer may use another compatible combination. If it fails, the relevant question is whether the adapter source is compatible with that environment, not whether the app can be forced onto Fresnica's CI versions.
+
+## Source-build fallback
+
+The normal path is the published Native SDK binary plus a consumer-built adapter. If a platform/toolchain exposes a genuine Native SDK binary incompatibility, the consumer can fall back to building the Native SDK from Fresnica source and then compile the same adapter source in its own framework environment. That is an escape hatch, not the normal application build path.
+
+The compatibility authority remains the Native Binding/API contract; a Gradle or AGP version is never part of that API identity.
+
 ## Compatibility manifest
 
 Generate or validate the manifest independently:
