@@ -1,0 +1,28 @@
+diff --git a/clients/rust-cli/src/transaction_flow.rs b/clients/rust-cli/src/transaction_flow.rs
+index 075d03a..4163495 100644
+--- a/clients/rust-cli/src/transaction_flow.rs
++++ b/clients/rust-cli/src/transaction_flow.rs
+@@ -2,7 +2,6 @@ use std::io::{self, Write};
+ 
+ use fresnica_client::{
+     resolve_local_signing_wallet as client_resolve_local_signing_wallet,
+-    resolve_signing_wallet as client_resolve_signing_wallet,
+     sign_and_submit as client_sign_and_submit,
+     sign_transaction_xdr_with_passcode as client_sign_transaction_xdr_with_passcode, HorizonClient,
+     WalletRecord, WalletStorage,
+@@ -14,15 +13,6 @@ pub(crate) use fresnica_client::{
+     parse_stroops, parse_transaction_xdr,
+ };
+ 
+-pub fn resolve_signing_wallet(
+-    storage: &WalletStorage,
+-    network: &str,
+-    name: Option<&str>,
+-) -> Result<WalletRecord, String> {
+-    let horizon = network_client(network)?;
+-    client_resolve_signing_wallet(storage, &horizon, network, name)
+-}
+-
+ pub(crate) fn resolve_local_signing_wallet(
+     storage: &WalletStorage,
+     network: &str,
