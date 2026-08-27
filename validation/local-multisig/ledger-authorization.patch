@@ -1,0 +1,209 @@
+diff --git a/clients/rust-client/src/ledger_authorization.rs b/clients/rust-client/src/ledger_authorization.rs
+index d5c284b..a726be6 100644
+--- a/clients/rust-client/src/ledger_authorization.rs
++++ b/clients/rust-client/src/ledger_authorization.rs
+@@ -1,6 +1,7 @@
+ use std::collections::{BTreeMap, BTreeSet};
+ use std::str::FromStr;
+ 
++use fresnica_core::{transaction_envelope_has_valid_signature, transaction_hash};
+ use serde_json::Value as JsonValue;
+ use stellar_xdr::{
+     AccountId, MuxedAccount, OperationBody, Preconditions, PublicKey, SignerKey,
+@@ -176,37 +177,44 @@ impl LedgerAuthorizationPlan {
+     }
+ }
+ 
+-pub fn ensure_local_ed25519_signer_can_satisfy(
++pub fn satisfied_transaction_conditions(
+     plan: &LedgerAuthorizationPlan,
+-    signer_public_key: &str,
+-) -> Result<(), String> {
+-    AccountId::from_str(signer_public_key)
+-        .map_err(|_| "local ledger-authorization signer must be a Classic G address".to_owned())?;
+-    let available = BTreeSet::from([LedgerSignerCondition {
+-        kind: LedgerSignerKind::Ed25519PublicKey,
+-        key: signer_public_key.to_owned(),
+-    }]);
+-    let gaps = plan
++    envelope: &TransactionEnvelope,
++    network_passphrase: &str,
++) -> Result<BTreeSet<LedgerSignerCondition>, String> {
++    let hash = transaction_hash(envelope, network_passphrase)
++        .map_err(|error| format!("Unable to hash transaction for ledger authorization: {error}"))?;
++    let mut satisfied = BTreeSet::new();
++    let mut seen = BTreeSet::new();
++
++    for signer in plan
+         .requirements
+         .iter()
+-        .filter_map(|requirement| {
+-            let available_weight = requirement.available_weight(&available);
+-            (available_weight < u32::from(requirement.required_weight)).then(|| {
+-                format!(
+-                    "{} requires weight {} but local signer provides {}",
+-                    requirement.account_id, requirement.required_weight, available_weight
+-                )
+-            })
+-        })
+-        .collect::<Vec<_>>();
+-    if gaps.is_empty() {
+-        Ok(())
+-    } else {
+-        Err(format!(
+-            "Direct signing cannot satisfy ledger authorization: {}. Additional signer conditions must be completed through Signing Coordination before submission",
+-            gaps.join("; ")
+-        ))
++        .flat_map(|requirement| &requirement.signers)
++    {
++        let condition = &signer.condition;
++        if !seen.insert(condition.clone()) {
++            continue;
++        }
++        let matches = match condition.kind {
++            LedgerSignerKind::Ed25519PublicKey => transaction_envelope_has_valid_signature(
++                envelope,
++                network_passphrase,
++                &condition.key,
++            )
++            .map_err(|error| format!("Unable to verify existing transaction signature: {error}"))?,
++            LedgerSignerKind::PreauthorizedTransaction => match SignerKey::from_str(&condition.key)
++            {
++                Ok(SignerKey::PreAuthTx(value)) => value.0 == hash,
++                _ => false,
++            },
++            LedgerSignerKind::HashX | LedgerSignerKind::Ed25519SignedPayload => false,
++        };
++        if matches {
++            satisfied.insert(condition.clone());
++        }
+     }
++    Ok(satisfied)
+ }
+ 
+ pub fn plan_classic_ledger_authorization(
+@@ -407,11 +415,14 @@ fn json_u8(value: &JsonValue, field: &str, label: &str) -> Result<u8, String> {
+ mod tests {
+     use super::*;
+     use crate::build_operation_envelope;
+-    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber, String64};
++    use fresnica_core::{sign_transaction_envelope, SoftwareSigner};
++    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber, String64, Uint256};
+ 
+     const ACCOUNT_A: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+     const ACCOUNT_B: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+     const SIGNER_C: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
++    const ACCOUNT_B_SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
++    const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+ 
+     fn horizon_account(
+         account_id: &str,
+@@ -509,6 +520,64 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn transaction_satisfaction_recognizes_matching_preauth() {
++        let envelope = build_operation_envelope(
++            ACCOUNT_A,
++            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
++                data_name: String64::try_from("auth").unwrap(),
++                data_value: None,
++            })],
++            1,
++            100,
++            None,
++        )
++        .unwrap();
++        let hash = transaction_hash(&envelope, TESTNET_PASSPHRASE).unwrap();
++        let preauth = SignerKey::PreAuthTx(Uint256(hash)).to_string();
++        let account = horizon_account(ACCOUNT_A, 1, 2, 3, &[(preauth.as_str(), 2, "preauth_tx")]);
++        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
++
++        let satisfied =
++            satisfied_transaction_conditions(&plan, &envelope, TESTNET_PASSPHRASE).unwrap();
++
++        assert!(plan.is_satisfiable_by(&satisfied));
++        assert_eq!(satisfied.len(), 1);
++        assert_eq!(
++            satisfied.iter().next().unwrap().kind,
++            LedgerSignerKind::PreauthorizedTransaction
++        );
++    }
++
++    #[test]
++    fn transaction_satisfaction_recognizes_existing_ed25519_signature() {
++        let mut envelope = build_operation_envelope(
++            ACCOUNT_B,
++            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
++                data_name: String64::try_from("auth").unwrap(),
++                data_value: None,
++            })],
++            1,
++            100,
++            None,
++        )
++        .unwrap();
++        sign_transaction_envelope(
++            &mut envelope,
++            TESTNET_PASSPHRASE,
++            &SoftwareSigner::from_secret(ACCOUNT_B_SECRET).unwrap(),
++        )
++        .unwrap();
++        let account = horizon_account(ACCOUNT_B, 1, 1, 1, &[(ACCOUNT_B, 1, "ed25519_public_key")]);
++        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
++
++        let satisfied =
++            satisfied_transaction_conditions(&plan, &envelope, TESTNET_PASSPHRASE).unwrap();
++
++        assert!(plan.is_satisfiable_by(&satisfied));
++        assert_eq!(satisfied, BTreeSet::from([ed25519(ACCOUNT_B)]));
++    }
++
+     #[test]
+     fn transaction_source_low_and_medium_operation_share_one_account_requirement() {
+         let account = horizon_account(
+@@ -602,43 +671,6 @@ mod tests {
+         assert!(plan.is_satisfiable_by(&available));
+     }
+ 
+-    #[test]
+-    fn direct_local_signer_guard_requires_enough_weight() {
+-        let account = horizon_account(
+-            ACCOUNT_A,
+-            1,
+-            2,
+-            3,
+-            &[
+-                (ACCOUNT_A, 1, "ed25519_public_key"),
+-                (SIGNER_C, 1, "ed25519_public_key"),
+-            ],
+-        );
+-        let envelope = build_operation_envelope(
+-            ACCOUNT_A,
+-            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+-                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
+-                data_value: None,
+-            })],
+-            1,
+-            100,
+-            None,
+-        )
+-        .unwrap();
+-        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
+-
+-        assert_eq!(
+-            ensure_local_ed25519_signer_can_satisfy(&plan, ACCOUNT_A).unwrap_err(),
+-            format!(
+-                "Direct signing cannot satisfy ledger authorization: {ACCOUNT_A} requires weight 2 but local signer provides 1. Additional signer conditions must be completed through Signing Coordination before submission"
+-            )
+-        );
+-
+-        let account = horizon_account(ACCOUNT_A, 1, 2, 3, &[(ACCOUNT_A, 2, "ed25519_public_key")]);
+-        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
+-        assert!(ensure_local_ed25519_signer_can_satisfy(&plan, ACCOUNT_A).is_ok());
+-    }
+-
+     #[test]
+     fn loader_fetches_each_source_once_before_planning() {
+         let envelope = build_operation_envelope(
