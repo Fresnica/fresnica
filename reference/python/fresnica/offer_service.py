@@ -10,6 +10,7 @@ from .errors import (
     WatchOnlyError,
 )
 from .models import Asset, MarketPair, OfferIntent, OfferView, OpenOffer, PriceRatio
+from .trustline_policy import FRESNICA_TRUSTLINE_LIMIT
 
 
 STROOP_SCALE = 10_000_000
@@ -85,8 +86,19 @@ class OfferService:
         adapter = self.transaction_builder.adapter
         fee = adapter.fetch_base_fee()
         account = adapter.get_account(wallet.address())
+        selling = _selling_asset(intent)
         buying = _buying_asset(intent)
         adds_trustline = not _account_can_hold(account, buying)
+        _ensure_full_offer_authorization(account, selling)
+        if not adds_trustline:
+            _ensure_full_offer_authorization(account, buying)
+        if adds_trustline and allow_trustline:
+            issuer_account = adapter.get_account(buying.issuer)
+            if _issuer_requires_authorization(issuer_account):
+                raise TransactionError(
+                    f"Receiving trustline for {buying.display} requires issuer authorization "
+                    "before an offer can be created"
+                )
         operation_count = 2 if adds_trustline else 1
         _preflight_new_offer(
             account,
@@ -95,6 +107,7 @@ class OfferService:
             base_reserve_stroops=adapter.get_base_reserve_stroops(),
             fee_stroops=fee * operation_count,
             extra_subentries=1 + (1 if adds_trustline else 0),
+            adds_trustline=adds_trustline,
         )
         if adds_trustline and not allow_trustline:
             raise TrustlineConfirmationRequired(buying.display)
@@ -123,7 +136,19 @@ class OfferService:
             raise TransactionError(
                 "Offer update must keep the current market pair and BUY/SELL side"
             )
-        fee = self.transaction_builder.adapter.fetch_base_fee()
+        adapter = self.transaction_builder.adapter
+        fee = adapter.fetch_base_fee()
+        account = adapter.get_account(wallet.address())
+        _ensure_full_offer_authorization(account, _selling_asset(intent))
+        _ensure_full_offer_authorization(account, _buying_asset(intent))
+        _preflight_update_offer(
+            account,
+            intent,
+            price_r,
+            offer,
+            base_reserve_stroops=adapter.get_base_reserve_stroops(),
+            fee_stroops=fee,
+        )
         return self.transaction_builder.build_offer(
             wallet_name=wallet_name,
             wallet=wallet,
@@ -145,7 +170,10 @@ class OfferService:
         view = offer_view_for_pair(offer, pair) if pair is not None else None
         if pair is not None and view is None:
             raise TransactionError("Offer cancellation pair does not match the current offer")
-        fee = self.transaction_builder.adapter.fetch_base_fee()
+        adapter = self.transaction_builder.adapter
+        fee = adapter.fetch_base_fee()
+        account = adapter.get_account(wallet.address())
+        _ensure_offer_fee_capacity(account, adapter.get_base_reserve_stroops(), fee)
         return self.transaction_builder.build_cancel_offer(
             wallet_name=wallet_name,
             wallet=wallet,
@@ -173,15 +201,18 @@ def _preflight_new_offer(
     base_reserve_stroops: int,
     fee_stroops: int,
     extra_subentries: int,
+    adds_trustline: bool,
 ) -> None:
     selling = _selling_asset(intent)
-    required_selling = _required_selling_stroops(intent, price_r)
+    buying = _buying_asset(intent)
+    liabilities = _offer_liabilities(intent.side, _to_stroops(intent.amount), price_r)
     account_id = str(account.get("account_id", ""))
 
     # Issuers can sell newly issued units of their own asset without a trustline.
     if selling.is_native or selling.issuer != account_id:
         selling_balance = _find_balance(account, selling)
         available_selling = _available_balance_stroops(selling_balance)
+        required_selling = liabilities[0]
         if selling.is_native:
             reserve_units = max(
                 2
@@ -220,12 +251,162 @@ def _preflight_new_offer(
                 _from_stroops(available_native),
             )
 
+    new_limit = _to_stroops(FRESNICA_TRUSTLINE_LIMIT) if adds_trustline else None
+    receive_capacity = _receiving_capacity_stroops(account, buying, account_id, new_limit)
+    if liabilities[1] > receive_capacity:
+        raise InsufficientBalanceError(
+            buying.display,
+            _from_stroops(liabilities[1]),
+            _from_stroops(receive_capacity),
+        )
 
-def _required_selling_stroops(intent: OfferIntent, price_r: PriceRatio) -> int:
-    amount = _to_stroops(intent.amount)
-    if intent.side == "sell":
-        return amount
-    return (amount * price_r.n + price_r.d - 1) // price_r.d
+
+def _preflight_update_offer(
+    account: dict,
+    intent: OfferIntent,
+    price_r: PriceRatio,
+    offer: OpenOffer,
+    base_reserve_stroops: int,
+    fee_stroops: int,
+) -> None:
+    selling = _selling_asset(intent)
+    buying = _buying_asset(intent)
+    account_id = str(account.get("account_id", ""))
+    _ensure_offer_fee_capacity(account, base_reserve_stroops, fee_stroops)
+    new_liabilities = _offer_liabilities(intent.side, _to_stroops(intent.amount), price_r)
+    old_liabilities = _offer_liabilities(
+        "sell", _to_stroops(offer.selling_amount), offer.price_r
+    )
+
+    if selling.is_native or selling.issuer != account_id:
+        available_after_release = (
+            _available_balance_stroops(_find_balance(account, selling))
+            + old_liabilities[0]
+        )
+        required_selling = new_liabilities[0]
+        if selling.is_native:
+            reserve_units = max(
+                2
+                + int(account.get("subentry_count", 0))
+                + int(account.get("num_sponsoring", 0))
+                - int(account.get("num_sponsored", 0)),
+                0,
+            )
+            required_selling += reserve_units * base_reserve_stroops + fee_stroops
+        if required_selling > available_after_release:
+            raise InsufficientBalanceError(
+                selling.display,
+                _from_stroops(required_selling),
+                _from_stroops(available_after_release),
+            )
+
+
+    if buying.issuer == account_id:
+        receive_after_release = 2**63 - 1
+    else:
+        receive_after_release = (
+            _receiving_capacity_stroops(account, buying, account_id)
+            + old_liabilities[1]
+        )
+    if new_liabilities[1] > receive_after_release:
+        raise InsufficientBalanceError(
+            buying.display,
+            _from_stroops(new_liabilities[1]),
+            _from_stroops(receive_after_release),
+        )
+
+
+def _ensure_offer_fee_capacity(
+    account: dict, base_reserve_stroops: int, fee_stroops: int
+) -> None:
+    native = _find_balance(account, Asset("XLM"))
+    free = max(
+        _available_balance_stroops(native)
+        - max(
+            2
+            + int(account.get("subentry_count", 0))
+            + int(account.get("num_sponsoring", 0))
+            - int(account.get("num_sponsored", 0)),
+            0,
+        )
+        * base_reserve_stroops,
+        0,
+    )
+    if free < fee_stroops:
+        raise InsufficientBalanceError(
+            "XLM", _from_stroops(fee_stroops), _from_stroops(free)
+        )
+
+
+def _offer_liabilities(side: str, amount: int, price_r: PriceRatio) -> tuple[int, int]:
+    if side == "sell":
+        price_n, price_d = price_r.n, price_r.d
+        max_wheat_send, max_sheep_receive = amount, 2**63 - 1
+    elif side == "buy":
+        price_n, price_d = price_r.d, price_r.n
+        max_wheat_send, max_sheep_receive = 2**63 - 1, amount
+    else:
+        raise TransactionError(f"Unsupported offer side: {side}")
+    return _exchange_v10_normal_liabilities(
+        price_n, price_d, max_wheat_send, max_sheep_receive
+    )
+
+
+def _exchange_v10_normal_liabilities(
+    price_n: int, price_d: int, max_wheat_send: int, max_sheep_receive: int
+) -> tuple[int, int]:
+    if price_n <= 0 or price_d <= 0 or max_wheat_send < 0 or max_sheep_receive < 0:
+        raise TransactionError("Invalid offer liability inputs")
+    int64_max = 2**63 - 1
+    wheat_value = min(max_wheat_send * price_n, max_sheep_receive * price_d)
+    sheep_value = min(int64_max * price_d, int64_max * price_n)
+    wheat_stays = wheat_value > sheep_value
+
+    if wheat_stays:
+        if price_n > price_d:
+            wheat_receive = sheep_value // price_n
+            sheep_send = _ceil_div(wheat_receive * price_n, price_d)
+        else:
+            sheep_send = sheep_value // price_d
+            wheat_receive = sheep_send * price_d // price_n
+    elif price_n > price_d:
+        wheat_receive = wheat_value // price_n
+        sheep_send = wheat_receive * price_n // price_d
+    else:
+        sheep_send = wheat_value // price_d
+        wheat_receive = _ceil_div(sheep_send * price_d, price_n)
+    return wheat_receive, sheep_send
+
+
+def _ceil_div(numerator: int, denominator: int) -> int:
+    if numerator < 0 or denominator <= 0:
+        raise TransactionError("Invalid offer liability division")
+    return (numerator + denominator - 1) // denominator
+
+
+def _receiving_capacity_stroops(
+    account: dict, asset: Asset, account_id: str, new_trustline_limit: int | None = None
+) -> int:
+    if not asset.is_native and asset.issuer == account_id:
+        return 2**63 - 1
+    raw = _find_balance(account, asset)
+    if asset.is_native:
+        if raw is None:
+            raise TransactionError("Horizon returned no native balance")
+        return max(
+            (2**63 - 1)
+            - _decimal_stroops(raw.get("balance", "0"))
+            - _decimal_stroops(raw.get("buying_liabilities", "0")),
+            0,
+        )
+    if raw is None:
+        return new_trustline_limit or 0
+    return max(
+        _decimal_stroops(raw.get("limit", "0"))
+        - _decimal_stroops(raw.get("balance", "0"))
+        - _decimal_stroops(raw.get("buying_liabilities", "0")),
+        0,
+    )
 
 
 def _stellar_price_ratio(price: Decimal) -> PriceRatio:
@@ -266,6 +447,32 @@ def _stellar_price_ratio(price: Decimal) -> PriceRatio:
     if best_n <= 0 or best_d <= 0:
         raise InvalidAmountError("Offer price has no Stellar int32 rational approximation")
     return PriceRatio(best_n, best_d)
+
+
+def _ensure_full_offer_authorization(account: dict, asset: Asset) -> None:
+    account_id = str(account.get("account_id", ""))
+    if asset.is_native or asset.issuer == account_id:
+        return
+    raw = _find_balance(account, asset)
+    if raw is None:
+        raise TransactionError(f"Trustline is missing for {asset.display}")
+    authorized = raw.get("is_authorized")
+    if authorized is True:
+        return
+    if authorized is False:
+        raise TransactionError(
+            f"Trustline for {asset.display} is not fully authorized for offer management"
+        )
+    raise TransactionError(
+        f"Horizon returned malformed authorization state for {asset.display}"
+    )
+
+
+def _issuer_requires_authorization(account: dict) -> bool:
+    flags = account.get("flags")
+    if not isinstance(flags, dict) or not isinstance(flags.get("auth_required"), bool):
+        raise TransactionError("Horizon returned malformed issuer authorization flags")
+    return flags["auth_required"]
 
 
 def _account_can_hold(account: dict, asset: Asset) -> bool:

@@ -13,6 +13,7 @@ from fresnica.models import (
     PriceRatio,
 )
 from fresnica.offer_service import (
+    _offer_liabilities,
     _stellar_price_ratio,
     canonical_operation,
     offer_view_for_pair,
@@ -94,6 +95,21 @@ def test_price_rationalization_vectors_match_canonical_ratio():
     for case in VECTORS["price_rationalization"]:
         assert _stellar_price_ratio(Decimal(case["requested"])) == _ratio(
             case["expected"]
+        ), case["name"]
+
+
+def test_offer_liability_vectors_match_stellar_integer_rounding():
+    for case in VECTORS["offer_liabilities"]:
+        selling, buying = _offer_liabilities(
+            case["side"],
+            int(Decimal(case["amount"]) * Decimal(10_000_000)),
+            _ratio(case["price_r"]),
+        )
+        assert Decimal(selling) / Decimal(10_000_000) == Decimal(
+            case["expected"]["selling"]
+        ), case["name"]
+        assert Decimal(buying) / Decimal(10_000_000) == Decimal(
+            case["expected"]["buying"]
         ), case["name"]
 
 

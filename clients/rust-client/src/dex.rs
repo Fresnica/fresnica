@@ -508,11 +508,27 @@ impl FresnicaClient {
         let ledger = self.horizon().get_ledger_parameters()?;
         let (selling, buying) = side.assets(&base, &counter);
         let adds_trustline = !account_can_hold(&account, buying, &wallet.address);
+        ensure_full_offer_authorization(&account, selling, &wallet.address)?;
+        if !adds_trustline {
+            ensure_full_offer_authorization(&account, buying, &wallet.address)?;
+        }
         if adds_trustline && !allow_trustline {
             return Err(format!(
                 "Receiving trustline is missing for {}. Add it first or explicitly allow adding the trustline.",
                 buying.display()
             ));
+        }
+        if adds_trustline {
+            let issuer = buying
+                .issuer()
+                .ok_or_else(|| "issued receiving asset is missing an issuer".to_owned())?;
+            let issuer_account = self.horizon().get_account(issuer)?;
+            if issuer_requires_authorization(&issuer_account)? {
+                return Err(format!(
+                    "Receiving trustline for {} requires issuer authorization before an offer can be created",
+                    buying.display()
+                ));
+            }
         }
 
         let operation_count = if adds_trustline { 2_u32 } else { 1_u32 };
@@ -528,11 +544,13 @@ impl FresnicaClient {
             &wallet.address,
             side,
             selling,
+            buying,
             amount,
             &price,
             ledger.base_reserve_in_stroops,
             total_fee,
             extra_subentries,
+            adds_trustline,
         )?;
 
         let mut operations = Vec::with_capacity(operation_count as usize);
@@ -615,6 +633,30 @@ impl FresnicaClient {
 
         let account = self.horizon().get_account(&wallet.address)?;
         let ledger = self.horizon().get_ledger_parameters()?;
+        let (selling, buying) = side.assets(&base, &counter);
+        ensure_full_offer_authorization(&account, selling, &wallet.address)?;
+        ensure_full_offer_authorization(&account, buying, &wallet.address)?;
+        let old_amount = text(&raw_offer, "amount")
+            .ok_or_else(|| "Horizon returned malformed offer amount".to_owned())
+            .and_then(|value| {
+                parse_stroops(value, false)
+                    .map_err(|_| "Horizon returned malformed offer amount".to_owned())
+            })?;
+        let old_price = horizon_price(&raw_offer)?;
+        let total_fee = i64::from(ledger.base_fee_in_stroops);
+        preflight_update(
+            &account,
+            &wallet.address,
+            side,
+            selling,
+            buying,
+            amount,
+            &price,
+            old_amount,
+            &old_price,
+            ledger.base_reserve_in_stroops,
+            total_fee,
+        )?;
         let body = offer_operation(side, &base, &counter, amount, price, offer_id)?;
         let envelope = build_operation_envelope(
             &wallet.address,
@@ -623,7 +665,6 @@ impl FresnicaClient {
             ledger.base_fee_in_stroops,
             None,
         )?;
-        let total_fee = i64::from(ledger.base_fee_in_stroops);
 
         Ok(PreparedOffer {
             review: OfferReview {
@@ -687,6 +728,11 @@ impl FresnicaClient {
         });
         let account = self.horizon().get_account(&wallet.address)?;
         let ledger = self.horizon().get_ledger_parameters()?;
+        ensure_offer_fee_capacity(
+            &account,
+            ledger.base_reserve_in_stroops,
+            i64::from(ledger.base_fee_in_stroops),
+        )?;
         let envelope = build_operation_envelope(
             &wallet.address,
             vec![body],
@@ -905,16 +951,16 @@ fn preflight_create(
     account_id: &str,
     side: OfferSide,
     selling: &OfferAsset,
+    buying: &OfferAsset,
     amount: i64,
     price: &Price,
     base_reserve: i64,
     fee: i64,
     extra_subentries: i64,
+    adds_trustline: bool,
 ) -> Result<(), String> {
-    let required_selling = match side {
-        OfferSide::Sell => amount,
-        OfferSide::Buy => ceil_price_product(amount, price)?,
-    };
+    let liabilities = offer_liabilities(side, amount, price)?;
+    let required_selling = liabilities.selling;
     let available_selling = available_balance(account, selling)?;
     let issuer_can_sell = selling.issuer() == Some(account_id);
     let extra_reserve = base_reserve
@@ -958,6 +1004,102 @@ fn preflight_create(
             ));
         }
     }
+
+    let new_trustline_limit = if adds_trustline {
+        Some(
+            parse_stroops(DEFAULT_TRUSTLINE_LIMIT, true)
+                .map_err(|_| "invalid Fresnica trustline policy limit".to_owned())?,
+        )
+    } else {
+        None
+    };
+    let receiving_capacity = receiving_capacity(account, buying, account_id, new_trustline_limit)?;
+    if liabilities.buying > receiving_capacity {
+        return Err(format!(
+            "Insufficient receiving capacity for {}: need {}, available {}",
+            buying.display(),
+            format_stroops(liabilities.buying),
+            format_stroops(receiving_capacity)
+        ));
+    }
+    Ok(())
+}
+
+fn preflight_update(
+    account: &Value,
+    account_id: &str,
+    side: OfferSide,
+    selling: &OfferAsset,
+    buying: &OfferAsset,
+    amount: i64,
+    price: &Price,
+    old_amount: i64,
+    old_price: &Price,
+    base_reserve: i64,
+    fee: i64,
+) -> Result<(), String> {
+    ensure_offer_fee_capacity(account, base_reserve, fee)?;
+    let new_liabilities = offer_liabilities(side, amount, price)?;
+    let old_liabilities = offer_liabilities(OfferSide::Sell, old_amount, old_price)?;
+    let issuer_can_sell = selling.issuer() == Some(account_id);
+
+    if !issuer_can_sell {
+        let available_after_release = available_balance(account, selling)?
+            .checked_add(old_liabilities.selling)
+            .ok_or_else(|| "offer selling capacity overflow".to_owned())?;
+        if selling.is_native() {
+            let required = new_liabilities
+                .selling
+                .checked_add(minimum_balance_stroops(account, base_reserve)?)
+                .and_then(|value| value.checked_add(fee))
+                .ok_or_else(|| "offer requirement overflow".to_owned())?;
+            if required > available_after_release {
+                return Err(format!(
+                    "Insufficient XLM for offer update: need {}, available {}",
+                    format_stroops(required),
+                    format_stroops(available_after_release)
+                ));
+            }
+        } else if new_liabilities.selling > available_after_release {
+            return Err(format!(
+                "Insufficient {} for offer update: need {}, available {}",
+                selling.display(),
+                format_stroops(new_liabilities.selling),
+                format_stroops(available_after_release)
+            ));
+        }
+    }
+
+    let receiving_after_release = if buying.issuer() == Some(account_id) {
+        i64::MAX
+    } else {
+        receiving_capacity(account, buying, account_id, None)?
+            .checked_add(old_liabilities.buying)
+            .ok_or_else(|| "offer receiving capacity overflow".to_owned())?
+    };
+    if new_liabilities.buying > receiving_after_release {
+        return Err(format!(
+            "Insufficient receiving capacity for {} offer update: need {}, available {}",
+            buying.display(),
+            format_stroops(new_liabilities.buying),
+            format_stroops(receiving_after_release)
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_offer_fee_capacity(account: &Value, base_reserve: i64, fee: i64) -> Result<(), String> {
+    let native = OfferAsset::Native;
+    let free = available_balance(account, &native)?
+        .saturating_sub(minimum_balance_stroops(account, base_reserve)?)
+        .max(0);
+    if free < fee {
+        return Err(format!(
+            "Insufficient XLM for transaction fee: need {}, available {}",
+            format_stroops(fee),
+            format_stroops(free)
+        ));
+    }
     Ok(())
 }
 
@@ -977,6 +1119,151 @@ fn available_balance(account: &Value, asset: &OfferAsset) -> Result<i64, String>
         .max(0))
 }
 
+fn receiving_capacity(
+    account: &Value,
+    asset: &OfferAsset,
+    account_id: &str,
+    new_trustline_limit: Option<i64>,
+) -> Result<i64, String> {
+    if asset.issuer() == Some(account_id) {
+        return Ok(i64::MAX);
+    }
+    let balances = account
+        .get("balances")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+    let raw = balances
+        .iter()
+        .find(|balance| asset.matches_balance(balance));
+    if asset.is_native() {
+        let raw = raw.ok_or_else(|| "Horizon returned no native balance".to_owned())?;
+        let committed = balance_stroops(raw, "balance")?
+            .checked_add(balance_stroops(raw, "buying_liabilities")?)
+            .ok_or_else(|| "native receiving capacity overflow".to_owned())?;
+        return Ok(i64::MAX.saturating_sub(committed));
+    }
+    let Some(raw) = raw else {
+        return Ok(new_trustline_limit.unwrap_or(0));
+    };
+    let limit = balance_stroops(raw, "limit")?;
+    let committed = balance_stroops(raw, "balance")?
+        .checked_add(balance_stroops(raw, "buying_liabilities")?)
+        .ok_or_else(|| "trustline receiving capacity overflow".to_owned())?;
+    Ok(limit.saturating_sub(committed).max(0))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OfferLiabilities {
+    selling: i64,
+    buying: i64,
+}
+
+fn offer_liabilities(
+    side: OfferSide,
+    amount: i64,
+    price: &Price,
+) -> Result<OfferLiabilities, String> {
+    let (price_n, price_d, max_wheat_send, max_sheep_receive) = match side {
+        OfferSide::Sell => (price.n, price.d, amount, i64::MAX),
+        OfferSide::Buy => (price.d, price.n, i64::MAX, amount),
+    };
+    let (selling, buying) =
+        exchange_v10_normal_liabilities(price_n, price_d, max_wheat_send, max_sheep_receive)?;
+    Ok(OfferLiabilities { selling, buying })
+}
+
+fn exchange_v10_normal_liabilities(
+    price_n: i32,
+    price_d: i32,
+    max_wheat_send: i64,
+    max_sheep_receive: i64,
+) -> Result<(i64, i64), String> {
+    if price_n <= 0 || price_d <= 0 || max_wheat_send < 0 || max_sheep_receive < 0 {
+        return Err("invalid offer liability inputs".to_owned());
+    }
+
+    let max = i128::from(i64::MAX);
+    let n = i128::from(price_n);
+    let d = i128::from(price_d);
+    let wheat_value = (i128::from(max_wheat_send) * n).min(i128::from(max_sheep_receive) * d);
+    let sheep_value = (max * d).min(max * n);
+    let wheat_stays = wheat_value > sheep_value;
+
+    let (wheat_receive, sheep_send) = if wheat_stays {
+        if price_n > price_d {
+            let wheat = sheep_value / n;
+            let sheep = ceil_div(wheat * n, d)?;
+            (wheat, sheep)
+        } else {
+            let sheep = sheep_value / d;
+            let wheat = sheep * d / n;
+            (wheat, sheep)
+        }
+    } else if price_n > price_d {
+        let wheat = wheat_value / n;
+        let sheep = wheat * n / d;
+        (wheat, sheep)
+    } else {
+        let sheep = wheat_value / d;
+        let wheat = ceil_div(sheep * d, n)?;
+        (wheat, sheep)
+    };
+
+    let selling =
+        i64::try_from(wheat_receive).map_err(|_| "offer selling liability overflow".to_owned())?;
+    let buying =
+        i64::try_from(sheep_send).map_err(|_| "offer buying liability overflow".to_owned())?;
+    Ok((selling, buying))
+}
+
+fn ceil_div(numerator: i128, denominator: i128) -> Result<i128, String> {
+    if numerator < 0 || denominator <= 0 {
+        return Err("invalid offer liability division".to_owned());
+    }
+    numerator
+        .checked_add(denominator - 1)
+        .map(|value| value / denominator)
+        .ok_or_else(|| "offer liability overflow".to_owned())
+}
+
+fn ensure_full_offer_authorization(
+    account: &Value,
+    asset: &OfferAsset,
+    account_id: &str,
+) -> Result<(), String> {
+    if asset.is_native() || asset.issuer() == Some(account_id) {
+        return Ok(());
+    }
+    let balances = account
+        .get("balances")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+    let raw = balances
+        .iter()
+        .find(|balance| asset.matches_balance(balance))
+        .ok_or_else(|| format!("Trustline is missing for {}", asset.display()))?;
+    match raw.get("is_authorized").and_then(Value::as_bool) {
+        Some(true) => Ok(()),
+        Some(false) => Err(format!(
+            "Trustline for {} is not fully authorized for offer management",
+            asset.display()
+        )),
+        None => Err(format!(
+            "Horizon returned malformed authorization state for {}",
+            asset.display()
+        )),
+    }
+}
+
+fn issuer_requires_authorization(account: &Value) -> Result<bool, String> {
+    account
+        .get("flags")
+        .and_then(Value::as_object)
+        .and_then(|flags| flags.get("auth_required"))
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Horizon returned malformed issuer authorization flags".to_owned())
+}
+
 fn account_can_hold(account: &Value, asset: &OfferAsset, account_id: &str) -> bool {
     if asset.is_native() || asset.issuer() == Some(account_id) {
         return true;
@@ -989,18 +1276,6 @@ fn account_can_hold(account: &Value, asset: &OfferAsset, account_id: &str) -> bo
                 .iter()
                 .any(|balance| asset.matches_balance(balance))
         })
-}
-
-fn ceil_price_product(amount: i64, price: &Price) -> Result<i64, String> {
-    let numerator = i128::from(amount)
-        .checked_mul(i128::from(price.n))
-        .ok_or_else(|| "offer total overflow".to_owned())?;
-    let denominator = i128::from(price.d);
-    let value = numerator
-        .checked_add(denominator - 1)
-        .ok_or_else(|| "offer total overflow".to_owned())?
-        / denominator;
-    i64::try_from(value).map_err(|_| "offer total overflow".to_owned())
 }
 
 fn requested_price_if_approximated(price_stroops: i64, price: &Price) -> Option<String> {
@@ -1546,6 +1821,86 @@ mod tests {
     }
 
     #[test]
+    fn offer_liabilities_match_stellar_manage_offer_rounding() {
+        let price = Price { n: 13, d: 40 };
+        let amount = parse_offer_value("100", "amount").unwrap();
+        assert_eq!(
+            offer_liabilities(OfferSide::Sell, amount, &price).unwrap(),
+            OfferLiabilities {
+                selling: parse_offer_value("100", "amount").unwrap(),
+                buying: parse_offer_value("32.5", "amount").unwrap(),
+            }
+        );
+        assert_eq!(
+            offer_liabilities(OfferSide::Buy, amount, &price).unwrap(),
+            OfferLiabilities {
+                selling: parse_offer_value("32.5", "amount").unwrap(),
+                buying: parse_offer_value("100", "amount").unwrap(),
+            }
+        );
+
+        let half = Price { n: 1, d: 2 };
+        assert_eq!(
+            offer_liabilities(OfferSide::Sell, 1, &half).unwrap(),
+            OfferLiabilities {
+                selling: 0,
+                buying: 0,
+            }
+        );
+        assert_eq!(
+            offer_liabilities(OfferSide::Buy, 1, &half).unwrap(),
+            OfferLiabilities {
+                selling: 0,
+                buying: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn offer_preflight_uses_horizon_authorization_and_receiving_capacity() {
+        let asset = OfferAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let account = serde_json::json!({
+            "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            "balances": [
+                {
+                    "asset_type": "credit_alphanum4",
+                    "asset_code": "USD",
+                    "asset_issuer": ISSUER,
+                    "balance": "9.5",
+                    "buying_liabilities": "0.25",
+                    "selling_liabilities": "0",
+                    "limit": "10",
+                    "is_authorized": false,
+                    "is_authorized_to_maintain_liabilities": true
+                }
+            ]
+        });
+        assert!(ensure_full_offer_authorization(&account, &asset, "GOTHER").is_err());
+        assert_eq!(
+            receiving_capacity(&account, &asset, "GOTHER", None).unwrap(),
+            parse_offer_value("0.25", "amount").unwrap()
+        );
+    }
+
+    #[test]
+    fn offer_fee_preflight_does_not_credit_future_reserve_release() {
+        let account = serde_json::json!({
+            "subentry_count": 3,
+            "num_sponsoring": 0,
+            "num_sponsored": 0,
+            "balances": [
+                {
+                    "asset_type": "native",
+                    "balance": "2.5",
+                    "selling_liabilities": "0",
+                    "buying_liabilities": "0"
+                }
+            ]
+        });
+        assert!(ensure_offer_fee_capacity(&account, 5_000_000, 100).is_err());
+    }
+
+    #[test]
     fn buy_operation_keeps_pair_price_direction() {
         let base = OfferAsset::parse(&format!("XRP:{ISSUER}")).unwrap();
         let counter = OfferAsset::Native;
@@ -1598,7 +1953,13 @@ mod tests {
             Some("1000.0000001")
         );
         assert_eq!(
-            ceil_price_product(parse_offer_value("1", "amount").unwrap(), &effective).unwrap(),
+            offer_liabilities(
+                OfferSide::Buy,
+                parse_offer_value("1", "amount").unwrap(),
+                &effective,
+            )
+            .unwrap()
+            .selling,
             parse_offer_value("1000", "amount").unwrap()
         );
         assert_eq!(

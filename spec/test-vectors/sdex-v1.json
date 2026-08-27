@@ -60,6 +60,36 @@
       "expected": {"n": 2147483647, "d": 1}
     }
   ],
+  "offer_liabilities": [
+    {
+      "name": "sell-exact-common",
+      "side": "sell",
+      "amount": "100",
+      "price_r": {"n": 13, "d": 40},
+      "expected": {"selling": "100", "buying": "32.5"}
+    },
+    {
+      "name": "buy-exact-common",
+      "side": "buy",
+      "amount": "100",
+      "price_r": {"n": 13, "d": 40},
+      "expected": {"selling": "32.5", "buying": "100"}
+    },
+    {
+      "name": "sell-rounds-to-zero-at-stroop-boundary",
+      "side": "sell",
+      "amount": "0.0000001",
+      "price_r": {"n": 1, "d": 2},
+      "expected": {"selling": "0", "buying": "0"}
+    },
+    {
+      "name": "buy-rounds-to-zero-at-stroop-boundary",
+      "side": "buy",
+      "amount": "0.0000001",
+      "price_r": {"n": 1, "d": 2},
+      "expected": {"selling": "0", "buying": "0"}
+    }
+  ],
   "offer_projection": [
     {
       "name": "direct-canonical-offer-is-sell",

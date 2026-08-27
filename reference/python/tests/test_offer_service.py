@@ -48,7 +48,9 @@ class FakeAdapter:
     def get_account(self, address):
         if self.account is None:
             raise AssertionError("test did not configure fresh account state")
-        return self.account
+        if address == self.account.get("account_id"):
+            return self.account
+        return {"account_id": address, "flags": {"auth_required": False}}
 
     def build_manage_sell_offer(self, **kwargs):
         self.calls.append(("sell", kwargs))
@@ -91,6 +93,8 @@ def _balance(asset, balance, selling_liabilities="0"):
         "selling_liabilities": str(selling_liabilities),
         "buying_liabilities": "0",
         "limit": "922337203685.4775807",
+        "is_authorized": True,
+        "is_authorized_to_maintain_liabilities": False,
     }
 
 
@@ -285,6 +289,132 @@ def test_price_rationalization_recovers_signed_int32_boundary():
     assert _stellar_price_ratio(Decimal("2147483648")) == PriceRatio(2_147_483_647, 1)
 
 
+def test_offer_create_and_update_require_full_trustline_authorization():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    base = _balance(pair.base, "100")
+    base["is_authorized"] = False
+    base["is_authorized_to_maintain_liabilities"] = True
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [_balance(Asset("XLM"), "100"), base, _balance(pair.counter, "100")],
+        )
+    )
+    service = _service(adapter)
+
+    with pytest.raises(TransactionError, match="not fully authorized"):
+        service.prepare_create(
+            "main",
+            wallet,
+            OfferIntent(pair, "sell", Decimal("1"), Decimal("1")),
+        )
+
+    offer = OpenOffer(
+        offer_id="42",
+        selling=pair.base,
+        buying=pair.counter,
+        selling_amount=Decimal("1"),
+        price_r=PriceRatio(1, 1),
+    )
+    with pytest.raises(TransactionError, match="not fully authorized"):
+        service.prepare_update(
+            "main",
+            wallet,
+            offer,
+            OfferIntent(pair, "sell", Decimal("1"), Decimal("1")),
+        )
+
+
+def test_auto_added_trustline_rejects_auth_required_issuer():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [_balance(Asset("XLM"), "100"), _balance(pair.counter, "100")],
+        )
+    )
+
+    def get_account(address):
+        if address == wallet.address():
+            return adapter.account
+        return {"account_id": address, "flags": {"auth_required": True}}
+
+    adapter.get_account = get_account
+    service = _service(adapter)
+    with pytest.raises(TransactionError, match="requires issuer authorization"):
+        service.prepare_create(
+            "main",
+            wallet,
+            OfferIntent(pair, "buy", Decimal("1"), Decimal("1")),
+            allow_trustline=True,
+        )
+
+
+def test_create_preflight_checks_receiving_capacity_after_existing_buying_liabilities():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    counter = _balance(pair.counter, "9.5")
+    counter["limit"] = "10"
+    counter["buying_liabilities"] = "0.25"
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "100"),
+                _balance(pair.base, "100"),
+                counter,
+            ],
+        )
+    )
+    service = _service(adapter)
+
+    with pytest.raises(InsufficientBalanceError) as captured:
+        service.prepare_create(
+            "main",
+            wallet,
+            OfferIntent(pair, "sell", Decimal("1"), Decimal("1")),
+        )
+    assert captured.value.asset == pair.counter.display
+
+
+def test_update_preflight_releases_old_offer_liabilities_before_replacement():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    base = _balance(pair.base, "20", "10")
+    counter = _balance(pair.counter, "0")
+    counter["limit"] = "20"
+    counter["buying_liabilities"] = "10"
+    adapter = FakeAdapter(
+        _account(wallet, [_balance(Asset("XLM"), "100"), base, counter])
+    )
+    service = _service(adapter)
+    offer = OpenOffer(
+        offer_id="42",
+        selling=pair.base,
+        buying=pair.counter,
+        selling_amount=Decimal("10"),
+        price_r=PriceRatio(1, 1),
+    )
+
+    prepared = service.prepare_update(
+        "main",
+        wallet,
+        offer,
+        OfferIntent(pair, "sell", Decimal("15"), Decimal("1")),
+    )
+    assert prepared.review.amount == "15"
+
+    with pytest.raises(InsufficientBalanceError):
+        service.prepare_update(
+            "main",
+            wallet,
+            offer,
+            OfferIntent(pair, "sell", Decimal("21"), Decimal("1")),
+        )
+
+
 def test_credit_offer_preflight_still_requires_xlm_for_new_subentry_and_fee():
     pair = _pair()
     wallet = Wallet.from_secret(Keypair.random().secret)
@@ -330,7 +460,7 @@ def test_reverse_canonical_offer_projects_to_buy_and_updates_with_manage_buy():
     assert view.total == Decimal("32.5")
 
     wallet = Wallet.from_secret(Keypair.random().secret)
-    adapter = FakeAdapter()
+    adapter = _funded_adapter(wallet, pair)
     service = _service(adapter)
     intent = OfferIntent(pair, "buy", Decimal("90"), Decimal("0.33"))
     service.prepare_update("main", wallet, offer, intent)
@@ -343,6 +473,58 @@ def test_reverse_canonical_offer_projects_to_buy_and_updates_with_manage_buy():
     assert kwargs["price"] == PriceRatio(33, 100)
 
 
+def test_cancel_does_not_require_full_trustline_authorization():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    base = _balance(pair.base, "100", "1")
+    base["is_authorized"] = False
+    base["is_authorized_to_maintain_liabilities"] = True
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [_balance(Asset("XLM"), "100"), base, _balance(pair.counter, "100")],
+        )
+    )
+    service = _service(adapter)
+    offer = OpenOffer(
+        offer_id="77",
+        selling=pair.base,
+        buying=pair.counter,
+        selling_amount=Decimal("1"),
+        price_r=PriceRatio(1, 1),
+    )
+
+    prepared = service.prepare_cancel("main", wallet, offer)
+    assert prepared.review.action == "cancel"
+
+
+def test_cancel_fee_cannot_be_funded_by_reserve_released_after_operation():
+    pair = _pair()
+    wallet = Wallet.from_secret(Keypair.random().secret)
+    adapter = FakeAdapter(
+        _account(
+            wallet,
+            [
+                _balance(Asset("XLM"), "2.5"),
+                _balance(pair.base, "100"),
+                _balance(pair.counter, "100"),
+            ],
+            subentry_count=3,
+        )
+    )
+    service = _service(adapter)
+    offer = OpenOffer(
+        offer_id="77",
+        selling=pair.base,
+        buying=pair.counter,
+        selling_amount=Decimal("1"),
+        price_r=PriceRatio(1, 1),
+    )
+
+    with pytest.raises(InsufficientBalanceError):
+        service.prepare_cancel("main", wallet, offer)
+
+
 def test_cancel_uses_canonical_manage_sell_and_exact_price_fraction():
     pair = _pair()
     offer = OpenOffer(
@@ -353,7 +535,7 @@ def test_cancel_uses_canonical_manage_sell_and_exact_price_fraction():
         price_r=PriceRatio(2000, 337),
     )
     wallet = Wallet.from_secret(Keypair.random().secret)
-    adapter = FakeAdapter()
+    adapter = _funded_adapter(wallet, pair)
     service = _service(adapter)
 
     service.prepare_cancel("main", wallet, offer)
