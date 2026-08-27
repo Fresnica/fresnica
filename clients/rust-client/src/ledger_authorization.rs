@@ -304,7 +304,7 @@ fn json_u8(value: &JsonValue, field: &str, label: &str) -> Result<u8, String> {
 mod tests {
     use super::*;
     use crate::build_operation_envelope;
-    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber, StringM};
+    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber, String64};
 
     const ACCOUNT_A: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const ACCOUNT_B: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
@@ -388,22 +388,15 @@ mod tests {
         );
         let envelope = build_operation_envelope(
             ACCOUNT_A,
-            vec![OperationBody::BumpSequence(BumpSequenceOp {
-                bump_to: SequenceNumber(2),
+            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
+                data_value: None,
             })],
             1,
             100,
             None,
         )
         .unwrap();
-        let TransactionEnvelope::Tx(mut payment_like) = envelope else {
-            unreachable!();
-        };
-        payment_like.tx.operations[0].body = OperationBody::ManageData(stellar_xdr::ManageDataOp {
-            data_name: StringM::<64>::try_from("auth").unwrap().into(),
-            data_value: None,
-        });
-        let envelope = TransactionEnvelope::Tx(payment_like);
 
         let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
         assert_eq!(plan.requirements.len(), 1);
@@ -438,7 +431,7 @@ mod tests {
             ACCOUNT_A,
             vec![
                 OperationBody::ManageData(stellar_xdr::ManageDataOp {
-                    data_name: StringM::<64>::try_from("auth").unwrap().into(),
+                    data_name: String64::try_from(b"auth".to_vec()).unwrap(),
                     data_value: None,
                 }),
                 OperationBody::BumpSequence(BumpSequenceOp {
@@ -453,13 +446,15 @@ mod tests {
         let TransactionEnvelope::Tx(transaction) = &mut envelope else {
             unreachable!();
         };
-        transaction.tx.operations[0].source_account = Some(
+        let mut operations: Vec<_> = transaction.tx.operations.clone().into();
+        operations[0].source_account = Some(
             AccountId::from_str(ACCOUNT_B)
                 .map(|account| match account.0 {
                     PublicKey::PublicKeyTypeEd25519(key) => MuxedAccount::Ed25519(key),
                 })
                 .unwrap(),
         );
+        transaction.tx.operations = operations.try_into().unwrap();
 
         let plan = plan_classic_ledger_authorization(&envelope, &[account_a, account_b]).unwrap();
         assert_eq!(plan.requirements.len(), 2);
