@@ -304,7 +304,7 @@ fn json_u8(value: &JsonValue, field: &str, label: &str) -> Result<u8, String> {
 mod tests {
     use super::*;
     use crate::build_operation_envelope;
-    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber};
+    use stellar_xdr::{BumpSequenceOp, OperationBody, SequenceNumber, StringM};
 
     const ACCOUNT_A: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const ACCOUNT_B: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
@@ -400,7 +400,7 @@ mod tests {
             unreachable!();
         };
         payment_like.tx.operations[0].body = OperationBody::ManageData(stellar_xdr::ManageDataOp {
-            data_name: "auth".try_into().unwrap(),
+            data_name: StringM::<64>::try_from("auth").unwrap().into(),
             data_value: None,
         });
         let envelope = TransactionEnvelope::Tx(payment_like);
@@ -438,7 +438,7 @@ mod tests {
             ACCOUNT_A,
             vec![
                 OperationBody::ManageData(stellar_xdr::ManageDataOp {
-                    data_name: "auth".try_into().unwrap(),
+                    data_name: StringM::<64>::try_from("auth").unwrap().into(),
                     data_value: None,
                 }),
                 OperationBody::BumpSequence(BumpSequenceOp {
