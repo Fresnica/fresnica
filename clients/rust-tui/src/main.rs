@@ -905,7 +905,7 @@ impl App {
         let [header_area, main_area, footer_area] = Layout::vertical([
             Constraint::Length(4),
             Constraint::Min(8),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .areas(frame.area());
 
