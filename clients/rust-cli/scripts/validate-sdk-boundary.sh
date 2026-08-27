@@ -10,8 +10,12 @@ if grep -RInE "$forbidden" clients/rust-cli/src clients/rust-client/src; then
   exit 1
 fi
 
+# Validation branch starts from main before its build hook applies the local source patch.
 mapfile -t core_files < <(grep -RIl 'use fresnica_core' clients/rust-cli/src clients/rust-client/src | sort)
 expected=(
+  "clients/rust-client/src/anchor_protocol.rs"
+  "clients/rust-client/src/ledger_authorization.rs"
+  "clients/rust-client/src/signing_coordination.rs"
   "clients/rust-client/src/transaction.rs"
   "clients/rust-client/src/wallet.rs"
 )
