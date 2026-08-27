@@ -52,6 +52,7 @@ fn main() {
         "sep10-test-identities.patch",
         "simplify-selector.patch",
         "sep10-zero-threshold.patch",
+        "sep10-zero-test-import.patch",
     ] {
         apply_patch(&root, &patches.join(name));
     }
