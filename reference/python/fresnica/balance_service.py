@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from .availability import AvailabilityService
+from .availability import AvailabilityService, MAX_STELLAR_AMOUNT
 from .errors import FresnicaError
 from .models import Asset, BalanceView, LiquidityPositionView, LiquidityReserveView
 
@@ -229,12 +229,22 @@ def _cached_balance_view(raw: dict) -> BalanceView:
     else:
         available = max(balance - selling, Decimal("0"))
 
+    if asset.is_liquidity_pool:
+        receiving_capacity = None
+    elif asset.is_native:
+        receiving_capacity = max(MAX_STELLAR_AMOUNT - balance - buying, Decimal("0"))
+    else:
+        receiving_capacity = max(
+            Decimal(str(raw.get("limit", "0"))) - balance - buying, Decimal("0")
+        )
+
     return BalanceView(
         asset=asset,
         balance=balance,
         selling_liabilities=selling,
         buying_liabilities=buying,
         available=available,
+        receiving_capacity=receiving_capacity,
         raw=raw,
     )
 

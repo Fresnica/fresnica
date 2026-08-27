@@ -167,6 +167,7 @@ class BalanceView:
     selling_liabilities: Decimal = Decimal("0")
     buying_liabilities: Decimal = Decimal("0")
     available: Decimal | None = None
+    receiving_capacity: Decimal | None = None
     raw: dict = field(default_factory=dict)
 
 

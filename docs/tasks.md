@@ -41,8 +41,8 @@
 - [x] Expose the effective trustline limit in Rust/RefPython SDEX review whenever offer preparation adds a receiving trustline; the operation already uses the canonical Fresnica marker but current review only carries the asset
 - [x] Clean legacy RefPython lower-level trustline builder/help/test wording that still says `Stellar maximum`; current `TrustlineService` already supplies the canonical Fresnica `708269837873.6765` marker
 - [x] Rework Rust/RefPython SDEX preflight around final ledger effect: exact integer-stroop liabilities/rounding, receiving capacity, issuer special cases, replacement liabilities on update, and fee/authorization handling on cancel
-- [ ] Add Balance/Payment receiving-capacity semantics in Rust/RefPython, including issued trustline limit/buying-liability headroom, native `INT64_MAX` headroom and issuer-own-asset special handling
-- [ ] Add Payment source/destination trustline full-authorization and destination-capacity preflight plus explicit SEP-29 `memo_required` protection to the Rust shared Payment path; keep issuer-special/orphaned-issuer behavior aligned with current protocol
+- [x] Add Balance/Payment receiving-capacity semantics in Rust/RefPython, including issued trustline limit/buying-liability headroom, native `INT64_MAX` headroom and issuer-own-asset special handling
+- [x] Add Payment source/destination trustline full-authorization and destination-capacity preflight plus explicit SEP-29 `memo_required` protection to the Rust shared Payment path; keep issuer-special/orphaned-issuer behavior aligned with current protocol
 - [x] Add CAP-18 authorization-aware SDEX preflight: create/update require full authorization while cancel remains valid with maintain-liabilities authorization
 - [ ] Add Trustline remove preflight for `liquidityPoolUseCount`, issuer-existence add/nonzero-limit rules, and resulting authorization/clawback state; keep pool-share ChangeTrustAsset outside current product scope
 - [x] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry

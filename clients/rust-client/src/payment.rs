@@ -213,8 +213,21 @@ impl FresnicaClient {
                     .to_owned(),
             );
         }
+        let destination_account = if destination_exists {
+            Some(self.horizon().get_account(destination_address)?)
+        } else {
+            None
+        };
         let ledger = self.horizon().get_ledger_parameters()?;
-        validate_transfer(&account, &asset, amount, ledger)?;
+        validate_transfer(&account, &current.address, &asset, amount, ledger)?;
+        if let Some(destination_account) = destination_account.as_ref() {
+            validate_destination_receive(destination_account, destination_address, &asset, amount)?;
+            if matches!(&memo, PaymentMemo::None) && account_requires_memo(destination_account)? {
+                return Err(format!(
+                    "Destination {destination_address} requires a transaction memo (SEP-29). Add a memo and try again."
+                ));
+            }
+        }
         if !destination_exists {
             let minimum = 2_i64
                 .checked_mul(ledger.base_reserve_in_stroops)
@@ -304,6 +317,13 @@ impl PaymentAsset {
         matches!(self, Self::Native)
     }
 
+    fn issuer(&self) -> Option<&str> {
+        match self {
+            Self::Native => None,
+            Self::Credit { issuer, .. } => Some(issuer),
+        }
+    }
+
     fn display(&self) -> String {
         match self {
             Self::Native => "XLM".to_owned(),
@@ -368,6 +388,7 @@ fn payment_body(
 
 fn validate_transfer(
     account: &Value,
+    account_id: &str,
     asset: &PaymentAsset,
     requested: i64,
     ledger: LedgerParameters,
@@ -376,6 +397,12 @@ fn validate_transfer(
         .get("balances")
         .and_then(Value::as_array)
         .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+
+    if !asset.is_native() && asset.issuer() == Some(account_id) {
+        ensure_payment_fee_capacity(account, ledger)?;
+        return Ok(());
+    }
+
     let raw = balances
         .iter()
         .find(|balance| asset.matches_balance(balance));
@@ -391,28 +418,10 @@ fn validate_transfer(
                 .max(0)
         }
         Some(raw_balance) => {
+            ensure_payment_trustline_authorized(raw_balance, asset)?;
+            ensure_payment_fee_capacity(account, ledger)?;
             let balance = balance_stroops(raw_balance, "balance")?;
             let selling = balance_stroops(raw_balance, "selling_liabilities")?;
-            let native = balances
-                .iter()
-                .find(|balance| text(balance, "asset_type") == Some("native"))
-                .ok_or_else(|| {
-                    "No XLM balance is available to pay the transaction fee".to_owned()
-                })?;
-            let native_balance = balance_stroops(native, "balance")?;
-            let native_selling = balance_stroops(native, "selling_liabilities")?;
-            let minimum = minimum_balance_stroops(account, ledger.base_reserve_in_stroops)?;
-            let free_before_fee = native_balance
-                .saturating_sub(native_selling)
-                .saturating_sub(minimum)
-                .max(0);
-            if free_before_fee < i64::from(ledger.base_fee_in_stroops) {
-                return Err(format!(
-                    "Insufficient XLM for transaction fee: need {}, available {}",
-                    format_stroops(i64::from(ledger.base_fee_in_stroops)),
-                    format_stroops(free_before_fee)
-                ));
-            }
             balance.saturating_sub(selling).max(0)
         }
         None => 0,
@@ -426,6 +435,104 @@ fn validate_transfer(
         ));
     }
     Ok(())
+}
+
+fn validate_destination_receive(
+    account: &Value,
+    account_id: &str,
+    asset: &PaymentAsset,
+    requested: i64,
+) -> Result<(), String> {
+    if !asset.is_native() && asset.issuer() == Some(account_id) {
+        return Ok(());
+    }
+    let balances = account
+        .get("balances")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Horizon returned malformed destination balance data".to_owned())?;
+    let raw = balances
+        .iter()
+        .find(|balance| asset.matches_balance(balance))
+        .ok_or_else(|| format!("Destination has no trustline for {}", asset.display()))?;
+
+    let capacity = if asset.is_native() {
+        let committed = balance_stroops(raw, "balance")?
+            .checked_add(balance_stroops(raw, "buying_liabilities")?)
+            .ok_or_else(|| "destination native receiving capacity overflow".to_owned())?;
+        i64::MAX.saturating_sub(committed)
+    } else {
+        ensure_payment_trustline_authorized(raw, asset)?;
+        let limit = balance_stroops(raw, "limit")?;
+        let committed = balance_stroops(raw, "balance")?
+            .checked_add(balance_stroops(raw, "buying_liabilities")?)
+            .ok_or_else(|| "destination trustline receiving capacity overflow".to_owned())?;
+        limit.saturating_sub(committed).max(0)
+    };
+    if requested > capacity {
+        return Err(format!(
+            "Insufficient receiving capacity for {} at destination: need {}, available {}",
+            asset.display(),
+            format_stroops(requested),
+            format_stroops(capacity)
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_payment_fee_capacity(account: &Value, ledger: LedgerParameters) -> Result<(), String> {
+    let balances = account
+        .get("balances")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+    let native = balances
+        .iter()
+        .find(|balance| text(balance, "asset_type") == Some("native"))
+        .ok_or_else(|| "No XLM balance is available to pay the transaction fee".to_owned())?;
+    let balance = balance_stroops(native, "balance")?;
+    let selling = balance_stroops(native, "selling_liabilities")?;
+    let minimum = minimum_balance_stroops(account, ledger.base_reserve_in_stroops)?;
+    let free = balance
+        .saturating_sub(selling)
+        .saturating_sub(minimum)
+        .max(0);
+    let fee = i64::from(ledger.base_fee_in_stroops);
+    if free < fee {
+        return Err(format!(
+            "Insufficient XLM for transaction fee: need {}, available {}",
+            format_stroops(fee),
+            format_stroops(free)
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_payment_trustline_authorized(raw: &Value, asset: &PaymentAsset) -> Result<(), String> {
+    match raw.get("is_authorized").and_then(Value::as_bool) {
+        Some(true) => Ok(()),
+        Some(false) => Err(format!(
+            "Trustline for {} is not fully authorized for payment",
+            asset.display()
+        )),
+        None => Err(format!(
+            "Horizon returned malformed authorization state for {}",
+            asset.display()
+        )),
+    }
+}
+
+fn account_requires_memo(account: &Value) -> Result<bool, String> {
+    let Some(encoded) = account
+        .get("data")
+        .and_then(Value::as_object)
+        .and_then(|data| data.get("config.memo_required"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(false);
+    };
+    let decoded = STANDARD
+        .decode(encoded)
+        .map_err(|_| "Horizon returned malformed config.memo_required data".to_owned())?;
+    Ok(decoded.as_slice() == b"1")
 }
 
 fn validate_asset_code(code: &str) -> Result<(), String> {
@@ -479,6 +586,7 @@ mod tests {
         };
         assert!(validate_transfer(
             &account,
+            "GSOURCE",
             &PaymentAsset::Native,
             parse_positive_stroops("7.99999").unwrap(),
             ledger,
@@ -486,11 +594,109 @@ mod tests {
         .is_ok());
         assert!(validate_transfer(
             &account,
+            "GSOURCE",
             &PaymentAsset::Native,
             parse_positive_stroops("8").unwrap(),
             ledger,
         )
         .is_err());
+    }
+
+    #[test]
+    fn issuer_can_send_own_asset_without_a_source_trustline() {
+        let source = DESTINATION;
+        let account = serde_json::json!({
+            "subentry_count": 0,
+            "num_sponsoring": 0,
+            "num_sponsored": 0,
+            "balances": [{
+                "asset_type": "native",
+                "balance": "10",
+                "selling_liabilities": "0",
+                "buying_liabilities": "0"
+            }]
+        });
+        let ledger = LedgerParameters {
+            base_fee_in_stroops: 100,
+            base_reserve_in_stroops: 5_000_000,
+        };
+        let asset = PaymentAsset::parse(&format!("USD:{source}")).unwrap();
+        assert!(validate_transfer(&account, source, &asset, 1_000_000_000, ledger).is_ok());
+    }
+
+    #[test]
+    fn destination_credit_requires_full_authorization_and_receiving_headroom() {
+        let asset = PaymentAsset::parse(&format!("USD:{DESTINATION}")).unwrap();
+        let destination = serde_json::json!({
+            "balances": [{
+                "asset_type": "credit_alphanum4",
+                "asset_code": "USD",
+                "asset_issuer": DESTINATION,
+                "balance": "9.5",
+                "buying_liabilities": "0.25",
+                "selling_liabilities": "0",
+                "limit": "10",
+                "is_authorized": true
+            }]
+        });
+        // The destination is the issuer here, so redemption is a special case.
+        assert!(validate_destination_receive(
+            &destination,
+            DESTINATION,
+            &asset,
+            parse_positive_stroops("100").unwrap(),
+        )
+        .is_ok());
+
+        let holder = "GHOLDER";
+        assert!(validate_destination_receive(
+            &destination,
+            holder,
+            &asset,
+            parse_positive_stroops("0.25").unwrap(),
+        )
+        .is_ok());
+        assert!(validate_destination_receive(
+            &destination,
+            holder,
+            &asset,
+            parse_positive_stroops("0.2500001").unwrap(),
+        )
+        .is_err());
+
+        let mut unauthorized = destination;
+        unauthorized["balances"][0]["is_authorized"] = Value::Bool(false);
+        assert!(validate_destination_receive(&unauthorized, holder, &asset, 1,).is_err());
+    }
+
+    #[test]
+    fn native_destination_capacity_respects_int64_headroom() {
+        let destination = serde_json::json!({
+            "balances": [{
+                "asset_type": "native",
+                "balance": "922337203685.4775800",
+                "buying_liabilities": "0",
+                "selling_liabilities": "0"
+            }]
+        });
+        assert!(
+            validate_destination_receive(&destination, DESTINATION, &PaymentAsset::Native, 7,)
+                .is_ok()
+        );
+        assert!(
+            validate_destination_receive(&destination, DESTINATION, &PaymentAsset::Native, 8,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sep29_memo_required_decodes_horizon_account_data() {
+        let account = serde_json::json!({
+            "data": {"config.memo_required": "MQ=="}
+        });
+        assert!(account_requires_memo(&account).unwrap());
+        let unset = serde_json::json!({"data": {}});
+        assert!(!account_requires_memo(&unset).unwrap());
     }
 
     #[test]

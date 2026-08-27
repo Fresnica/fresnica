@@ -2,11 +2,12 @@
 
 from decimal import Decimal, InvalidOperation
 
-from .errors import InvalidAmountError, InsufficientBalanceError
+from .errors import InvalidAmountError, InsufficientBalanceError, TransactionError
 from .models import Asset, BalanceView
 
 
 STROOPS_PER_XLM = Decimal("10000000")
+MAX_STELLAR_AMOUNT = Decimal(2**63 - 1) / STROOPS_PER_XLM
 
 
 class AvailabilityService:
@@ -38,14 +39,17 @@ class AvailabilityService:
             buying = Decimal(raw.get("buying_liabilities", "0"))
             if asset.is_liquidity_pool:
                 available = balance
+                receiving_capacity = None
             elif asset.is_native:
                 available = (
                     balance
                     - selling
                     - self.minimum_balance_xlm(account, base_reserve_stroops)
                 )
+                receiving_capacity = MAX_STELLAR_AMOUNT - balance - buying
             else:
                 available = balance - selling
+                receiving_capacity = Decimal(str(raw.get("limit", "0"))) - balance - buying
             views.append(
                 BalanceView(
                     asset=asset,
@@ -53,6 +57,11 @@ class AvailabilityService:
                     selling_liabilities=selling,
                     buying_liabilities=buying,
                     available=max(available, Decimal("0")),
+                    receiving_capacity=(
+                        None
+                        if receiving_capacity is None
+                        else max(receiving_capacity, Decimal("0"))
+                    ),
                     raw=raw,
                 )
             )
@@ -65,6 +74,8 @@ class AvailabilityService:
         base_reserve_stroops: int,
         fee_stroops: int,
     ) -> Decimal:
+        if not asset.is_native and asset.issuer == account.get("account_id"):
+            return MAX_STELLAR_AMOUNT
         raw = _find_balance(account, asset)
         if raw is None:
             return Decimal("0")
@@ -92,6 +103,9 @@ class AvailabilityService:
         fee_stroops: int,
     ) -> Decimal:
         requested = _amount(amount)
+        if not asset.is_native and asset.issuer != account.get("account_id"):
+            raw = _find_balance(account, asset)
+            _ensure_full_authorization(raw, asset, "source")
         available = self.available_for_transfer(
             account,
             asset,
@@ -119,6 +133,45 @@ class AvailabilityService:
                     "XLM", fee, max(free_before_fee, Decimal("0"))
                 )
         return requested
+
+
+    def receiving_capacity(self, account: dict, asset: Asset) -> Decimal:
+        if not asset.is_native and asset.issuer == account.get("account_id"):
+            return MAX_STELLAR_AMOUNT
+        raw = _find_balance(account, asset)
+        if raw is None:
+            return Decimal("0")
+        balance = Decimal(raw.get("balance", "0"))
+        buying = Decimal(raw.get("buying_liabilities", "0"))
+        if asset.is_native:
+            return max(MAX_STELLAR_AMOUNT - balance - buying, Decimal("0"))
+        limit = Decimal(raw.get("limit", "0"))
+        return max(limit - balance - buying, Decimal("0"))
+
+    def validate_receive(self, account: dict, asset: Asset, amount) -> Decimal:
+        requested = _amount(amount)
+        if not asset.is_native and asset.issuer != account.get("account_id"):
+            raw = _find_balance(account, asset)
+            _ensure_full_authorization(raw, asset, "destination")
+        capacity = self.receiving_capacity(account, asset)
+        if requested > capacity:
+            raise InsufficientBalanceError(asset.display, requested, capacity)
+        return requested
+
+
+def _ensure_full_authorization(raw: dict | None, asset: Asset, role: str) -> None:
+    if raw is None:
+        raise TransactionError(f"{role.title()} trustline is missing for {asset.display}")
+    authorized = raw.get("is_authorized")
+    if authorized is True:
+        return
+    if authorized is False:
+        raise TransactionError(
+            f"{role.title()} trustline for {asset.display} is not fully authorized"
+        )
+    raise TransactionError(
+        f"Horizon returned malformed authorization state for {asset.display}"
+    )
 
 
 def _amount(value) -> Decimal:

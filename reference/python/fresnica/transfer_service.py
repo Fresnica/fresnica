@@ -1,9 +1,11 @@
 """User-facing Stellar payment orchestration."""
 
+import base64
+import binascii
 from decimal import Decimal
 
 from .availability import AvailabilityService, STROOPS_PER_XLM
-from .errors import InvalidAmountError, TransactionError, WatchOnlyError
+from .errors import InvalidAmountError, MemoRequiredError, TransactionError, WatchOnlyError
 from .models import Asset
 
 
@@ -43,6 +45,7 @@ class TransferService:
                 "Destination account does not exist. Only XLM can create a new "
                 "Stellar account; issued assets require an existing account and trustline."
             )
+        destination_account = None if create_destination else adapter.get_account(destination)
 
         base_fee = adapter.fetch_base_fee()
         base_reserve = adapter.get_base_reserve_stroops()
@@ -53,6 +56,10 @@ class TransferService:
             base_reserve_stroops=base_reserve,
             fee_stroops=base_fee,
         )
+        if destination_account is not None:
+            self.availability.validate_receive(destination_account, asset, amount)
+            if not memo and _account_requires_memo(destination_account):
+                raise MemoRequiredError(destination)
 
         if create_destination:
             minimum = Decimal(2 * base_reserve) / STROOPS_PER_XLM
@@ -81,3 +88,18 @@ class TransferService:
 
     def submit(self, prepared):
         return self.transaction_service.submit(prepared)
+
+
+def _account_requires_memo(account: dict) -> bool:
+    encoded = (account.get("data") or {}).get("config.memo_required")
+    if encoded is None:
+        return False
+    if not isinstance(encoded, str):
+        raise TransactionError("Horizon returned malformed config.memo_required data")
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise TransactionError(
+            "Horizon returned malformed config.memo_required data"
+        ) from exc
+    return decoded == b"1"
