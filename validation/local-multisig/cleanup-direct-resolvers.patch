@@ -1,0 +1,81 @@
+diff --git a/clients/rust-cli/src/transaction_flow.rs b/clients/rust-cli/src/transaction_flow.rs
+index 3ba3239..ce8ea13 100644
+--- a/clients/rust-cli/src/transaction_flow.rs
++++ b/clients/rust-cli/src/transaction_flow.rs
+@@ -1,7 +1,6 @@
+ use std::io::{self, Write};
+ 
+ use fresnica_client::{
+-    resolve_local_signing_wallet as client_resolve_local_signing_wallet,
+     sign_and_submit as client_sign_and_submit, HorizonClient, WalletRecord, WalletStorage,
+ };
+ use stellar_xdr::TransactionEnvelope;
+@@ -11,14 +10,6 @@ pub(crate) use fresnica_client::{
+     parse_stroops, parse_transaction_xdr,
+ };
+ 
+-pub(crate) fn resolve_local_signing_wallet(
+-    storage: &WalletStorage,
+-    network: &str,
+-    name: Option<&str>,
+-) -> Result<WalletRecord, String> {
+-    client_resolve_local_signing_wallet(storage, network, name)
+-}
+-
+ pub fn confirm_submission() -> Result<bool, String> {
+     print!("Submit this transaction? [y/N] ");
+     io::stdout()
+diff --git a/clients/rust-client/src/lib.rs b/clients/rust-client/src/lib.rs
+index b4384b3..9e30f7f 100644
+--- a/clients/rust-client/src/lib.rs
++++ b/clients/rust-client/src/lib.rs
+@@ -57,9 +57,8 @@ pub use transaction::{
+     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
+     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
+     minimum_balance_stroops, network_client, network_passphrase, parse_positive_stroops,
+-    parse_stroops, parse_transaction_xdr, resolve_local_signing_wallet, resolve_signing_wallet,
+-    resolve_write_wallet, sign_and_submit, sign_transaction_xdr_with_passcode,
+-    TransactionSubmission, STROOPS_PER_XLM,
++    parse_stroops, parse_transaction_xdr, resolve_write_wallet, sign_and_submit,
++    sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
+ };
+ pub use trustline::{
+     PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,
+diff --git a/clients/rust-client/src/transaction.rs b/clients/rust-client/src/transaction.rs
+index db1b329..fbdfaf6 100644
+--- a/clients/rust-client/src/transaction.rs
++++ b/clients/rust-client/src/transaction.rs
+@@ -74,33 +74,6 @@ pub fn resolve_write_wallet(
+     Ok(record)
+ }
+ 
+-pub fn resolve_signing_wallet(
+-    storage: &WalletStorage,
+-    horizon: &HorizonClient,
+-    network: &str,
+-    name: Option<&str>,
+-) -> Result<WalletRecord, String> {
+-    let record = resolve_local_signing_wallet(storage, network, name)?;
+-    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(
+-        network,
+-        &record.address,
+-        horizon,
+-    )?;
+-    Ok(record)
+-}
+-
+-pub fn resolve_local_signing_wallet(
+-    storage: &WalletStorage,
+-    network: &str,
+-    name: Option<&str>,
+-) -> Result<WalletRecord, String> {
+-    let record = resolve_network_wallet(storage, network, name)?;
+-    if record.watch_only() || record.secret.is_none() {
+-        return Err(format!("wallet \"{}\" is watch-only", record.name));
+-    }
+-    Ok(record)
+-}
+-
+ fn resolve_network_wallet(
+     storage: &WalletStorage,
+     network: &str,
