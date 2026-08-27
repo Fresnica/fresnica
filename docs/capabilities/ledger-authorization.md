@@ -74,9 +74,11 @@ Those belong to Signer, Signing Coordination, Transaction, Application Security,
 
 ## Current implementation status
 
-The boundary is Defined because Fresnica already depends on the conceptual distinction (`hasLocalSigner != ledger-authorized-for-this-transaction`), but the Rust/RefPython references do not yet provide one complete reusable multisig/threshold evaluator.
+The boundary remains Defined because Fresnica does not yet provide complete multisig/delegated signing across Rust/RefPython and product Flows.
 
-Current single-signer Classic flows should therefore remain explicit about their supported scope instead of presenting that scope as a universal authorization algorithm. The Rust Anchor reference now has one intentionally narrow evidence point: before direct Classic SEP-10 signing it compares the account master signer weight with the current medium threshold (or permits the SEP-10 unactivated-account master-key case) and fails explicitly when additional authorization is required. This guard is not a reusable prepared-transaction evaluator and does not change this Capability maturity.
+The Rust reference now contains a first reusable planning slice, `plan_classic_ledger_authorization`: it normalizes Horizon account thresholds and typed signer conditions, applies the transaction-source low threshold, applies operation-source thresholds for the Classic operations currently emitted by Fresnica, aggregates mixed-source requirements, and can compare those weighted requirements with explicitly available typed signer conditions. It fails closed on unsupported Classic operations and on `PreconditionsV2.extraSigners` rather than guessing. This is planning/evidence only; it does not collect signatures or claim general multisig completion.
+
+The Rust Anchor reference still has its narrower SEP-10 guard because SEP-10 also permits an unactivated Client Account master-key proof, which is not the same semantic as authorizing a ledger-submittable transaction. Before direct Classic SEP-10 signing it compares the account master signer weight with the current medium threshold (or permits the SEP-10 unactivated-account case) and fails explicitly when additional authorization is required. RefPython remains narrower still.
 
 ## Promotion criteria
 

@@ -51,6 +51,7 @@
 - [x] Make direct-Classic SEP-10 fail explicitly before signing when the available local signer cannot satisfy the supported direct path: Rust checks current master weight against Horizon medium threshold and RefPython rejects an attached delegated signer
 - [ ] Route SEP-10 delegated/multisig requirements through reusable Ledger Authorization + Signing Coordination and collect the additional required signatures
 - [x] Add cross-language asset-identity vectors for protocol-valid case-sensitive issued codes, including values that high-level SDK convenience constructors may normalize
+- [x] Add the first reusable Rust Ledger Authorization planning slice for normalized typed Horizon signers/thresholds, transaction + operation sources, weighted availability and fail-closed unsupported semantics
 - [ ] Add a real Ledger Authorization implementation/evidence set before claiming general Classic multisig/delegated signing support
 - [ ] Define a next-generation portable Backup/Restore format/activation path before Mobile adoption; authenticate or independently revalidate security-significant account/signer/network relationship metadata rather than copying terminal v1 wholesale
 
