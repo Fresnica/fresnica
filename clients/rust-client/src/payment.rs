@@ -9,7 +9,7 @@ use stellar_xdr::{
 
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope_with_memo, format_stroops,
-    minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_signing_wallet,
+    minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_write_wallet,
     sign_and_submit, FresnicaClient, LedgerParameters, TransactionSubmission, WalletRecord,
 };
 
@@ -138,7 +138,7 @@ pub struct PreparedPayment {
 
 impl FresnicaClient {
     pub fn prepare_payment(&self, request: &PaymentRequest) -> Result<PreparedPayment, String> {
-        let wallet = resolve_signing_wallet(
+        let wallet = resolve_write_wallet(
             self.storage(),
             self.horizon(),
             self.network(),
@@ -168,7 +168,7 @@ impl FresnicaClient {
         contact_name: Option<&str>,
         memo: PaymentMemo,
     ) -> Result<PreparedPayment, String> {
-        let current = resolve_signing_wallet(
+        let current = resolve_write_wallet(
             self.storage(),
             self.horizon(),
             self.network(),

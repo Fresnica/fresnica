@@ -20,9 +20,8 @@ use stellar_xdr::{
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::ledger_authorization::{
-    ensure_local_ed25519_signer_can_satisfy, load_classic_ledger_authorization_plan,
-};
+use crate::ledger_authorization::load_classic_ledger_authorization_plan;
+use crate::signing_coordination::sign_with_local_ed25519;
 use crate::{
     HorizonClient, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
     TESTNET_HORIZON_URL,
@@ -60,6 +59,21 @@ pub fn network_client(network: &str) -> Result<HorizonClient, String> {
     }))
 }
 
+pub fn resolve_write_wallet(
+    storage: &WalletStorage,
+    horizon: &HorizonClient,
+    network: &str,
+    name: Option<&str>,
+) -> Result<WalletRecord, String> {
+    let record = resolve_network_wallet(storage, network, name)?;
+    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(
+        network,
+        &record.address,
+        horizon,
+    )?;
+    Ok(record)
+}
+
 pub fn resolve_signing_wallet(
     storage: &WalletStorage,
     horizon: &HorizonClient,
@@ -80,15 +94,24 @@ pub fn resolve_local_signing_wallet(
     network: &str,
     name: Option<&str>,
 ) -> Result<WalletRecord, String> {
+    let record = resolve_network_wallet(storage, network, name)?;
+    if record.watch_only() || record.secret.is_none() {
+        return Err(format!("wallet \"{}\" is watch-only", record.name));
+    }
+    Ok(record)
+}
+
+fn resolve_network_wallet(
+    storage: &WalletStorage,
+    network: &str,
+    name: Option<&str>,
+) -> Result<WalletRecord, String> {
     let record = storage.resolve(name)?;
     if record.network != network {
         return Err(format!(
             "wallet \"{}\" is configured for {}; invoke with --network {}",
             record.name, record.network, record.network
         ));
-    }
-    if record.watch_only() || record.secret.is_none() {
-        return Err(format!("wallet \"{}\" is watch-only", record.name));
     }
     Ok(record)
 }
@@ -242,14 +265,8 @@ pub fn sign_and_submit(
 ) -> Result<TransactionSubmission, String> {
     ensure_transaction_not_expired(envelope)?;
     let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
-    ensure_local_ed25519_signer_can_satisfy(&authorization, &record.address)?;
+    sign_with_local_ed25519(storage, &authorization, network, envelope, &passcode)?;
     let network_passphrase = network_passphrase(network)?;
-    let unsigned_xdr = transaction_envelope_xdr(envelope)
-        .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
-    let signed_xdr = sign_transaction_xdr_with_passcode(record, network, unsigned_xdr, passcode)?;
-    *envelope = parse_transaction_envelope_xdr(&signed_xdr).map_err(|error| {
-        format!("Unable to decode transaction returned by Fresnica SDK: {error}")
-    })?;
 
     let tx_hash = transaction_hash(envelope, network_passphrase)
         .map_err(|error| format!("Unable to hash signed transaction: {error}"))?;

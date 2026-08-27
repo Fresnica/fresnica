@@ -38,25 +38,25 @@ pub use horizon::{
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
 };
 pub use ledger_authorization::{
-    ensure_local_ed25519_signer_can_satisfy, load_classic_ledger_authorization_plan,
-    plan_classic_ledger_authorization, satisfied_transaction_conditions,
-    AccountAuthorizationRequirement, AuthorizationScope, AuthorizationThreshold, AuthorizationUse,
-    ClassicOperationKind, LedgerAccountAuthorization, LedgerAuthorizationPlan,
-    LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
+    satisfied_transaction_conditions, AccountAuthorizationRequirement, AuthorizationScope,
+    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, LedgerAccountAuthorization,
+    LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
     PreparedPayment,
 };
 pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
-pub use signing_coordination::select_local_ed25519_signers;
+pub use signing_coordination::{select_local_ed25519_signers, sign_with_local_ed25519};
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
     minimum_balance_stroops, network_client, network_passphrase, parse_positive_stroops,
     parse_stroops, parse_transaction_xdr, resolve_local_signing_wallet, resolve_signing_wallet,
-    sign_and_submit, sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
+    resolve_write_wallet, sign_and_submit, sign_transaction_xdr_with_passcode,
+    TransactionSubmission, STROOPS_PER_XLM,
 };
 pub use trustline::{
     PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,

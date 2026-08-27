@@ -7,9 +7,7 @@ use serde_json::Value as JsonValue;
 use zeroize::Zeroizing;
 
 use crate::send::review_and_submit_payment;
-use crate::transaction_flow::{
-    resolve_local_signing_wallet, resolve_signing_wallet, sign_transaction_xdr_with_wallet,
-};
+use crate::transaction_flow::{resolve_local_signing_wallet, sign_transaction_xdr_with_wallet};
 use fresnica_client::{
     anchor_status_requires_sep10, anchor_transaction_text as transaction_text,
     anchor_transfer_requires_sep10,
@@ -661,8 +659,6 @@ fn command_status(client: &FresnicaClient, arguments: &[String]) -> Result<(), S
     }
 
     let payment = withdrawal_payment_from_transaction(&transaction, &record.address, asset)?;
-    let signing_record =
-        resolve_signing_wallet(client.storage(), client.network(), Some(&record.name))?;
     println!();
     println!("Anchor withdrawal payment handoff");
     println!("Anchor:     {}", capabilities.domain);
@@ -679,7 +675,7 @@ fn command_status(client: &FresnicaClient, arguments: &[String]) -> Result<(), S
 
     review_and_submit_payment(
         client,
-        &signing_record,
+        &record,
         &payment.amount,
         &asset.display(),
         &payment.destination,

@@ -8,8 +8,8 @@ use stellar_xdr::{
 
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
-    minimum_balance_stroops, parse_stroops, resolve_signing_wallet, sign_and_submit,
-    FresnicaClient, HorizonClient, TransactionSubmission, WalletRecord,
+    minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
+    HorizonClient, TransactionSubmission, WalletRecord,
 };
 
 pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -87,7 +87,7 @@ impl FresnicaClient {
         &self,
         request: &TrustlineRequest,
     ) -> Result<PreparedTrustline, String> {
-        let wallet = resolve_signing_wallet(
+        let wallet = resolve_write_wallet(
             self.storage(),
             self.horizon(),
             self.network(),

@@ -217,39 +217,6 @@ pub fn satisfied_transaction_conditions(
     Ok(satisfied)
 }
 
-pub fn ensure_local_ed25519_signer_can_satisfy(
-    plan: &LedgerAuthorizationPlan,
-    signer_public_key: &str,
-) -> Result<(), String> {
-    AccountId::from_str(signer_public_key)
-        .map_err(|_| "local ledger-authorization signer must be a Classic G address".to_owned())?;
-    let available = BTreeSet::from([LedgerSignerCondition {
-        kind: LedgerSignerKind::Ed25519PublicKey,
-        key: signer_public_key.to_owned(),
-    }]);
-    let gaps = plan
-        .requirements
-        .iter()
-        .filter_map(|requirement| {
-            let available_weight = requirement.available_weight(&available);
-            (available_weight < u32::from(requirement.required_weight)).then(|| {
-                format!(
-                    "{} requires weight {} but local signer provides {}",
-                    requirement.account_id, requirement.required_weight, available_weight
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    if gaps.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Direct signing cannot satisfy ledger authorization: {}. Additional signer conditions must be completed through Signing Coordination before submission",
-            gaps.join("; ")
-        ))
-    }
-}
-
 pub fn plan_classic_ledger_authorization(
     envelope: &TransactionEnvelope,
     accounts: &[LedgerAccountAuthorization],
@@ -702,43 +669,6 @@ mod tests {
 
         let available = BTreeSet::from([ed25519(ACCOUNT_A), ed25519(ACCOUNT_B), ed25519(SIGNER_C)]);
         assert!(plan.is_satisfiable_by(&available));
-    }
-
-    #[test]
-    fn direct_local_signer_guard_requires_enough_weight() {
-        let account = horizon_account(
-            ACCOUNT_A,
-            1,
-            2,
-            3,
-            &[
-                (ACCOUNT_A, 1, "ed25519_public_key"),
-                (SIGNER_C, 1, "ed25519_public_key"),
-            ],
-        );
-        let envelope = build_operation_envelope(
-            ACCOUNT_A,
-            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
-                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
-                data_value: None,
-            })],
-            1,
-            100,
-            None,
-        )
-        .unwrap();
-        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
-
-        assert_eq!(
-            ensure_local_ed25519_signer_can_satisfy(&plan, ACCOUNT_A).unwrap_err(),
-            format!(
-                "Direct signing cannot satisfy ledger authorization: {ACCOUNT_A} requires weight 2 but local signer provides 1. Additional signer conditions must be completed through Signing Coordination before submission"
-            )
-        );
-
-        let account = horizon_account(ACCOUNT_A, 1, 2, 3, &[(ACCOUNT_A, 2, "ed25519_public_key")]);
-        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
-        assert!(ensure_local_ed25519_signer_can_satisfy(&plan, ACCOUNT_A).is_ok());
     }
 
     #[test]

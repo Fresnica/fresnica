@@ -2,7 +2,6 @@ use std::io::{self, Write};
 
 use fresnica_client::{
     resolve_local_signing_wallet as client_resolve_local_signing_wallet,
-    resolve_signing_wallet as client_resolve_signing_wallet,
     sign_and_submit as client_sign_and_submit,
     sign_transaction_xdr_with_passcode as client_sign_transaction_xdr_with_passcode, HorizonClient,
     WalletRecord, WalletStorage,
@@ -13,15 +12,6 @@ pub(crate) use fresnica_client::{
     format_stroops, has_valid_transaction_signature, network_client, network_passphrase,
     parse_stroops, parse_transaction_xdr,
 };
-
-pub fn resolve_signing_wallet(
-    storage: &WalletStorage,
-    network: &str,
-    name: Option<&str>,
-) -> Result<WalletRecord, String> {
-    let horizon = network_client(network)?;
-    client_resolve_signing_wallet(storage, &horizon, network, name)
-}
 
 pub(crate) fn resolve_local_signing_wallet(
     storage: &WalletStorage,
