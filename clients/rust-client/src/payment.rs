@@ -578,6 +578,59 @@ mod tests {
     }
 
     #[test]
+    fn shared_asset_identity_vectors_preserve_exact_code_and_issuer() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/asset-identity-v1.json"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            vectors["schema"].as_str(),
+            Some("fresnica-asset-identity-v1")
+        );
+        let mut identities = std::collections::BTreeMap::new();
+        for case in vectors["issued_assets"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let code = case["code"].as_str().unwrap();
+            let issuer = case["issuer"].as_str().unwrap();
+            let identity = case["identity"].as_str().unwrap();
+            let asset = PaymentAsset::parse(identity).unwrap();
+
+            assert!(!asset.is_native(), "{name}");
+            assert_eq!(asset.display(), identity, "{name}");
+            match &asset {
+                PaymentAsset::Credit {
+                    code: actual,
+                    issuer: actual_issuer,
+                } => {
+                    assert_eq!(actual, code, "{name}");
+                    assert_eq!(actual_issuer, issuer, "{name}");
+                }
+                PaymentAsset::Native => panic!("{name}: issued vector became native"),
+            }
+            assert!(matches!(
+                (
+                    case["asset_type"].as_str().unwrap(),
+                    asset.to_xdr().unwrap()
+                ),
+                ("credit_alphanum4", Asset::CreditAlphanum4(_))
+                    | ("credit_alphanum12", Asset::CreditAlphanum12(_))
+            ));
+            identities.insert(name.to_owned(), asset);
+        }
+
+        for pair in vectors["distinct_identity_pairs"].as_array().unwrap() {
+            let left = pair[0].as_str().unwrap();
+            let right = pair[1].as_str().unwrap();
+            assert_ne!(
+                identities.get(left),
+                identities.get(right),
+                "{left} vs {right}"
+            );
+        }
+    }
+
+    #[test]
     fn native_availability_reserves_minimum_balance_and_fee() {
         let account = account("10.0000000", 2);
         let ledger = LedgerParameters {

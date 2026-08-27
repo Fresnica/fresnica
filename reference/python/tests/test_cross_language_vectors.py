@@ -19,6 +19,7 @@ from fresnica.offer_service import (
     offer_view_for_pair,
 )
 from fresnica.trade_segments import account_trade_segment_for_pair, compress_account_trades
+from fresnica.stellar_adapter import StellarAdapter
 from fresnica.transaction_builder_service import TransactionBuilderService
 
 
@@ -26,6 +27,13 @@ VECTORS = json.loads(
     (Path(__file__).resolve().parents[3] / "spec/test-vectors/sdex-v1.json").read_text(
         encoding="utf-8"
     )
+)
+
+ASSET_IDENTITY_VECTORS = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "spec/test-vectors/asset-identity-v1.json"
+    ).read_text(encoding="utf-8")
 )
 
 
@@ -50,6 +58,34 @@ class RecordingAdapter:
         self.operation = "manage_buy_offer"
         self.kwargs = kwargs
         return object()
+
+
+def test_asset_identity_vectors_preserve_exact_code_and_issuer():
+    native = ASSET_IDENTITY_VECTORS["native"]
+    native_asset = Asset(native["code"], native["issuer"])
+    assert native_asset.is_native
+    assert StellarAdapter.to_sdk_asset(native_asset).is_native()
+
+    by_name = {}
+    for case in ASSET_IDENTITY_VECTORS["issued_assets"]:
+        asset = Asset(case["code"], case["issuer"])
+        by_name[case["name"]] = asset
+
+        assert not asset.is_native, case["name"]
+        assert f"{asset.code}:{asset.issuer}" == case["identity"], case["name"]
+
+        sdk_asset = StellarAdapter.to_sdk_asset(asset)
+        assert not sdk_asset.is_native(), case["name"]
+        assert sdk_asset.code == case["code"], case["name"]
+        assert sdk_asset.issuer == case["issuer"], case["name"]
+        assert sdk_asset.type == case["asset_type"], case["name"]
+
+        roundtrip = type(sdk_asset).from_xdr_object(sdk_asset.to_xdr_object())
+        assert roundtrip.code == case["code"], case["name"]
+        assert roundtrip.issuer == case["issuer"], case["name"]
+
+    for left, right in ASSET_IDENTITY_VECTORS["distinct_identity_pairs"]:
+        assert by_name[left] != by_name[right]
 
 
 def test_offer_intent_vectors_match_stellar_operation_encoding():

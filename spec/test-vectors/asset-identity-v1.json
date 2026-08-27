@@ -1,0 +1,51 @@
+{
+  "schema": "fresnica-asset-identity-v1",
+  "native": {
+    "code": "XLM",
+    "issuer": null,
+    "identity": "XLM",
+    "asset_type": "native"
+  },
+  "issued_assets": [
+    {
+      "name": "uppercase-usd",
+      "code": "USD",
+      "issuer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "identity": "USD:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "asset_type": "credit_alphanum4"
+    },
+    {
+      "name": "lowercase-usd-is-distinct",
+      "code": "usd",
+      "issuer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "identity": "usd:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "asset_type": "credit_alphanum4"
+    },
+    {
+      "name": "lowercase-xlm-remains-issued",
+      "code": "xlm",
+      "issuer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "identity": "xlm:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "asset_type": "credit_alphanum4",
+      "requires_exact_construction": true
+    },
+    {
+      "name": "uppercase-xlm-with-issuer-remains-issued",
+      "code": "XLM",
+      "issuer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "identity": "XLM:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "asset_type": "credit_alphanum4"
+    },
+    {
+      "name": "mixed-case-alphanum12",
+      "code": "AbCd1234EfGh",
+      "issuer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "identity": "AbCd1234EfGh:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "asset_type": "credit_alphanum12"
+    }
+  ],
+  "distinct_identity_pairs": [
+    ["uppercase-usd", "lowercase-usd-is-distinct"],
+    ["lowercase-xlm-remains-issued", "uppercase-xlm-with-issuer-remains-issued"]
+  ]
+}

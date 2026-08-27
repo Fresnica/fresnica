@@ -63,7 +63,7 @@ An issued asset is identified by both code and issuer. Code-only equality is nev
 
 Issued-asset code bytes/case are part of identity. Product display policy may prefer uppercase, but a Capability must not uppercase/lowercase a protocol-valid issued code for comparison or construction. `USD:G...` and `usd:G...` are distinct identities when both are protocol-valid.
 
-Capability implementations may use native Stellar SDK `Asset` objects internally, but cross-platform semantic DTOs/fixtures should preserve the full identity. If a language SDK convenience constructor would normalize a protocol-valid asset code, the adapter must use an exact construction path or reject explicitly rather than silently change identity.
+Capability implementations may use native Stellar SDK `Asset` objects internally, but cross-platform semantic DTOs/fixtures should preserve the full identity. If a language SDK convenience constructor would normalize a protocol-valid asset code, the adapter must use an exact construction path or reject explicitly rather than silently change identity. Shared conformance cases are fixed by [`../../spec/test-vectors/asset-identity-v1.json`](../../spec/test-vectors/asset-identity-v1.json).
 
 ## Classic asset amount
 

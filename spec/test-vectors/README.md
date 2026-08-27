@@ -8,6 +8,7 @@ Current sets:
 - `protection-v1.json`: password and system-key wallet-secret encryption compatibility.
 - `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
+- `asset-identity-v1.json`: exact Classic native/issued asset identity, including case-sensitive issued codes and `xlm:G...` constructor-normalization hazards.
 - `smart-account-auth-v1.json`: real Protocol 27 Testnet smart-account authorization captured after a confirmed WebAuthn/passkey transfer and accepted by the provider fixture verifier.
 
 The smart-account vector is captured public authorization material from Testnet, not a synthetic passkey fixture. It contains the confirmed transaction identity, host-function XDR and signed Soroban auth XDR required to replay the provider conformance checks; it does not contain a passkey private key or Fresnica software-wallet secret.
@@ -37,6 +38,10 @@ The vector freezes compatibility with existing Fresnica records; it does not cla
 Implementations must agree on the unsigned envelope XDR, network-specific transaction hash, raw Ed25519 signature, four-byte Stellar signature hint, and final decorated-signature envelope XDR. The transaction hash is the signing payload; raw XDR and network passphrase are review/context inputs for external signers rather than arbitrary bytes to sign.
 
 This vector deliberately covers Classic transaction signing only. SEP-53 arbitrary-message signing and Soroban contract authorization require separate domain-specific vectors.
+
+## Classic asset identity
+
+`asset-identity-v1.json` fixes native `XLM` separately from issued `CODE:GISSUER` identity. Issued code bytes and case are semantic: `USD:G...` and `usd:G...` are distinct, and `xlm:G...` remains an issued asset rather than native XLM. Platform SDK convenience constructors that normalize XLM spellings must use an exact construction path or fail explicitly instead of changing these vectors.
 
 ## Numeric rules
 
