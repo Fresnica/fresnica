@@ -19,11 +19,11 @@ pub use anchor::{
 pub use anchor_protocol::{
     anchor_sep6_requires_auth, anchor_status_requires_sep10, anchor_transaction_text,
     anchor_transfer_requires_sep10, anchor_withdrawal_payment_from_transaction,
-    exchange_anchor_sep10_challenge, fetch_anchor_transaction, prepare_anchor_sep10_challenge,
-    select_anchor_status_protocol, select_anchor_transfer_protocol, start_anchor_sep24_transfer,
-    start_anchor_sep6_transfer, AnchorAsset, AnchorCapabilities, AnchorDiscovery, AnchorProtocol,
-    AnchorSep10Challenge, AnchorSep24InteractiveResult, AnchorTransferKind,
-    AnchorWithdrawalPayment,
+    ensure_direct_sep10_authorization, exchange_anchor_sep10_challenge, fetch_anchor_transaction,
+    prepare_anchor_sep10_challenge, select_anchor_status_protocol, select_anchor_transfer_protocol,
+    start_anchor_sep24_transfer, start_anchor_sep6_transfer, AnchorAsset, AnchorCapabilities,
+    AnchorDiscovery, AnchorProtocol, AnchorSep10Challenge, AnchorSep24InteractiveResult,
+    AnchorTransferKind, AnchorWithdrawalPayment,
 };
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{

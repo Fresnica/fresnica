@@ -14,8 +14,8 @@ use fresnica_client::{
     anchor_status_requires_sep10, anchor_transaction_text as transaction_text,
     anchor_transfer_requires_sep10,
     anchor_withdrawal_payment_from_transaction as withdrawal_payment_from_transaction,
-    exchange_anchor_sep10_challenge, fetch_anchor_transaction, get_anchor_customer,
-    prepare_anchor_sep10_challenge, put_anchor_customer,
+    ensure_direct_sep10_authorization, exchange_anchor_sep10_challenge, fetch_anchor_transaction,
+    get_anchor_customer, prepare_anchor_sep10_challenge, put_anchor_customer,
     select_anchor_status_protocol as select_status_protocol,
     select_anchor_transfer_protocol as select_transfer_protocol, start_anchor_sep24_transfer,
     start_anchor_sep6_transfer, AnchorAsset as IssuedAsset, AnchorCapabilities, AnchorCustomerFile,
@@ -130,6 +130,7 @@ fn command_auth(client: &FresnicaClient, arguments: &[String]) -> Result<(), Str
     let discovery = client.discover_anchor(&arguments[0])?;
     let record = resolve_local_signing_wallet(client.storage(), client.network(), wallet)?;
     let token = authenticate_anchor_sep10(
+        client,
         &record,
         client.network(),
         &discovery.home_domain,
@@ -266,6 +267,7 @@ fn command_customer(client: &FresnicaClient, arguments: &[String]) -> Result<(),
     })?;
     let record = client.resolve_wallet(wallet)?;
     let token = authenticate_anchor_sep10(
+        client,
         &record,
         client.network(),
         &discovery.home_domain,
@@ -506,6 +508,7 @@ fn command_transfer(
     let record = client.resolve_wallet(wallet)?;
     let token = if anchor_transfer_requires_sep10(capabilities, protocol, kind) {
         Some(authenticate_anchor_sep10(
+            client,
             &record,
             client.network(),
             &discovery.home_domain,
@@ -627,6 +630,7 @@ fn command_status(client: &FresnicaClient, arguments: &[String]) -> Result<(), S
     let record = client.resolve_wallet(wallet)?;
     let token = if anchor_status_requires_sep10(capabilities, protocol) {
         Some(authenticate_anchor_sep10(
+            client,
             &record,
             client.network(),
             &discovery.home_domain,
@@ -771,6 +775,7 @@ fn parse_transfer_field(value: &str) -> Result<(String, String), String> {
 }
 
 fn authenticate_anchor_sep10(
+    client: &FresnicaClient,
     record: &WalletRecord,
     network: &str,
     home_domain: &str,
@@ -782,6 +787,8 @@ fn authenticate_anchor_sep10(
             record.name
         ));
     }
+    let ledger_account = client.ledger_account(&record.address)?;
+    ensure_direct_sep10_authorization(ledger_account.as_ref(), &record.address)?;
     let challenge =
         prepare_anchor_sep10_challenge(network, &record.address, home_domain, capabilities)?;
     let signed_xdr =

@@ -71,6 +71,10 @@ impl FresnicaClient {
         Ok(record)
     }
 
+    pub fn ledger_account(&self, address: &str) -> Result<Option<Value>, String> {
+        self.horizon.get_account_optional(address)
+    }
+
     pub fn account(&self, name: Option<&str>) -> Result<AccountSnapshot, String> {
         let wallet = self.resolve_wallet(name)?;
         let account = self.horizon.get_account(&wallet.address)?;

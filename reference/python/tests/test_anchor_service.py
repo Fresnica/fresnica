@@ -8,6 +8,7 @@ from fresnica.anchor_service import AnchorCapabilities, AnchorError, AnchorServi
 from fresnica.errors import NetworkError
 from fresnica.models import Asset
 from fresnica.network import get_network
+from fresnica.signer import StellarKeypairSigner
 from fresnica.wallet import Wallet
 
 
@@ -192,6 +193,27 @@ class Sep24Session:
                 "id": "tx-1",
             }
         )
+
+
+def test_sep10_rejects_delegated_local_signer_before_http():
+    network_passphrase = get_network("testnet").passphrase
+    account_key = Keypair.random()
+    delegated_key = Keypair.random()
+    wallet = Wallet.from_secret(account_key.secret).with_signer(
+        StellarKeypairSigner(delegated_key)
+    )
+    capabilities = AnchorCapabilities(
+        domain="anchor.example",
+        web_auth_url="https://anchor.example/auth",
+        signing_key=Keypair.random().public_key,
+    )
+    session = Session([])
+
+    with pytest.raises(AnchorError, match="Ledger Authorization"):
+        AnchorService(session=session)._authenticate_sep10(
+            wallet, capabilities, network_passphrase
+        )
+    assert session.urls == []
 
 
 def test_sep24_authenticates_with_verified_challenge_and_wallet_signature():

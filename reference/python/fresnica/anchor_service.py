@@ -216,6 +216,12 @@ class AnchorService:
     ) -> str:
         assert capabilities.web_auth_url is not None
         assert capabilities.signing_key is not None
+        if not wallet.can_sign():
+            raise AnchorError("Watch-only wallet cannot sign SEP-10 authentication")
+        if wallet.signer_public_key() != wallet.address():
+            raise AnchorError(
+                "Delegated/multisig SEP-10 signing requires Ledger Authorization + Signing Coordination"
+            )
         endpoint = capabilities.web_auth_url
         try:
             response = self.session.get(

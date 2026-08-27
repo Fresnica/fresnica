@@ -33,6 +33,23 @@ impl HorizonClient {
         )
     }
 
+    pub fn get_account_optional(&self, address: &str) -> Result<Option<Value>, String> {
+        let url = format!("{}/accounts/{address}", self.base_url);
+        let mut response = match ureq::get(&url).call() {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return Ok(None),
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(format!("Horizon returned HTTP {code} for {url}"))
+            }
+            Err(error) => return Err(format!("Unable to contact Horizon at {url}: {error}")),
+        };
+        response
+            .body_mut()
+            .read_json::<Value>()
+            .map(Some)
+            .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
+    }
+
     pub fn get_liquidity_pool(&self, liquidity_pool_id: &str) -> Result<Value, String> {
         self.get_json(
             &format!("/liquidity_pools/{liquidity_pool_id}"),
@@ -630,6 +647,29 @@ mod tests {
                 .unwrap_err(),
             "Stellar account not found: GNOTFOUND"
         );
+    }
+
+    #[test]
+    fn optional_account_maps_404_to_none() {
+        let base = mock_server("GET", "/accounts/GNEW", 404, r#"{}"#);
+        assert_eq!(
+            HorizonClient::new(&base)
+                .get_account_optional("GNEW")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn optional_account_returns_existing_account_json() {
+        let body = r#"{"account_id":"GACCOUNT","thresholds":{"med_threshold":0}}"#;
+        let base = mock_server("GET", "/accounts/GACCOUNT", 200, body);
+        let account = HorizonClient::new(&base)
+            .get_account_optional("GACCOUNT")
+            .unwrap()
+            .unwrap();
+        assert_eq!(account["account_id"], "GACCOUNT");
+        assert_eq!(account["thresholds"]["med_threshold"], 0);
     }
 
     #[test]

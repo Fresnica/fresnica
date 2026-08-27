@@ -76,7 +76,7 @@ Those belong to Signer, Signing Coordination, Transaction, Application Security,
 
 The boundary is Defined because Fresnica already depends on the conceptual distinction (`hasLocalSigner != ledger-authorized-for-this-transaction`), but the Rust/RefPython references do not yet provide one complete reusable multisig/threshold evaluator.
 
-Current single-signer Classic flows should therefore remain explicit about their supported scope instead of presenting that scope as a universal authorization algorithm.
+Current single-signer Classic flows should therefore remain explicit about their supported scope instead of presenting that scope as a universal authorization algorithm. The Rust Anchor reference now has one intentionally narrow evidence point: before direct Classic SEP-10 signing it compares the account master signer weight with the current medium threshold (or permits the SEP-10 unactivated-account master-key case) and fails explicitly when additional authorization is required. This guard is not a reusable prepared-transaction evaluator and does not change this Capability maturity.
 
 ## Promotion criteria
 

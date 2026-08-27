@@ -897,6 +897,51 @@ struct Sep10TokenResponse {
     token: String,
 }
 
+pub fn ensure_direct_sep10_authorization(
+    ledger_account: Option<&JsonValue>,
+    account_id: &str,
+) -> Result<(), String> {
+    let Some(account) = ledger_account else {
+        // SEP-10 explicitly allows an unactivated Client Account to prove control
+        // with exactly one valid master-key signature.
+        return Ok(());
+    };
+
+    let observed_account = account
+        .get("account_id")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "Horizon account authorization is missing account_id".to_owned())?;
+    if observed_account != account_id {
+        return Err("Horizon account authorization belongs to a different account".to_owned());
+    }
+
+    let medium_threshold = account
+        .get("thresholds")
+        .and_then(|value| value.get("med_threshold"))
+        .and_then(JsonValue::as_u64)
+        .filter(|value| *value <= u64::from(u8::MAX))
+        .ok_or_else(|| "Horizon account authorization is missing med_threshold".to_owned())?;
+    let required_weight = medium_threshold.max(1);
+    let signers = account
+        .get("signers")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| "Horizon account authorization is missing signers".to_owned())?;
+    let master_weight = signers
+        .iter()
+        .find(|signer| signer.get("key").and_then(JsonValue::as_str) == Some(account_id))
+        .and_then(|signer| signer.get("weight"))
+        .and_then(JsonValue::as_u64)
+        .filter(|value| *value <= u64::from(u8::MAX))
+        .unwrap_or(0);
+
+    if master_weight < required_weight {
+        return Err(format!(
+            "SEP-10 direct signing is unsupported for this account: medium threshold requires weight {required_weight}, but the account master key contributes {master_weight}; use Ledger Authorization + Signing Coordination"
+        ));
+    }
+    Ok(())
+}
+
 pub fn prepare_anchor_sep10_challenge(
     network: &str,
     account: &str,
@@ -1370,6 +1415,65 @@ mod tests {
             sep24_withdraw: true,
             warnings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn direct_sep10_authorization_allows_unactivated_and_sufficient_master_key() {
+        assert!(ensure_direct_sep10_authorization(None, ISSUER).is_ok());
+
+        let default_account = serde_json::json!({
+            "account_id": ISSUER,
+            "thresholds": {"low_threshold": 0, "med_threshold": 0, "high_threshold": 0},
+            "signers": [
+                {"key": ISSUER, "weight": 1, "type": "ed25519_public_key"}
+            ]
+        });
+        assert!(ensure_direct_sep10_authorization(Some(&default_account), ISSUER).is_ok());
+
+        let account = serde_json::json!({
+            "account_id": ISSUER,
+            "thresholds": {"low_threshold": 0, "med_threshold": 2, "high_threshold": 2},
+            "signers": [
+                {"key": ISSUER, "weight": 2, "type": "ed25519_public_key"},
+                {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 1, "type": "ed25519_public_key"}
+            ]
+        });
+        assert!(ensure_direct_sep10_authorization(Some(&account), ISSUER).is_ok());
+    }
+
+    #[test]
+    fn direct_sep10_authorization_rejects_insufficient_or_disabled_master_key() {
+        for master_weight in [0, 1] {
+            let account = serde_json::json!({
+                "account_id": ISSUER,
+                "thresholds": {"med_threshold": 2},
+                "signers": [
+                    {"key": ISSUER, "weight": master_weight, "type": "ed25519_public_key"},
+                    {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 2, "type": "ed25519_public_key"}
+                ]
+            });
+            let error = ensure_direct_sep10_authorization(Some(&account), ISSUER).unwrap_err();
+            assert!(error.contains("use Ledger Authorization + Signing Coordination"));
+        }
+    }
+
+    #[test]
+    fn direct_sep10_authorization_fails_closed_on_malformed_or_wrong_account_state() {
+        let malformed = serde_json::json!({"account_id": ISSUER, "signers": []});
+        assert_eq!(
+            ensure_direct_sep10_authorization(Some(&malformed), ISSUER).unwrap_err(),
+            "Horizon account authorization is missing med_threshold"
+        );
+
+        let wrong = serde_json::json!({
+            "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            "thresholds": {"med_threshold": 1},
+            "signers": []
+        });
+        assert_eq!(
+            ensure_direct_sep10_authorization(Some(&wrong), ISSUER).unwrap_err(),
+            "Horizon account authorization belongs to a different account"
+        );
     }
 
     #[test]

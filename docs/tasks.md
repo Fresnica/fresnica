@@ -48,7 +48,8 @@
 - [x] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry
 - [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
 - [x] Harden Rust/RefPython Anchor asset matching to exact-case full identity and reject automatic redirects so an initially validated HTTPS endpoint cannot silently change transport/origin
-- [ ] Add delegated/multisig SEP-10 handling through Ledger Authorization/Signing Coordination or explicit unsupported failure
+- [x] Make direct-Classic SEP-10 fail explicitly before signing when the available local signer cannot satisfy the supported direct path: Rust checks current master weight against Horizon medium threshold and RefPython rejects an attached delegated signer
+- [ ] Route SEP-10 delegated/multisig requirements through reusable Ledger Authorization + Signing Coordination and collect the additional required signatures
 - [x] Add cross-language asset-identity vectors for protocol-valid case-sensitive issued codes, including values that high-level SDK convenience constructors may normalize
 - [ ] Add a real Ledger Authorization implementation/evidence set before claiming general Classic multisig/delegated signing support
 - [ ] Define a next-generation portable Backup/Restore format/activation path before Mobile adoption; authenticate or independently revalidate security-significant account/signer/network relationship metadata rather than copying terminal v1 wholesale
