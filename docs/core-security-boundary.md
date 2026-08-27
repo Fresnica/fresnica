@@ -77,20 +77,22 @@ It must not be persisted in normal application state, navigation state, Realm/SQ
 
 ## 5. Routine authorization vs higher privilege
 
-System authentication and the Fresnica app passcode have different authority.
+System authentication and the Fresnica passphrase have different authority.
 
 ```text
 System Auth
   -> may authorize routine signer use according to platform policy
 
-Fresnica passcode
+Fresnica Passphrase
   -> protection/recovery authority
-  -> required for higher-privilege operations such as Reveal/Export and passcode rotation
+  -> required for higher-privilege operations such as Reveal/Export and passphrase rotation
 ```
 
 System authentication must not silently become a replacement recovery credential.
 
 A native `WalletUnlockKey` is routine software-signing authorization material, not a Reveal/Export credential. It must remain outside normal JavaScript/Dart/application scripting state.
+
+Passphrase strength and credential-entry UX are Wallet/Application policy. The current Fresnica product baseline requires at least 15 Unicode scalar values when establishing new protection, while Core remains authoritative for KDF/encryption semantics rather than password-composition policy. Existing protected envelopes must remain unlockable so weak historical credentials can be rotated safely.
 
 ## 6. Transaction integrity
 

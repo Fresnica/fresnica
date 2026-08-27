@@ -9,6 +9,16 @@ use thiserror::Error;
 
 use crate::signer::{ClassicSigner, SignerError, TransactionSigningRequest};
 
+// Finite library-level decoder bound. Wallet/Application ingress may apply stricter policy.
+const XDR_DECODE_MAX_DEPTH: u32 = 500;
+
+fn xdr_decode_limits(encoded_len: usize) -> Limits {
+    Limits {
+        depth: XDR_DECODE_MAX_DEPTH,
+        len: encoded_len,
+    }
+}
+
 pub fn network_id(network_passphrase: &str) -> [u8; 32] {
     Sha256::digest(network_passphrase.as_bytes()).into()
 }
@@ -165,7 +175,8 @@ fn verify_signature(
 pub fn parse_transaction_envelope_xdr(
     xdr: &[u8],
 ) -> Result<TransactionEnvelope, TransactionSigningError> {
-    TransactionEnvelope::from_xdr(xdr, Limits::none()).map_err(TransactionSigningError::Xdr)
+    TransactionEnvelope::from_xdr(xdr, xdr_decode_limits(xdr.len()))
+        .map_err(TransactionSigningError::Xdr)
 }
 
 pub fn transaction_envelope_xdr(
@@ -240,6 +251,37 @@ mod tests {
             TransactionEnvelope::Tx(value) => value.signatures = signatures,
             TransactionEnvelope::TxFeeBump(value) => value.signatures = signatures,
         }
+    }
+
+    #[test]
+    fn xdr_decode_limits_bound_length_and_recursive_depth() {
+        use stellar_xdr::ScVal;
+
+        let limits = xdr_decode_limits(1234);
+        assert_eq!(limits.len, 1234);
+        assert_eq!(limits.depth, XDR_DECODE_MAX_DEPTH);
+
+        fn nested_scval_xdr(levels: usize) -> Vec<u8> {
+            const SCV_VEC: [u8; 4] = 16i32.to_be_bytes();
+            const PRESENT: [u8; 4] = 1u32.to_be_bytes();
+            const ONE_ITEM: [u8; 4] = 1u32.to_be_bytes();
+            const SCV_VOID: [u8; 4] = 1i32.to_be_bytes();
+
+            let mut raw = Vec::with_capacity(levels * 12 + 4);
+            for _ in 0..levels {
+                raw.extend_from_slice(&SCV_VEC);
+                raw.extend_from_slice(&PRESENT);
+                raw.extend_from_slice(&ONE_ITEM);
+            }
+            raw.extend_from_slice(&SCV_VOID);
+            raw
+        }
+
+        let accepted = nested_scval_xdr(8);
+        assert!(ScVal::from_xdr(&accepted, xdr_decode_limits(accepted.len())).is_ok());
+
+        let rejected = nested_scval_xdr(1_000);
+        assert!(ScVal::from_xdr(&rejected, xdr_decode_limits(rejected.len())).is_err());
     }
 
     #[test]
