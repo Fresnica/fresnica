@@ -796,6 +796,7 @@ fn authenticate_anchor_sep10(
         &authorization,
         &satisfied,
         &excluded,
+        1,
         network,
         &mut envelope,
         passcode.as_str(),

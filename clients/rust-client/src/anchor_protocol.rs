@@ -921,7 +921,7 @@ pub fn sep10_authorization_plan(
             }
             AccountAuthorizationRequirement {
                 account_id: account.account_id,
-                required_weight: account.medium_threshold.max(1),
+                required_weight: account.medium_threshold,
                 uses: Vec::new(),
                 signers: account.signers,
             }
@@ -1015,7 +1015,7 @@ pub fn exchange_anchor_sep10_challenge(
         kind: LedgerSignerKind::Ed25519PublicKey,
         key: challenge.server_signing_key.clone(),
     });
-    if !authorization.is_satisfiable_by(&satisfied) {
+    if satisfied.is_empty() || !authorization.is_satisfiable_by(&satisfied) {
         return Err(
             "signed SEP-10 challenge does not satisfy client ledger authorization".to_owned(),
         );
@@ -1450,7 +1450,7 @@ mod tests {
             ]
         });
         let default_plan = sep10_authorization_plan(Some(&default_account), ISSUER).unwrap();
-        assert_eq!(default_plan.requirements[0].required_weight, 1);
+        assert_eq!(default_plan.requirements[0].required_weight, 0);
 
         let account = serde_json::json!({
             "account_id": ISSUER,
@@ -1679,7 +1679,15 @@ mod tests {
         };
 
         let signed_envelope = parse_transaction_xdr(&transaction_xdr).unwrap();
-        let authorization = sep10_authorization_plan(None, ISSUER).unwrap();
+        let ledger_account = serde_json::json!({
+            "account_id": ISSUER,
+            "thresholds": {"low_threshold": 0, "med_threshold": 0, "high_threshold": 0},
+            "signers": [
+                {"key": ISSUER, "weight": 0, "type": "ed25519_public_key"}
+            ]
+        });
+        let authorization = sep10_authorization_plan(Some(&ledger_account), ISSUER).unwrap();
+        assert!(authorization.is_satisfiable_by(&BTreeSet::new()));
         assert_eq!(
             exchange_anchor_sep10_challenge(TESTNET, &challenge, &authorization, &signed_envelope)
                 .unwrap_err(),

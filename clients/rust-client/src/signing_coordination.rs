@@ -5,7 +5,7 @@ use stellar_xdr::TransactionEnvelope;
 
 use crate::ledger_authorization::{
     satisfied_transaction_conditions, LedgerAuthorizationPlan, LedgerSignerCondition,
-    LedgerSignerKind,
+    LedgerSignerKind, WeightedLedgerSigner,
 };
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction::{
@@ -26,6 +26,7 @@ pub fn sign_with_local_ed25519(
         plan,
         &satisfied,
         &BTreeSet::new(),
+        0,
         network,
         envelope,
         passcode,
@@ -44,6 +45,7 @@ pub fn sign_needed_local_ed25519(
     plan: &LedgerAuthorizationPlan,
     satisfied: &BTreeSet<LedgerSignerCondition>,
     excluded_keys: &BTreeSet<String>,
+    minimum_signatures: usize,
     network: &str,
     envelope: &mut TransactionEnvelope,
     passcode: &str,
@@ -54,7 +56,8 @@ pub fn sign_needed_local_ed25519(
         .filter(|key| !excluded_keys.contains(*key))
         .cloned()
         .collect();
-    let selected = select_local_ed25519_signers(plan, satisfied, &local_signers)?;
+    let selected =
+        select_local_ed25519_signers(plan, satisfied, &local_signers, minimum_signatures)?;
 
     for key in selected {
         let record = records
@@ -90,6 +93,7 @@ pub fn select_local_ed25519_signers(
     plan: &LedgerAuthorizationPlan,
     satisfied: &BTreeSet<LedgerSignerCondition>,
     local_signers: &BTreeSet<String>,
+    minimum_signatures: usize,
 ) -> Result<Vec<String>, String> {
     let mut current = satisfied.clone();
     let mut selected = Vec::new();
@@ -97,15 +101,7 @@ pub fn select_local_ed25519_signers(
     for requirement in &plan.requirements {
         while requirement.available_weight(&current) < u32::from(requirement.required_weight) {
             let available = requirement.available_weight(&current);
-            let signer = requirement
-                .signers
-                .iter()
-                .filter(|signer| {
-                    signer.condition.kind == LedgerSignerKind::Ed25519PublicKey
-                        && local_signers.contains(&signer.condition.key)
-                        && !current.contains(&signer.condition)
-                })
-                .max_by_key(|signer| signer.weight)
+            let signer = best_local_signer(requirement.signers.iter(), &current, local_signers)
                 .ok_or_else(|| {
                     format!(
                         "Signing Coordination cannot satisfy ledger authorization: {} requires weight {} but has {}",
@@ -116,7 +112,41 @@ pub fn select_local_ed25519_signers(
             selected.push(signer.condition.key.clone());
         }
     }
+
+    while current
+        .iter()
+        .filter(|condition| condition.kind == LedgerSignerKind::Ed25519PublicKey)
+        .count()
+        < minimum_signatures
+    {
+        let signer = best_local_signer(
+            plan.requirements
+                .iter()
+                .flat_map(|requirement| requirement.signers.iter()),
+            &current,
+            local_signers,
+        )
+        .ok_or_else(|| {
+            "Signing Coordination cannot provide the required Ed25519 proof".to_owned()
+        })?;
+        current.insert(signer.condition.clone());
+        selected.push(signer.condition.key.clone());
+    }
     Ok(selected)
+}
+
+fn best_local_signer<'a>(
+    signers: impl Iterator<Item = &'a WeightedLedgerSigner>,
+    current: &BTreeSet<LedgerSignerCondition>,
+    local_signers: &BTreeSet<String>,
+) -> Option<&'a WeightedLedgerSigner> {
+    signers
+        .filter(|signer| {
+            signer.condition.kind == LedgerSignerKind::Ed25519PublicKey
+                && local_signers.contains(&signer.condition.key)
+                && !current.contains(&signer.condition)
+        })
+        .max_by_key(|signer| signer.weight)
 }
 
 #[cfg(test)]
@@ -245,7 +275,7 @@ mod tests {
             SIGNER_C.to_owned(),
         ]);
 
-        let selected = select_local_ed25519_signers(&plan, &BTreeSet::new(), &local).unwrap();
+        let selected = select_local_ed25519_signers(&plan, &BTreeSet::new(), &local, 0).unwrap();
 
         assert_eq!(selected.len(), 2);
         let selected = selected
@@ -256,5 +286,29 @@ mod tests {
             })
             .collect();
         assert!(plan.is_satisfiable_by(&selected));
+    }
+
+    #[test]
+    fn minimum_signature_proof_can_use_zero_weight_signer() {
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 0,
+                uses: Vec::new(),
+                signers: vec![WeightedLedgerSigner {
+                    condition: LedgerSignerCondition {
+                        kind: LedgerSignerKind::Ed25519PublicKey,
+                        key: SIGNER_A.to_owned(),
+                    },
+                    weight: 0,
+                }],
+            }],
+        };
+        let local = BTreeSet::from([SIGNER_A.to_owned()]);
+
+        assert_eq!(
+            select_local_ed25519_signers(&plan, &BTreeSet::new(), &local, 1).unwrap(),
+            vec![SIGNER_A]
+        );
     }
 }
