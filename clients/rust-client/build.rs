@@ -1,18 +1,27 @@
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-fn git_apply(root: &PathBuf, patch: &PathBuf, reverse: bool, check: bool) -> bool {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(root).arg("apply");
-    if reverse {
-        command.arg("--reverse");
-    }
-    if check {
-        command.arg("--check");
-    }
-    command.arg(patch);
-    command.status().expect("run git apply").success()
+fn apply_patch(root: &PathBuf, patch: &PathBuf) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("apply")
+        .arg("--check")
+        .arg(patch)
+        .status()
+        .expect("check validation patch");
+    assert!(status.success(), "check {}", patch.display());
+
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("apply")
+        .arg(patch)
+        .status()
+        .expect("apply validation patch");
+    assert!(status.success(), "apply {}", patch.display());
 }
 
 fn main() {
@@ -20,8 +29,12 @@ fn main() {
         .join("../..")
         .canonicalize()
         .expect("repo root");
-    let patches = root.join("validation/local-multisig");
+    let marker = root.join(".git/fresnica-local-multisig-validation-applied");
+    if marker.exists() {
+        return;
+    }
 
+    let patches = root.join("validation/local-multisig");
     for name in [
         "anchor.patch",
         "transaction-flow.patch",
@@ -34,15 +47,7 @@ fn main() {
         "trustline.patch",
         "test-xdr-fix.patch",
     ] {
-        let patch = patches.join(name);
-        println!("cargo:rerun-if-changed={}", patch.display());
-        if git_apply(&root, &patch, false, true) {
-            assert!(git_apply(&root, &patch, false, false), "apply {name}");
-        } else {
-            assert!(
-                git_apply(&root, &patch, true, true),
-                "validation patch is neither applicable nor already applied: {name}"
-            );
-        }
+        apply_patch(&root, &patches.join(name));
     }
+    fs::write(marker, b"ok").expect("write validation marker");
 }
