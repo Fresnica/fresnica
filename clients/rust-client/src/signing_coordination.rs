@@ -183,7 +183,7 @@ mod tests {
     const SECRET_A: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const MNEMONIC_B: &str =
         "illness spike retreat truth genius clock brain pass fit cave bargain toe";
-    const PASSCODE: &str = "passcode";
+    const PASSCODE: &str = "correct horse battery staple";
 
     fn signer(key: &str) -> WeightedLedgerSigner {
         WeightedLedgerSigner {

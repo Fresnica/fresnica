@@ -34,6 +34,10 @@
 
 ### Implementation follow-ups discovered by contract audit
 
+- [x] Bound Core transaction XDR decoding by finite recursion depth and the actual encoded input length without turning Core into the Wallet/Dapp ingress-policy layer
+- [x] Define the 15-Unicode-scalar Fresnica passphrase baseline and enforce it in the shared Rust Wallet reference path for new protected signers while preserving unlock compatibility for existing weaker envelopes
+- [ ] Apply the same new-passphrase/re-protection policy in Mobile onboarding/settings; keep credential-strength policy in Wallet/Application rather than Core
+- [ ] Benchmark Scrypt cost on supported iOS/Android hardware before changing version-1 KDF parameters; any stronger KDF profile must use explicit versioned migration
 - [x] Align Rust SDEX decimal-price rationalization with the canonical bounded best-rational behavior, including semi-convergent recovery at signed-int32 boundaries (for example `2147483648` -> `2147483647/1`)
 - [x] Make Rust/RefPython SDEX BUY preflight derive price-dependent selling capacity from the same effective `Price { n, d }` that will be encoded, not independently from the requested decimal
 - [x] Align Rust/RefPython SDEX create/update review with the exact encoded Stellar `Price { n, d }` when decimal input requires rational approximation; requested price alone is not sufficient review truth

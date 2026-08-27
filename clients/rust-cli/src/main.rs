@@ -74,7 +74,7 @@ Wallet commands:
 The native client uses the platform-neutral Fresnica SDK for wallet protection and
 signing, while low-level Stellar/XDR primitives remain in Rust Core. It uses the
 same wallet files and version-1 encrypted backup format as the Python reference
-client. All local software wallets share one Fresnica passcode while retaining
+client. All local software wallets share one Fresnica passphrase while retaining
 independent Core salt/nonce-derived encryption keys.
 "#;
 
@@ -180,7 +180,7 @@ fn command_info(storage: &WalletStorage, arguments: &[String]) -> Result<(), Str
         if record.watch_only() {
             "none"
         } else {
-            "Fresnica passcode envelope v1"
+            "Fresnica passphrase envelope v1"
         }
     );
     println!(
@@ -402,7 +402,7 @@ fn wallet_detach_signer(storage: &WalletStorage, name: &str) -> Result<(), Strin
     if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
         return Ok(());
     }
-    let passcode = prompt_hidden("Fresnica passcode: ")?;
+    let passcode = prompt_hidden("Fresnica passphrase: ")?;
     let updated = wallet_ops::detach_signer_record(&record, &passcode)?;
     storage.save(&updated, true)?;
     println!("Wallet \"{}\" is now watch-only", updated.name);
@@ -415,7 +415,7 @@ fn wallet_reveal(storage: &WalletStorage, name: Option<&str>) -> Result<(), Stri
     if record.watch_only() {
         return Err("watch-only wallet has no signing material".to_owned());
     }
-    let passcode = prompt_hidden("Fresnica passcode: ")?;
+    let passcode = prompt_hidden("Fresnica passphrase: ")?;
     let material = wallet_ops::reveal_record(&record, &passcode)?;
     match material {
         RevealedSigningMaterial::Secret { secret } => {
@@ -477,11 +477,11 @@ fn wallet_restore(storage: &WalletStorage, arguments: &[String]) -> Result<(), S
     if !record.watch_only() && has_app_passcode(storage)? {
         let passcode = prompt_existing_app_passcode(storage)?;
         wallet_ops::verify_passcode(&record, &passcode)
-            .map_err(|_| "backup does not use the current Fresnica passcode".to_owned())?;
+            .map_err(|_| "backup does not use the current Fresnica passphrase".to_owned())?;
     }
     save_new_record(storage, &record)?;
     println!(
-        "Restored wallet \"{}\" [{}]; unlock with the Fresnica passcode",
+        "Restored wallet \"{}\" [{}]; unlock with the Fresnica passphrase",
         record.name, record.network
     );
     Ok(())
@@ -547,9 +547,9 @@ fn prompt_app_passcode(storage: &WalletStorage) -> Result<Zeroizing<String>, Str
 }
 
 fn prompt_existing_app_passcode(storage: &WalletStorage) -> Result<Zeroizing<String>, String> {
-    let passcode = prompt_hidden("Fresnica passcode: ")?;
+    let passcode = prompt_hidden("Fresnica passphrase: ")?;
     if passcode.is_empty() {
-        return Err("Fresnica passcode cannot be empty".to_owned());
+        return Err("Fresnica passphrase cannot be empty".to_owned());
     }
     verify_app_passcode(storage, &passcode)?;
     Ok(passcode)
@@ -629,13 +629,11 @@ fn prompt_hidden(prompt: &str) -> Result<Zeroizing<String>, String> {
 }
 
 fn prompt_new_passcode() -> Result<Zeroizing<String>, String> {
-    let passcode = prompt_hidden("Create Fresnica passcode: ")?;
-    let confirmation = prompt_hidden("Confirm Fresnica passcode: ")?;
-    if passcode.is_empty() {
-        return Err("Fresnica passcode cannot be empty".to_owned());
-    }
+    let passcode = prompt_hidden("Create Fresnica passphrase: ")?;
+    let confirmation = prompt_hidden("Confirm Fresnica passphrase: ")?;
+    wallet_ops::validate_new_passphrase(&passcode)?;
     if passcode.as_str() != confirmation.as_str() {
-        return Err("Fresnica passcodes do not match".to_owned());
+        return Err("Fresnica passphrases do not match".to_owned());
     }
     Ok(passcode)
 }

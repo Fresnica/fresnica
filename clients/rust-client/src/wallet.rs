@@ -5,6 +5,17 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::storage::WalletRecord;
 
+const MIN_FRESNICA_PASSPHRASE_CHARS: usize = 15;
+
+pub fn validate_new_passphrase(passphrase: &str) -> Result<(), String> {
+    if passphrase.chars().count() < MIN_FRESNICA_PASSPHRASE_CHARS {
+        return Err(format!(
+            "Fresnica passphrase must contain at least {MIN_FRESNICA_PASSPHRASE_CHARS} characters"
+        ));
+    }
+    Ok(())
+}
+
 pub enum RevealedSigningMaterial {
     Secret {
         secret: Zeroizing<String>,
@@ -24,6 +35,7 @@ pub fn import_secret_record(
     passcode: &str,
 ) -> Result<WalletRecord, String> {
     validate_name_and_network(name, network)?;
+    validate_new_passphrase(passcode)?;
     let protected = FresnicaSdk::new()
         .protect_secret(secret.to_owned(), passcode.to_owned(), None)
         .map_err(|error| error.to_string())?;
@@ -47,6 +59,7 @@ pub fn import_mnemonic_record(
     passcode: &str,
 ) -> Result<WalletRecord, String> {
     validate_name_and_network(name, network)?;
+    validate_new_passphrase(passcode)?;
     let language = match language {
         Some(value) if !value.is_empty() => value.to_owned(),
         _ => detect_mnemonic_language(mnemonic)
@@ -83,6 +96,7 @@ pub fn create_mnemonic_record(
     passcode: &str,
 ) -> Result<(WalletRecord, Zeroizing<String>), String> {
     validate_name_and_network(name, network)?;
+    validate_new_passphrase(passcode)?;
     let generated = FresnicaSdk::new()
         .generate_mnemonic(
             language.to_owned(),
@@ -109,6 +123,7 @@ pub fn attach_secret_record(
     passcode: &str,
 ) -> Result<WalletRecord, String> {
     ensure_watch_only(record)?;
+    validate_new_passphrase(passcode)?;
     let protected = FresnicaSdk::new()
         .protect_secret(
             secret.to_owned(),
@@ -132,6 +147,7 @@ pub fn attach_mnemonic_record(
     passcode: &str,
 ) -> Result<WalletRecord, String> {
     ensure_watch_only(record)?;
+    validate_new_passphrase(passcode)?;
     let language = match language {
         Some(value) if !value.is_empty() => value.to_owned(),
         _ => detect_mnemonic_language(mnemonic)
@@ -171,7 +187,7 @@ pub fn verify_passcode(record: &WalletRecord, passcode: &str) -> Result<(), Stri
     let envelope_json = record_envelope_json(record)?;
     let mut unlock_key = FresnicaSdk::new()
         .derive_unlock_key(envelope_json, passcode.to_owned(), record.address.clone())
-        .map_err(|_| "invalid Fresnica passcode".to_owned())?;
+        .map_err(|_| "invalid Fresnica passphrase".to_owned())?;
     unlock_key.zeroize();
     Ok(())
 }
@@ -282,20 +298,32 @@ mod tests {
     const MNEMONIC: &str =
         "illness spike retreat truth genius clock brain pass fit cave bargain toe";
     const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
+    const PASSPHRASE: &str = "correct horse battery staple";
+
+    #[test]
+    fn new_protection_rejects_pin_length_and_accepts_unicode_phrase() {
+        assert_eq!(
+            import_secret_record("weak", "testnet", SECRET, "123456").unwrap_err(),
+            "Fresnica passphrase must contain at least 15 characters"
+        );
+        let phrase = "萤火照亮自己的路前行吧钱包安全";
+        assert_eq!(phrase.chars().count(), MIN_FRESNICA_PASSPHRASE_CHARS);
+        assert!(validate_new_passphrase(phrase).is_ok());
+    }
 
     #[test]
     fn secret_record_is_protected_by_sdk_and_revealable() {
-        let record = import_secret_record("alpha", "testnet", SECRET, "passcode").unwrap();
+        let record = import_secret_record("alpha", "testnet", SECRET, PASSPHRASE).unwrap();
         assert_eq!(record.address, PUBLIC);
         assert_eq!(record.wallet_type, "secret");
         assert!(!record.secret.as_ref().unwrap().to_string().contains(SECRET));
-        verify_passcode(&record, "passcode").unwrap();
+        verify_passcode(&record, PASSPHRASE).unwrap();
         assert_eq!(
             verify_passcode(&record, "different").unwrap_err(),
-            "invalid Fresnica passcode"
+            "invalid Fresnica passphrase"
         );
 
-        match reveal_record(&record, "passcode").unwrap() {
+        match reveal_record(&record, PASSPHRASE).unwrap() {
             RevealedSigningMaterial::Secret { secret } => assert_eq!(secret.as_str(), SECRET),
             _ => panic!("secret wallet revealed the wrong material kind"),
         }
@@ -311,12 +339,12 @@ mod tests {
             secret: None,
             metadata: Map::new(),
         };
-        let attached = attach_secret_record(&watch, SECRET, "passcode").unwrap();
+        let attached = attach_secret_record(&watch, SECRET, PASSPHRASE).unwrap();
         assert_eq!(attached.address, PUBLIC);
         assert_eq!(attached.wallet_type, "secret");
         assert!(attached.secret.is_some());
 
-        let detached = detach_signer_record(&attached, "passcode").unwrap();
+        let detached = detach_signer_record(&attached, PASSPHRASE).unwrap();
         assert_eq!(detached.address, PUBLIC);
         assert_eq!(detached.wallet_type, "watch-only");
         assert!(detached.secret.is_none());
@@ -327,7 +355,7 @@ mod tests {
             ..watch
         };
         assert_eq!(
-            attach_secret_record(&mismatch, SECRET, "passcode").unwrap_err(),
+            attach_secret_record(&mismatch, SECRET, PASSPHRASE).unwrap_err(),
             "signing material does not match watch-only address"
         );
     }
@@ -342,7 +370,7 @@ mod tests {
             secret: None,
             metadata: Map::new(),
         };
-        let attached = attach_mnemonic_record(&watch, MNEMONIC, "", 0, None, "passcode").unwrap();
+        let attached = attach_mnemonic_record(&watch, MNEMONIC, "", 0, None, PASSPHRASE).unwrap();
         assert_eq!(attached.wallet_type, "mnemonic");
         assert_eq!(
             attached.metadata.get("language").and_then(Value::as_str),
@@ -357,7 +385,7 @@ mod tests {
     #[test]
     fn generated_mnemonic_record_preserves_derivation_metadata() {
         let (record, mnemonic) =
-            create_mnemonic_record("alpha", "mainnet", "", 3, "english", 128, "passcode").unwrap();
+            create_mnemonic_record("alpha", "mainnet", "", 3, "english", 128, PASSPHRASE).unwrap();
         assert_eq!(mnemonic.split_whitespace().count(), 12);
         assert_eq!(record.wallet_type, "mnemonic");
         assert_eq!(
@@ -368,7 +396,7 @@ mod tests {
             record.metadata.get("language").and_then(Value::as_str),
             Some("english")
         );
-        match reveal_record(&record, "passcode").unwrap() {
+        match reveal_record(&record, PASSPHRASE).unwrap() {
             RevealedSigningMaterial::Mnemonic {
                 mnemonic: revealed,
                 index,
