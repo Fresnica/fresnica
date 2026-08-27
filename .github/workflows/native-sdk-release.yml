@@ -144,7 +144,7 @@ jobs:
           fi
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" "ndk;${ANDROID_NDK_VERSION}" "platforms;android-34"
+          "$SDKMANAGER" "ndk;${ANDROID_NDK_VERSION}" "platforms;android-34" "build-tools;36.0.0"
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build Rust libraries and generated Kotlin
@@ -152,9 +152,13 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           bash bindings/native/scripts/build-android.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "7.5.1"
+          gradle-version: "9.4.1"
       - name: Build and lint Native SDK AAR
         run: gradle -p bindings/native/platform/android assembleRelease lintRelease --stacktrace
       - name: Validate Android Native SDK

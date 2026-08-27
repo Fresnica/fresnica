@@ -1,6 +1,5 @@
 plugins {
-    id 'com.android.library' version '7.4.0'
-    id 'org.jetbrains.kotlin.android' version '1.9.24'
+    id 'com.android.library' version '9.2.1'
 }
 
 String requiredProperty(String name) {
@@ -32,9 +31,6 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
 }
 
 repositories {

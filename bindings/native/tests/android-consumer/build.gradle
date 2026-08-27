@@ -1,6 +1,5 @@
 plugins {
-    id 'com.android.application' version '7.4.0'
-    id 'org.jetbrains.kotlin.android' version '1.9.24'
+    id 'com.android.application' version '9.2.1'
 }
 
 repositories {
@@ -25,9 +24,6 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
 }
 
 def nativeSdkAar = System.getenv('FRESNICA_NATIVE_AAR')
