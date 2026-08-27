@@ -50,6 +50,7 @@ fn main() {
         "sep10-anchor-protocol.patch",
         "cleanup-direct-resolvers.patch",
         "sep10-test-identities.patch",
+        "simplify-selector.patch",
     ] {
         apply_patch(&root, &patches.join(name));
     }
