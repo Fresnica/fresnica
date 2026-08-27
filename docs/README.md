@@ -44,6 +44,7 @@ Normative contracts currently include Account, Signer, Balance / Availability, P
 See [`core/README.md`](core/README.md) for Core client/security/signer/protection/reveal details.
 
 The short cross-platform authority remains [Core Security Boundary](core-security-boundary.md).
+The three cross-cutting trust/credential/Dapp decisions are summarized in [Security Architecture Baseline v1](security-architecture-baseline.md).
 
 ### Platforms
 
