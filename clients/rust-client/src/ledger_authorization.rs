@@ -458,7 +458,7 @@ fn json_u8(value: &JsonValue, field: &str, label: &str) -> Result<u8, String> {
 mod tests {
     use super::*;
     use crate::build_operation_envelope;
-    use fresnica_core::{sign_transaction_envelope, SoftwareSigner};
+    use fresnica_core::{sign_transaction_envelope, transaction_hash, SoftwareSigner};
     use sha2::Digest;
     use stellar_xdr::{
         BumpSequenceOp, OperationBody, PreconditionsV2, SequenceNumber, String64, Uint256, VecM,
