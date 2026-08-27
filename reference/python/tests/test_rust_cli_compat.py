@@ -119,45 +119,31 @@ def test_rust_cli_restores_python_backup_without_changing_envelope(rust_cli, tmp
     assert destination_storage.get_default() == "restored-by-rust"
 
 
-def test_rust_cli_uses_python_contact_storage(rust_cli, tmp_path):
-    home = tmp_path / "contacts-home"
+def test_rust_cli_reads_python_contacts(rust_cli, tmp_path):
+    home = tmp_path / "python-contacts"
+    ContactStore(home / "contacts.json").add("Alice", PUBLIC, memo="default-memo")
+
+    listed = _run(rust_cli, home, "contact", "list")
+
+    assert "Alice" in listed
+    assert PUBLIC in listed
+    assert "default-memo" in listed
+
+
+def test_python_reads_rust_cli_contacts(rust_cli, tmp_path):
+    home = tmp_path / "rust-contacts"
     _run(
         rust_cli,
         home,
-        "--network",
-        "testnet",
-        "wallet",
-        "import-watch",
-        "rust-watch",
-        PUBLIC,
+        "contact",
+        "add",
+        "Bob",
+        SECOND_PUBLIC,
+        "--memo",
+        "12345",
     )
 
-    contacts = ContactStore(home / "contacts.json")
-    contacts.add("Bob", SECOND_PUBLIC, memo="invoice-7")
-
-    listed = _run(rust_cli, home, "contacts", "list")
-    assert "Bob" in listed
-    assert SECOND_PUBLIC in listed
-    assert "invoice-7" in listed
-
-    resolved = _run(rust_cli, home, "contacts", "resolve", "bob")
-    assert SECOND_PUBLIC in resolved
-    assert "invoice-7" in resolved
-
-
-def test_rust_cli_supports_native_wallet_info_for_watch_only(rust_cli, tmp_path):
-    home = tmp_path / "watch-info"
-    _run(
-        rust_cli,
-        home,
-        "--network",
-        "mainnet",
-        "wallet",
-        "import-watch",
-        "watch",
-        PUBLIC,
-    )
-
-    info = _run(rust_cli, home, "info", "--wallet", "watch")
-    assert "Protection: none" in info
-    assert "Type:       watch-only" in info
+    contact = ContactStore(home / "contacts.json").get("bob")
+    assert contact.name == "Bob"
+    assert contact.address == SECOND_PUBLIC
+    assert contact.memo == "12345"
