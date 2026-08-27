@@ -296,12 +296,13 @@ Desktop consumes platform Native SDK binaries plus a framework adapter only when
 
 ## Immediate Next Work
 
-1. **Finish documentation/contract stabilization**: keep `docs/README.md`, the five common contracts and `docs/capabilities/` as the authoritative cross-project vocabulary; remove remaining stale implementation-status claims rather than duplicating contracts in platform/state documents.
-2. **Land and validate the current Rust reference batch**: after the documentation batch is pushed, run real Rust tests/release builds for the Anchor Capability extraction that follows the already-validated SEP-12 batch.
-3. **Let independent Mobile integration proceed from the contracts**: Mobile Features implement Application Flows and may implement Capabilities with Stellar JS SDK + Native SDK + Mobile-owned repositories; do not require `fresnica-client` or mirror Rust module structure.
-4. **Upgrade Defined capabilities only from concrete product evidence**: Backup/Restore, Ledger Authorization, Asset Discovery/Catalog, Dapp/session transport, History normalization, Contacts, Application Security, Wallet aggregate and Network/Gateway contracts should mature from real Mobile/Web/Desktop behavior.
-5. **Keep SEP/hardware extensions demand-driven**: validate Anchor behavior against concrete anchors before nested `/customer/files`; keep SEP-45 separate; keep Ledger transport gated by exact XDR/provider compatibility.
-6. **Preserve provider conformance baselines**: smart-account/passkey remains provider/Testnet reference material until a product needs a cross-platform capability contract.
+The shared foundation has reached the point where product integration, not more speculative shared code, should drive the roadmap. Remaining open tasks are not startup blockers for `fresnica-mobile`.
+
+1. **Land the validated foundation checkpoint** and establish its `main-bundle` as the Mobile integration baseline.
+2. **Let independent Mobile integration proceed from the contracts**: Mobile Features implement Application Flows and may implement Capabilities with Stellar JS SDK + Native SDK + Mobile-owned repositories; do not require `fresnica-client` or mirror Rust module structure.
+3. **Upgrade Core/SDK or Defined capabilities only from concrete evidence**: real Mobile/Web/Desktop behavior, a protocol-conformance defect or a security issue should justify new shared semantics.
+4. **Keep provider/platform extensions demand-driven**: external/hardware signer transport, uncommon SEP-12 file workflows, platform-native passkey wiring and additional non-Rust packages wait for real consumers.
+5. **Preserve compatibility/release discipline**: pin API versions/releases, keep conformance fixtures authoritative and rerun the relevant platform gates at meaningful boundaries.
 
 ## Architecture / Security Rules
 

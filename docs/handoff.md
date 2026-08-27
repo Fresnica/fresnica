@@ -163,7 +163,7 @@ The common Classic Anchor Capability contract includes:
 - reviewed withdrawal payment handoff;
 - common SEP-12 customer status and scalar/binary updates.
 
-The current Rust Anchor extraction moves protocol/transport semantics into `fresnica-client`; CLI remains product/prompt/rendering orchestration. Rust and RefPython now require exact-case `code + issuer` asset identity and reject automatic Anchor redirects. Rust direct-Classic SEP-10 also checks current master weight against the ledger medium threshold before signing, while RefPython rejects an attached delegated signer. Additional-signature collection/coordination remains a known reference conformance gap; do not describe these guards as general ledger-authorization support yet.
+The Rust Anchor path keeps protocol/transport semantics in `fresnica-client`; CLI remains product/prompt/rendering orchestration. Rust and RefPython require exact-case `code + issuer` asset identity and reject automatic Anchor redirects. The Rust reference path now uses reusable Ledger Authorization + Signing Coordination for local Ed25519 multisig/delegated SEP-10, models `PreconditionsV2.extraSigners`, and recognizes already-present Ed25519, pre-authorized transaction, Hash-X and signed-payload authorization material. Provider-backed collection for Hash-X, signed-payload and external/hardware signers remains demand-driven; RefPython remains a narrower behavioral reference rather than evidence of general multisig support.
 
 Still demand-driven/deferred:
 
@@ -237,14 +237,13 @@ Real Rust/Apple/Android/Web/platform gates should run at meaningful validation b
 
 ## 11. Immediate next work
 
-Current priority is **documentation/contract stabilization**, then landing/validating the existing Rust batch.
+The shared Core/SDK foundation is complete enough to hand product pressure to the independent `fresnica-mobile` project. Do not keep adding generic shared abstractions merely to close remaining checkboxes.
 
-1. Keep the five common contracts small and authoritative.
-2. Move stable capability semantics and proven Reference Semantics into `docs/capabilities/` rather than leaving them hidden in implementation docs/code.
-3. Keep platform implementation detail under `docs/platforms/`, while allowing platform repositories to contribute evidence back through documentation PRs.
-4. Land the current development bundle when the documentation batch reaches a natural boundary.
-5. Run real Rust test/release-build validation for the Anchor extraction after landing.
-6. After that, let concrete Mobile/Web/Desktop/product needs drive the next Capability implementation or contract upgrade.
+1. Land the current validated checkpoint and use the resulting `main-bundle` as the new baseline.
+2. Let `fresnica-mobile` consume the pinned Native SDK and common Capability contracts while owning Realm, Horizon/network orchestration, platform auth and product UX.
+3. Change Core/SDK only for a concrete security/protocol defect or evidence from a real Mobile/Web/Desktop integration.
+4. Keep external/hardware signer transport, uncommon SEP extensions and additional platform packages demand-driven until a real consumer exists.
+5. Preserve API/version compatibility, conformance fixtures and release gates while the product layer matures.
 
 ## 12. Start here next session
 
