@@ -57,9 +57,8 @@ pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
     minimum_balance_stroops, network_client, network_passphrase, parse_positive_stroops,
-    parse_stroops, parse_transaction_xdr, resolve_local_signing_wallet, resolve_signing_wallet,
-    resolve_write_wallet, sign_and_submit, sign_transaction_xdr_with_passcode,
-    TransactionSubmission, STROOPS_PER_XLM,
+    parse_stroops, parse_transaction_xdr, resolve_write_wallet, sign_and_submit,
+    sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
 };
 pub use trustline::{
     PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,

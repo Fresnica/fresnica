@@ -74,33 +74,6 @@ pub fn resolve_write_wallet(
     Ok(record)
 }
 
-pub fn resolve_signing_wallet(
-    storage: &WalletStorage,
-    horizon: &HorizonClient,
-    network: &str,
-    name: Option<&str>,
-) -> Result<WalletRecord, String> {
-    let record = resolve_local_signing_wallet(storage, network, name)?;
-    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(
-        network,
-        &record.address,
-        horizon,
-    )?;
-    Ok(record)
-}
-
-pub fn resolve_local_signing_wallet(
-    storage: &WalletStorage,
-    network: &str,
-    name: Option<&str>,
-) -> Result<WalletRecord, String> {
-    let record = resolve_network_wallet(storage, network, name)?;
-    if record.watch_only() || record.secret.is_none() {
-        return Err(format!("wallet \"{}\" is watch-only", record.name));
-    }
-    Ok(record)
-}
-
 fn resolve_network_wallet(
     storage: &WalletStorage,
     network: &str,
