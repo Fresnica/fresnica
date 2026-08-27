@@ -9,6 +9,13 @@ fn replace_if_needed(path: &str, from: &str, to: &str) {
     fs::write(path, source.replacen(from, to, 1)).expect("write validation source");
 }
 
+fn replace_all_if_present(path: &str, from: &str, to: &str) {
+    let source = fs::read_to_string(path).expect("read validation source");
+    if source.contains(from) {
+        fs::write(path, source.replace(from, to)).expect("write validation source");
+    }
+}
+
 fn remove_if_present(path: &str, text: &str) {
     let source = fs::read_to_string(path).expect("read validation source");
     if source.contains(text) {
@@ -32,5 +39,10 @@ fn main() {
         "src/anchor_protocol.rs",
         "let wrong = serde_json::json!({\n            \"account_id\": \"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF\",",
         "let wrong = serde_json::json!({\n            \"account_id\": \"GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I\",",
+    );
+    replace_all_if_present(
+        "src/ledger_authorization.rs",
+        "data_name: \"auth\".try_into().unwrap(),",
+        "data_name: stellar_xdr::StringM::<64>::try_from(\"auth\").unwrap().into(),",
     );
 }
