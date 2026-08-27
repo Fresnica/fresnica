@@ -54,7 +54,7 @@
 - [x] Add the first reusable Rust Ledger Authorization planning slice for normalized typed Horizon signers/thresholds, transaction + operation sources, weighted availability and fail-closed unsupported semantics
 - [x] Route the Rust reference shared submit path through fresh Horizon Ledger Authorization and coordinate only the local software Ed25519 signatures still required after existing signatures/preauth conditions are evaluated
 - [ ] Extend the proven Rust local-Ed25519 Ledger Authorization path to provider-backed Hash-X/signed-payload/external signer conditions before claiming general Classic multisig/delegated signing support
-- [ ] Define a next-generation portable Backup/Restore format/activation path before Mobile adoption; authenticate or independently revalidate security-significant account/signer/network relationship metadata rather than copying terminal v1 wholesale
+- [x] Define portable Backup/Restore v2 around backup-local Account/Signer graph references and revalidation-before-activation: explicit target-network confirmation, Core signer re-protection/identity verification, direct-master activation, pending delegated/provider relationships, and non-authoritative Recovery Source hints
 
 ## Runtime
 

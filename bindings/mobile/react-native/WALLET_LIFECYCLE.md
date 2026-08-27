@@ -82,6 +82,22 @@ A wrong current passcode or any Core failure therefore leaves every persisted en
 passcode. A concurrent signer modification aborts the database swap. A Keychain/Keystore cleanup
 failure never rolls the newly committed envelopes back.
 
+## Portable backup / restore
+
+`src/portable-backup.ts` defines the Mobile reference for `fresnica-wallet-backup` version 2 without
+copying Realm primary keys or device-bound System Auth state into the file. Backup references are
+local to the backup (`a1`, `s1`, ...), and stored networks are only suggestions.
+
+Restore must receive an explicit target network for every account. Protected signer envelopes are
+validated and freshly re-encrypted by Core through `reprotect(oldPasscode, newPasscode,
+expectedSignerPublicKey)` before they can be persisted. Direct Classic master-key references can be
+activated from identity equality; delegated Classic and contract/provider references remain pending
+until the host validates their authorization. Recovery-source grouping is returned as a pending
+hint and is not persisted as signer authority by this layer.
+
+This keeps backup crypto in Rust Core and keeps the React Native layer limited to graph validation,
+staging and one atomic store transaction.
+
 ## Store contract
 
 A `WalletStore` adapter must provide atomic `transaction` semantics. Reads used to decide whether a

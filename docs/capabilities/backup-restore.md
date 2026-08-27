@@ -49,6 +49,53 @@ In an installation that already has the Fresnica app passcode, the current termi
 
 A future Mobile/Desktop portable backup must close this gap by integrity-protecting security-significant metadata or by keeping restored records inactive until the required independent validation/reconfirmation succeeds.
 
+## Portable backup v2 reference
+
+The React Native reference now exercises the second option: **revalidate before activation** rather than introducing a second backup-encryption hierarchy.
+
+Portable v2 keeps the existing format family and advances the version:
+
+```text
+format  = fresnica-wallet-backup
+version = 2
+```
+
+Its graph contains backup-local references only:
+
+```text
+accounts[]
+  ref, address, suggestedNetwork, name
+
+signers[]
+  ref, kind=protected-software, signerPublicKey, envelope
+
+accountSignerReferences[]
+  accountRef -> signerRef
+
+recoverySources[]
+  ref, kind=mnemonic, signerRefs[]
+```
+
+Source-installation database IDs, `WalletUnlockKey`, System Auth registrations and other device-bound material are deliberately absent.
+
+Restore staging follows these rules:
+
+1. `suggestedNetwork` is only a hint. The host must explicitly supply the target network for every Account before activation.
+2. Core re-parses every Account identity; silent canonicalization is rejected.
+3. Every protected software signer is passed through existing Core `reprotect(oldPasscode, newPasscode, expectedSignerPublicKey)`. This authenticates the protected material against the declared signer identity and creates a fresh envelope without exposing secret/mnemonic plaintext to JavaScript.
+4. A Classic Account whose address equals the verified Ed25519 signer key may activate that direct master-key relationship immediately.
+5. A different Classic signer remains pending until current ledger authorization validates the relationship on the confirmed target network. Contract/provider relationships likewise remain pending for their provider-specific authorization path.
+6. Recovery Source grouping is restored only as an untrusted hint until a later capability can independently validate that grouping. It is not signer authority.
+7. Active records and validated references are committed atomically. Unvalidated references are not silently attached.
+
+Reference evidence:
+
+- [`bindings/mobile/react-native/src/portable-backup.ts`](../../bindings/mobile/react-native/src/portable-backup.ts)
+- [`bindings/mobile/react-native/test/portable-backup.test.ts`](../../bindings/mobile/react-native/test/portable-backup.test.ts)
+- [`spec/test-vectors/portable-backup-v2.json`](../../spec/test-vectors/portable-backup-v2.json)
+
+Backup / Restore remains Defined: the graph/activation model now has non-terminal implementation evidence, but Recovery Source activation and a real host-application persistence/migration integration are still intentionally unresolved.
+
 ## Implementation freedom
 
 The common contract does not require:

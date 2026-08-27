@@ -227,13 +227,13 @@ A `Defined` label means the capability boundary is useful now but the common con
 Current reasons include:
 
 - **Wallet** — terminal references use compact wallet records while Mobile is expected to model Account/Signer relationships more independently;
-- **Backup / Restore** — Rust/RefPython share a useful encrypted terminal v1 format, but future portable backup must protect/revalidate a richer Account/Signer/Recovery graph rather than freeze that record shape;
+- **Backup / Restore** — terminal v1 remains useful reference evidence and Mobile now has a portable v2 revalidation/staging reference; Recovery Source activation plus real host persistence/migration evidence are still incomplete;
 - **Asset Discovery / Catalog** — RefPython has a useful cache-first multi-source catalog, but provider choice, recommendation metadata, entry DTOs and ranking policy still need independent platform evidence;
 - **History** — the Python reference has a mature raw-cache/activity model, while the Rust client still exposes more provider-shaped records and no cross-platform Activity DTO is frozen;
 - **Contacts** — destination precedence semantics are promising, but address types, name normalization, sync and storage vary by product;
 - **Application Security** — Apple/Android Native SDK system-auth behavior provides strong Reference Semantics, but application-level product contracts still need Mobile/Desktop evidence;
 - **Dapp Interaction** — no stable Fresnica request/session/result model exists yet;
-- **Ledger Authorization** — the local-signer vs on-ledger authorization boundary is fixed, while a reusable multisig/threshold evaluator still needs real implementation evidence;
+- **Ledger Authorization** — Rust now has real Classic threshold/multisig planning and local Ed25519 coordination evidence; Hash-X, signed-payload and external/provider authorization paths still need concrete provider evidence;
 - **External Signer** — the provider-neutral security boundary is defined, but no concrete hardware provider implementation is mature enough to contribute additional shared semantics;
 - **Network / Gateway** — network identity rules are stable, while Horizon/RPC/provider result models are still evolving.
 
@@ -352,11 +352,12 @@ Core cryptographic vectors remain SDK/Core-owned. Application semantic fixtures 
 
 ## 11. Relationship to current code
 
-Current Rust modules map to the common vocabulary approximately as:
+Current reference implementations map to the common vocabulary approximately as:
 
 ```text
 clients/rust-client::wallet       -> Account / Signer / current terminal Wallet implementations
 clients/rust-client::storage      -> terminal Backup / Restore v1 reference implementation
+bindings/mobile/react-native::portable-backup -> portable Backup / Restore v2 staging reference
 clients/rust-client::service      -> Account / Balance / History reference accessors
 clients/rust-client::payment      -> Payment implementation
 clients/rust-client::transaction  -> Transaction + part of Signing Coordination

@@ -1,0 +1,76 @@
+{
+  "schema": "fresnica-portable-backup-v2",
+  "note": "envelopeJson values are opaque placeholders for graph/activation conformance, not cryptographic protection vectors",
+  "backup": {
+    "format": "fresnica-wallet-backup",
+    "version": 2,
+    "accounts": [
+      {
+        "ref": "a1",
+        "address": "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+        "suggestedNetwork": "mainnet",
+        "name": "Primary"
+      },
+      {
+        "ref": "a2",
+        "address": "GAY5PRAHJ2HIYBYCLZXTHID6SPVELOOYH2LBPH3LD4RUMXUW3DOYTLXW",
+        "suggestedNetwork": "mainnet",
+        "name": "Delegated"
+      },
+      {
+        "ref": "a3",
+        "address": "CAN6HYKHCT2ZIN5P4HSJUEYY5XN33NBLJMS6FKRVN7AXMEHLOAXMPOTR",
+        "suggestedNetwork": "testnet",
+        "name": "Contract"
+      },
+      {
+        "ref": "a4",
+        "address": "GDV4V754BDMMUD3O4LPALGILRXG55G7PK5FOIPD3KVBO4QADH2HJRDEF",
+        "suggestedNetwork": "mainnet",
+        "name": "Watch only"
+      }
+    ],
+    "signers": [
+      {
+        "ref": "s1",
+        "kind": "protected-software",
+        "signerPublicKey": "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+        "envelope": {"fixture": "opaque-protected-signer-s1"}
+      },
+      {
+        "ref": "s2",
+        "kind": "protected-software",
+        "signerPublicKey": "GBAW5XGWORWVFE2XTJYDTLDHXTY2Q2MO73HYCGB3XMFMQ562Q2W2GJQX",
+        "envelope": {"fixture": "opaque-protected-signer-s2"}
+      }
+    ],
+    "accountSignerReferences": [
+      { "accountRef": "a1", "signerRef": "s1" },
+      { "accountRef": "a2", "signerRef": "s2" },
+      { "accountRef": "a3", "signerRef": "s2" }
+    ],
+    "recoverySources": [
+      { "ref": "r1", "kind": "mnemonic", "signerRefs": ["s1", "s2"] }
+    ]
+  },
+  "expectedActivation": {
+    "requiresExplicitTargetNetwork": ["a1", "a2", "a3", "a4"],
+    "directReferences": [
+      { "accountRef": "a1", "signerRef": "s1" }
+    ],
+    "pendingReferences": [
+      {
+        "accountRef": "a2",
+        "signerRef": "s2",
+        "reason": "ledger-authorization-required"
+      },
+      {
+        "accountRef": "a3",
+        "signerRef": "s2",
+        "reason": "provider-authorization-required"
+      }
+    ],
+    "watchOnlyAccounts": ["a4"],
+    "pendingRecoverySources": ["r1"]
+  }
+}

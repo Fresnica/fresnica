@@ -10,6 +10,7 @@ Current sets:
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
 - `asset-identity-v1.json`: exact Classic native/issued asset identity, including case-sensitive issued codes and `xlm:G...` constructor-normalization hazards.
 - `smart-account-auth-v1.json`: real Protocol 27 Testnet smart-account authorization captured after a confirmed WebAuthn/passkey transfer and accepted by the provider fixture verifier.
+- `portable-backup-v2.json`: portable Account/Signer graph shape and restore-activation classification; signer envelopes are opaque placeholders because cryptographic protection is already covered by protection vectors.
 
 The smart-account vector is captured public authorization material from Testnet, not a synthetic passkey fixture. It contains the confirmed transaction identity, host-function XDR and signed Soroban auth XDR required to replay the provider conformance checks; it does not contain a passkey private key or Fresnica software-wallet secret.
 
