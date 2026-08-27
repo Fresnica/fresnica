@@ -23,6 +23,24 @@ class FakeAdapter:
     def fetch_base_fee(self):
         return 100
 
+    def get_account(self, address):
+        return {
+            "account_id": address,
+            "subentry_count": 0,
+            "num_sponsoring": 0,
+            "num_sponsored": 0,
+            "balances": [
+                {
+                    "asset_type": "native",
+                    "balance": "1000",
+                    "selling_liabilities": "0",
+                }
+            ],
+        }
+
+    def get_base_reserve_stroops(self):
+        return 5_000_000
+
     def build_payment(self, **kwargs):
         self.payment = kwargs
         return FakeEnvelope()
