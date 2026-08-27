@@ -1,0 +1,34 @@
+diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
+index 5525708..872332b 100644
+--- a/clients/rust-client/src/anchor_protocol.rs
++++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -1389,6 +1389,7 @@ mod tests {
+     const CONTRACT: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+     const SERVER_SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
+     const SERVER_PUBLIC: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
++    const OTHER_SIGNER: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
+     const TESTNET: &str = "testnet";
+     const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+     const HOME_DOMAIN: &str = "anchor.example";
+@@ -1456,7 +1457,7 @@ mod tests {
+             "thresholds": {"low_threshold": 1, "med_threshold": 2, "high_threshold": 2},
+             "signers": [
+                 {"key": ISSUER, "weight": 1, "type": "ed25519_public_key"},
+-                {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 1, "type": "ed25519_public_key"}
++                {"key": OTHER_SIGNER, "weight": 1, "type": "ed25519_public_key"}
+             ]
+         });
+         let plan = sep10_authorization_plan(Some(&account), ISSUER).unwrap();
+@@ -1473,10 +1474,10 @@ mod tests {
+         );
+ 
+         let wrong = serde_json::json!({
+-            "account_id": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I",
++            "account_id": OTHER_SIGNER,
+             "thresholds": {"low_threshold": 1, "med_threshold": 1, "high_threshold": 1},
+             "signers": [
+-                {"key": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBU4I", "weight": 1, "type": "ed25519_public_key"}
++                {"key": OTHER_SIGNER, "weight": 1, "type": "ed25519_public_key"}
+             ]
+         });
+         assert_eq!(
