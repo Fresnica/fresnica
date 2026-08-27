@@ -1,28 +1,23 @@
-diff --git a/core/rust/src/lib.rs b/core/rust/src/lib.rs
-index 21d13c8..c39fa8a 100644
---- a/core/rust/src/lib.rs
-+++ b/core/rust/src/lib.rs
-@@ -38,13 +38,12 @@ pub use secret_store::{
-     SCRYPT_R,
- };
- pub use signer::{
--    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner,
--    TransactionSigningRequest,
-+    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner, TransactionSigningRequest,
- };
- pub use transaction::{
-     network_id, parse_transaction_envelope_xdr, sign_transaction_envelope,
--    transaction_envelope_has_valid_signature, transaction_envelope_xdr, transaction_hash,
--    TransactionSigningError,
-+    transaction_envelope_has_valid_signature, transaction_envelope_satisfies_signer_key,
-+    transaction_envelope_xdr, transaction_hash, TransactionSigningError,
- };
- pub use wallet::{
-     derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,
 diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
-index be860f8..4ff6578 100644
+index be860f8..5d79419 100644
 --- a/clients/rust-client/src/anchor_protocol.rs
 +++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -3,7 +3,6 @@ use std::str::FromStr;
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ use base64::{engine::general_purpose::STANDARD, Engine as _};
+-use fresnica_core::transaction_envelope_xdr;
+ use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value as JsonValue;
+@@ -24,6 +23,7 @@ use crate::payment::PaymentMemo;
+ use crate::service::FresnicaClient;
+ use crate::transaction::{
+     has_valid_transaction_signature, network_passphrase, parse_transaction_xdr,
++    transaction_xdr_bytes,
+ };
+ 
+ const MAX_ANCHOR_DOCUMENT_BYTES: u64 = 1_000_000;
 @@ -945,6 +945,7 @@ pub fn sep10_authorization_plan(
      };
      Ok(LedgerAuthorizationPlan {
@@ -31,10 +26,43 @@ index be860f8..4ff6578 100644
      })
  }
  
+@@ -1021,7 +1022,7 @@ pub fn exchange_anchor_sep10_challenge(
+         );
+     }
+ 
+-    let signed_xdr = transaction_envelope_xdr(signed_envelope)
++    let signed_xdr = transaction_xdr_bytes(signed_envelope)
+         .map_err(|error| format!("Unable to encode signed SEP-10 challenge: {error}"))?;
+     exchange_sep10_challenge(&challenge.web_auth_endpoint, &STANDARD.encode(signed_xdr))
+ }
 diff --git a/clients/rust-client/src/signing_coordination.rs b/clients/rust-client/src/signing_coordination.rs
-index ef9517c..2c95b7b 100644
+index ef9517c..d296a5b 100644
 --- a/clients/rust-client/src/signing_coordination.rs
 +++ b/clients/rust-client/src/signing_coordination.rs
+@@ -1,6 +1,5 @@
+ use std::collections::{BTreeMap, BTreeSet};
+ 
+-use fresnica_core::transaction_envelope_xdr;
+ use stellar_xdr::TransactionEnvelope;
+ 
+ use crate::ledger_authorization::{
+@@ -10,6 +9,7 @@ use crate::ledger_authorization::{
+ use crate::storage::{WalletRecord, WalletStorage};
+ use crate::transaction::{
+     network_passphrase, parse_transaction_xdr, sign_transaction_xdr_with_passcode,
++    transaction_xdr_bytes,
+ };
+ 
+ pub fn sign_with_local_ed25519(
+@@ -63,7 +63,7 @@ pub fn sign_needed_local_ed25519(
+         let record = records
+             .get(&key)
+             .expect("selected signer must come from local records");
+-        let transaction_xdr = transaction_envelope_xdr(envelope)
++        let transaction_xdr = transaction_xdr_bytes(envelope)
+             .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
+         *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_passcode(
+             record,
 @@ -98,6 +98,22 @@ pub fn select_local_ed25519_signers(
      let mut current = satisfied.clone();
      let mut selected = Vec::new();
@@ -129,3 +157,48 @@ index ef9517c..2c95b7b 100644
          };
          let local = BTreeSet::from([SIGNER_A.to_owned()]);
  
+diff --git a/clients/rust-client/src/transaction.rs b/clients/rust-client/src/transaction.rs
+index fbdfaf6..8a6d9f5 100644
+--- a/clients/rust-client/src/transaction.rs
++++ b/clients/rust-client/src/transaction.rs
+@@ -38,6 +38,10 @@ pub fn parse_transaction_xdr(xdr: &[u8]) -> Result<TransactionEnvelope, String>
+         .map_err(|error| format!("invalid Stellar transaction XDR: {error}"))
+ }
+ 
++pub fn transaction_xdr_bytes(envelope: &TransactionEnvelope) -> Result<Vec<u8>, String> {
++    transaction_envelope_xdr(envelope).map_err(|error| error.to_string())
++}
++
+ pub fn has_valid_transaction_signature(
+     envelope: &TransactionEnvelope,
+     network: &str,
+@@ -245,7 +249,7 @@ pub fn sign_and_submit(
+         .map_err(|error| format!("Unable to hash signed transaction: {error}"))?;
+     let tx_hash_hex = hex(&tx_hash);
+     let encoded = STANDARD.encode(
+-        transaction_envelope_xdr(envelope)
++        transaction_xdr_bytes(envelope)
+             .map_err(|error| format!("Unable to encode signed transaction: {error}"))?,
+     );
+     match horizon.submit_transaction(&encoded) {
+diff --git a/core/rust/src/lib.rs b/core/rust/src/lib.rs
+index 21d13c8..c39fa8a 100644
+--- a/core/rust/src/lib.rs
++++ b/core/rust/src/lib.rs
+@@ -38,13 +38,12 @@ pub use secret_store::{
+     SCRYPT_R,
+ };
+ pub use signer::{
+-    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner,
+-    TransactionSigningRequest,
++    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner, TransactionSigningRequest,
+ };
+ pub use transaction::{
+     network_id, parse_transaction_envelope_xdr, sign_transaction_envelope,
+-    transaction_envelope_has_valid_signature, transaction_envelope_xdr, transaction_hash,
+-    TransactionSigningError,
++    transaction_envelope_has_valid_signature, transaction_envelope_satisfies_signer_key,
++    transaction_envelope_xdr, transaction_hash, TransactionSigningError,
+ };
+ pub use wallet::{
+     derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,
