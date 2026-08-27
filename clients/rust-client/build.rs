@@ -51,6 +51,7 @@ fn main() {
         "cleanup-direct-resolvers.patch",
         "sep10-test-identities.patch",
         "simplify-selector.patch",
+        "sep10-zero-threshold.patch",
     ] {
         apply_patch(&root, &patches.join(name));
     }
