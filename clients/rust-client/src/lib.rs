@@ -5,6 +5,7 @@ pub mod dex;
 pub mod horizon;
 pub mod ledger_authorization;
 pub mod payment;
+pub mod signing_coordination;
 pub mod storage;
 pub mod transaction;
 pub mod trustline;
@@ -38,15 +39,17 @@ pub use horizon::{
 };
 pub use ledger_authorization::{
     ensure_local_ed25519_signer_can_satisfy, load_classic_ledger_authorization_plan,
-    plan_classic_ledger_authorization, AccountAuthorizationRequirement, AuthorizationScope,
-    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, LedgerAccountAuthorization,
-    LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    plan_classic_ledger_authorization, satisfied_transaction_conditions,
+    AccountAuthorizationRequirement, AuthorizationScope, AuthorizationThreshold, AuthorizationUse,
+    ClassicOperationKind, LedgerAccountAuthorization, LedgerAuthorizationPlan,
+    LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
     PreparedPayment,
 };
 pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
+pub use signing_coordination::select_local_ed25519_signers;
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
