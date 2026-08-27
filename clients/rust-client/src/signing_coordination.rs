@@ -209,7 +209,7 @@ mod tests {
         let mut envelope = build_operation_envelope(
             ACCOUNT,
             vec![OperationBody::ManageData(ManageDataOp {
-                data_name: String64::try_from("auth").unwrap(),
+                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
                 data_value: None,
             })],
             1,

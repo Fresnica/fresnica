@@ -525,7 +525,7 @@ mod tests {
         let envelope = build_operation_envelope(
             ACCOUNT_A,
             vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
-                data_name: String64::try_from("auth").unwrap(),
+                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
                 data_value: None,
             })],
             1,
@@ -554,7 +554,7 @@ mod tests {
         let mut envelope = build_operation_envelope(
             ACCOUNT_B,
             vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
-                data_name: String64::try_from("auth").unwrap(),
+                data_name: String64::try_from(b"auth".to_vec()).unwrap(),
                 data_value: None,
             })],
             1,
