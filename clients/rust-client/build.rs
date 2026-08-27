@@ -46,6 +46,8 @@ fn main() {
         "transaction.patch",
         "trustline.patch",
         "test-xdr-fix.patch",
+        "sep10-small.patch",
+        "sep10-anchor-protocol.patch",
     ] {
         apply_patch(&root, &patches.join(name));
     }
