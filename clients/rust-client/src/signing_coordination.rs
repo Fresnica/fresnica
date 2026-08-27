@@ -98,6 +98,22 @@ pub fn select_local_ed25519_signers(
     let mut current = satisfied.clone();
     let mut selected = Vec::new();
 
+    for condition in &plan.extra_signers {
+        if current.contains(condition) {
+            continue;
+        }
+        if condition.kind != LedgerSignerKind::Ed25519PublicKey
+            || !local_signers.contains(&condition.key)
+        {
+            return Err(format!(
+                "Signing Coordination cannot satisfy required extra signer: {}",
+                condition.key
+            ));
+        }
+        current.insert(condition.clone());
+        selected.push(condition.key.clone());
+    }
+
     for requirement in &plan.requirements {
         while requirement.available_weight(&current) < u32::from(requirement.required_weight) {
             let available = requirement.available_weight(&current);
@@ -241,6 +257,7 @@ mod tests {
                 }],
                 signers: vec![signer(SIGNER_A), signer(SIGNER_B)],
             }],
+            extra_signers: BTreeSet::new(),
         };
 
         sign_with_local_ed25519(&storage, &plan, "testnet", &mut envelope, PASSCODE).unwrap();
@@ -268,6 +285,7 @@ mod tests {
                 uses: Vec::new(),
                 signers: vec![signer(SIGNER_A), signer(SIGNER_B), signer(SIGNER_C)],
             }],
+            extra_signers: BTreeSet::new(),
         };
         let local = BTreeSet::from([
             SIGNER_A.to_owned(),
@@ -289,6 +307,46 @@ mod tests {
     }
 
     #[test]
+    fn selects_required_local_extra_signer() {
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::from([LedgerSignerCondition {
+                kind: LedgerSignerKind::Ed25519PublicKey,
+                key: SIGNER_C.to_owned(),
+            }]),
+        };
+        let local = BTreeSet::from([SIGNER_A.to_owned(), SIGNER_C.to_owned()]);
+
+        let selected = select_local_ed25519_signers(&plan, &BTreeSet::new(), &local, 0).unwrap();
+
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&SIGNER_A.to_owned()));
+        assert!(selected.contains(&SIGNER_C.to_owned()));
+    }
+
+    #[test]
+    fn unsupported_extra_signer_fails_closed() {
+        let plan = LedgerAuthorizationPlan {
+            requirements: Vec::new(),
+            extra_signers: BTreeSet::from([LedgerSignerCondition {
+                kind: LedgerSignerKind::HashX,
+                key: "XUNAVAILABLE".to_owned(),
+            }]),
+        };
+
+        assert!(
+            select_local_ed25519_signers(&plan, &BTreeSet::new(), &BTreeSet::new(), 0,)
+                .unwrap_err()
+                .contains("cannot satisfy required extra signer")
+        );
+    }
+
+    #[test]
     fn minimum_signature_proof_can_use_zero_weight_signer() {
         let plan = LedgerAuthorizationPlan {
             requirements: vec![AccountAuthorizationRequirement {
@@ -303,6 +361,7 @@ mod tests {
                     weight: 0,
                 }],
             }],
+            extra_signers: BTreeSet::new(),
         };
         let local = BTreeSet::from([SIGNER_A.to_owned()]);
 

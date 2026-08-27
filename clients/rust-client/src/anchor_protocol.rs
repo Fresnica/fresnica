@@ -945,6 +945,7 @@ pub fn sep10_authorization_plan(
     };
     Ok(LedgerAuthorizationPlan {
         requirements: vec![requirement],
+        extra_signers: Default::default(),
     })
 }
 
