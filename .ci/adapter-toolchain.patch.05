@@ -1,0 +1,80 @@
+ CI 只检查 compatibility，不重建 adapter
+ 
+ After the Android and Apple adapter binaries are stored, normal Mobile CI should run:
+ 
+@@ -268,7 +278,7 @@ Rebuild it only when a real compatibility boundary changes, such as:
+ 
+ Normal screen, Realm, navigation or business-logic changes do not require an adapter rebuild.
+ 
+-## 10. 第一个 smoke test
++## 11. 第一个 smoke test
+ 
+ The React Native module name is:
+ 
+@@ -302,7 +312,7 @@ React Native
+   -> result back to JS
+ ```
+ 
+-## 11. React Native 暴露的高层能力
++## 12. React Native 暴露的高层能力
+ 
+ The canonical adapter exposes:
+ 
+@@ -376,7 +386,7 @@ deriveMnemonicSigner(
+ 
+ Core authenticates the source envelope and derives the new index internally. The mnemonic does not cross back into JavaScript. Each returned signer gets a fresh independent protected envelope; Mobile may group them under one Recovery Source for backup/UX purposes.
+ 
+-## 12. Error contract
++## 13. Error contract
+ 
+ Core/SDK errors use stable categories:
+ 
+@@ -394,7 +404,7 @@ Framework/native authorization may additionally surface errors such as system-au
+ 
+ Product code should branch on stable error codes, not parse human-readable error messages.
+ 
+-## 13. Mobile persistence model
++## 14. Mobile persistence model
+ 
+ Mobile owns Realm/persistence. Preserve this conceptual graph:
+ 
+@@ -427,7 +437,7 @@ Mandatory invariants:
+ 9. Reveal/Export always requires a fresh Fresnica app passcode.
+ 10. Global passcode rotation stages every re-protected signer first, commits all envelopes atomically, marks previous system-auth registrations stale for the new envelope generation, then replaces wrapped unlock-key records in the existing System Auth Domain; this post-commit registration does not require another biometric prompt.
+ 
+-## 14. Mobile 推荐迁移顺序
++## 15. Mobile 推荐迁移顺序
+ 
+ After the smoke test succeeds:
+ 
+@@ -444,7 +454,7 @@ After the smoke test succeeds:
+ 
+ Do not copy the donor TypeScript class names blindly. Preserve the behavior and security invariants while integrating with the actual Mobile project structure.
+ 
+-## 15. Ownership boundary after Mobile starts
++## 16. Ownership boundary after Mobile starts
+ 
+ `fresnica` continues to own:
+ 
+@@ -468,7 +478,7 @@ Do not copy the donor TypeScript class names blindly. Preserve the behavior and
+ 
+ Mobile should upgrade by pinning a newer Native SDK release and rebuilding the framework adapter only when its compatibility manifest says a rebuild is required. It should not fork Core into the application repository.
+ 
+-## 16. 开工验收
++## 17. 开工验收
+ 
+ Mobile integration baseline is considered established when its CI proves:
+ 
+diff --git a/docs/roadmap.md b/docs/roadmap.md
+index 364aca7..153a2a1 100644
+--- a/docs/roadmap.md
++++ b/docs/roadmap.md
+@@ -215,7 +215,7 @@ The universal SDK work should provide:
+ 
+ The first repository-wide compatibility manifest now lives at `sdk/compatibility/manifest.json`. A lightweight Node validator checks the Core/SDK/Native/Mobile/WASM API constants, package versions, React Native adapter contract, and the pinned smart-account provider/upstream/Testnet fixture schema without invoking heavy platform builds. Its GitHub workflow is PR/manual-only.
+ 
+-The generalized Native SDK release contract is defined in `docs/sdk/native-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. `native-sdk-v0.1.0` established the generalized packaging boundary. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native package 0.2.1, Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.0. v0.2 added Core-owned derivation of another explicit mnemonic index without mnemonic re-export and replaced per-signer biometric enrollment with one device System Auth Protection Domain plus no-biometric public-key wrapping for later signers. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and React Native platform gates remain release requirements. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
++The generalized Native SDK release contract is defined in `docs/sdk/native-release.md` with its own `native-sdk-v*` tag namespace and marker-gated workflow. `native-sdk-v0.1.0` established the generalized packaging boundary. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native package 0.2.1, Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.1. Adapter 0.2.1 removes Fresnica-owned Android toolchain pins and builds as a temporary subproject of the consumer Android build; Gradle/AGP/Kotlin remain consumer-owned. v0.2 added Core-owned derivation of another explicit mnemonic index without mnemonic re-export and replaced per-signer biometric enrollment with one device System Auth Protection Domain plus no-biometric public-key wrapping for later signers. Android raw-AAR consumer validation, Apple iOS/macOS direct-consumer validation and React Native platform gates remain release requirements. The legacy `mobile-sdk-v0.1.0` publisher is retired from `main`; its tag/source remain historical migration material.
+ 
+ ## Phase 5 - Application Capability Foundation and Standards - CURRENT / STABILIZING
+ 
