@@ -561,7 +561,14 @@ impl FresnicaClient {
                     .map_err(|_| "invalid Fresnica trustline policy limit".to_owned())?,
             }));
         }
-        operations.push(offer_operation(side, &base, &counter, amount, price, 0)?);
+        operations.push(offer_operation(
+            side,
+            &base,
+            &counter,
+            amount,
+            price.clone(),
+            0,
+        )?);
         let envelope = build_operation_envelope(
             &wallet.address,
             operations,
@@ -657,7 +664,7 @@ impl FresnicaClient {
             ledger.base_reserve_in_stroops,
             total_fee,
         )?;
-        let body = offer_operation(side, &base, &counter, amount, price, offer_id)?;
+        let body = offer_operation(side, &base, &counter, amount, price.clone(), offer_id)?;
         let envelope = build_operation_envelope(
             &wallet.address,
             vec![body],
