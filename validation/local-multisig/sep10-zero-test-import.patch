@@ -1,0 +1,13 @@
+diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
+index 81c214b..be860f8 100644
+--- a/clients/rust-client/src/anchor_protocol.rs
++++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -1687,7 +1687,7 @@ mod tests {
+             ]
+         });
+         let authorization = sep10_authorization_plan(Some(&ledger_account), ISSUER).unwrap();
+-        assert!(authorization.is_satisfiable_by(&BTreeSet::new()));
++        assert!(authorization.is_satisfiable_by(&std::collections::BTreeSet::new()));
+         assert_eq!(
+             exchange_anchor_sep10_challenge(TESTNET, &challenge, &authorization, &signed_envelope)
+                 .unwrap_err(),
