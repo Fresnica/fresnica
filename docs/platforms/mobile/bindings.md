@@ -53,7 +53,7 @@ Native package version:       0.2.1
 NATIVE_BINDING_API_VERSION:   2
 SDK_API_VERSION:              3
 CLIENT_API_VERSION:           3
-RN adapter source version:    0.2.0
+RN adapter source version:    0.2.1
 ```
 
 Mobile must pin an exact pre-1.0 Native SDK release and record the adapter manifest. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.

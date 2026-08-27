@@ -50,6 +50,21 @@ test('Android adapter targets Native SDK and preserves the reviewed JS surface',
   }
 });
 
+
+test('Android adapter source borrows the consumer build instead of pinning a toolchain', async () => {
+  const [build, init] = await Promise.all([
+    readFile(path.join(ADAPTER_DIR, 'android/build.gradle'), 'utf8'),
+    readFile(path.join(ADAPTER_DIR, 'android/include.init.gradle'), 'utf8'),
+  ]);
+  assert.match(build, /apply plugin: 'com\.android\.library'/);
+  assert.doesNotMatch(build, /com\.android\.library['"]?\s+version|org\.jetbrains\.kotlin\.android['"]?\s+version/);
+  assert.doesNotMatch(build, /^repositories\s*\{/m, 'adapter module must use the consumer repository policy');
+  assert.match(build, /rootProject\.ext\.has\('compileSdkVersion'\)/);
+  assert.match(build, /Fresnica intentionally does not select a Kotlin plugin version/);
+  assert.match(init, /settings\.include\(adapterPath\)/);
+  assert.match(init, /projectDir = new File\(adapterProjectDir\)/);
+});
+
 test('Apple adapter targets Native SDK and preserves the reviewed bridge surface', async () => {
   const [source, shim] = await Promise.all([
     readFile(path.join(ADAPTER_DIR, 'apple/FresnicaCoreModule.swift'), 'utf8'),

@@ -7,19 +7,27 @@ import os from 'node:os';
 
 import { androidGradleInvocation, buildAndroidAdapter, buildAppleAdapter } from '../fresnica-adapter.mjs';
 
-test('Android build uses consumer Gradle wrapper and exact framework version', () => {
+test('Android build joins the consumer Gradle build instead of owning a toolchain', () => {
   const projectDir = path.resolve('/tmp/fresnica-consumer');
   const nativeSdkAar = path.resolve('/tmp/fresnica-native-sdk.aar');
   const invocation = androidGradleInvocation({
     projectDir,
     nativeSdkAar,
     reactNativeVersion: '0.74.2',
+    compileSdk: '35',
   });
 
   assert.equal(invocation.command, path.join(projectDir, 'android', process.platform === 'win32' ? 'gradlew.bat' : 'gradlew'));
-  assert.deepEqual(invocation.args.slice(-2), ['clean', 'assembleRelease']);
+  assert.deepEqual(invocation.args.slice(-2), [
+    ':fresnicaReactNativeAdapter:clean',
+    ':fresnicaReactNativeAdapter:assembleRelease',
+  ]);
+  assert.deepEqual(invocation.args.slice(0, 2), ['-p', path.join(projectDir, 'android')]);
+  assert.ok(invocation.args.includes('--init-script'));
+  assert.ok(invocation.args.some((arg) => arg.startsWith('-PfresnicaAdapterProjectDir=')));
   assert.ok(invocation.args.includes(`-PfresnicaNativeSdkAar=${nativeSdkAar}`));
   assert.ok(invocation.args.includes('-PfresnicaReactNativeVersion=0.74.2'));
+  assert.ok(invocation.args.includes('-PfresnicaCompileSdk=35'));
 });
 
 
@@ -34,7 +42,7 @@ test('Android one-time build emits adapter AAR plus compatibility manifest', asy
   await writeFile(nativeSdkAar, 'native-sdk');
   await writeFile(
     fakeGradle,
-    '#!/bin/sh\nset -eu\n[ "$1" = "-p" ]\nmkdir -p "$2/build/outputs/aar"\nprintf adapter-binary > "$2/build/outputs/aar/fresnica-react-native-adapter-release.aar"\n',
+    '#!/bin/sh\nset -eu\nadapter=\"\"\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    -PfresnicaAdapterProjectDir=*) adapter=${arg#*=} ;;\n  esac\ndone\n[ -n \"$adapter\" ]\nmkdir -p \"$adapter/build/outputs/aar\"\nprintf adapter-binary > \"$adapter/build/outputs/aar/fresnica-react-native-adapter-release.aar\"\n',
   );
   await chmod(fakeGradle, 0o755);
 

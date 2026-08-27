@@ -42,7 +42,7 @@ Native SDK release       native-sdk-v0.2.1
 Native Binding API       2
 Universal SDK API        3
 Core Client API          3
-RN adapter source        0.2.0
+RN adapter source        0.2.1
 ```
 
 Key validated delivery paths include:

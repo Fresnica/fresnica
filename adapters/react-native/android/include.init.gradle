@@ -1,0 +1,13 @@
+def adapterProjectDir = gradle.startParameter.projectProperties['fresnicaAdapterProjectDir']
+if (adapterProjectDir == null || adapterProjectDir.trim().isEmpty()) {
+    throw new GradleException('Missing required Gradle property: fresnicaAdapterProjectDir')
+}
+
+gradle.settingsEvaluated { settings ->
+    def adapterPath = ':fresnicaReactNativeAdapter'
+    if (settings.findProject(adapterPath) != null) {
+        throw new GradleException("Consumer build already defines ${adapterPath}")
+    }
+    settings.include(adapterPath)
+    settings.project(adapterPath).projectDir = new File(adapterProjectDir)
+}

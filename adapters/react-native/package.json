@@ -1,6 +1,6 @@
 {
   "name": "@fresnica/react-native-adapter-source",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {

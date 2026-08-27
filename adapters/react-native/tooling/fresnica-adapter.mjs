@@ -15,24 +15,28 @@ import {
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ADAPTER_DIR = path.resolve(TOOL_DIR, '..');
 const ANDROID_DIR = path.join(ADAPTER_DIR, 'android');
+const ANDROID_INIT_SCRIPT = path.join(ANDROID_DIR, 'include.init.gradle');
 const APPLE_BUILD_SCRIPT = path.join(ADAPTER_DIR, 'apple', 'build.sh');
 
-export function androidGradleInvocation({ projectDir, nativeSdkAar, reactNativeVersion }) {
+export function androidGradleInvocation({ projectDir, nativeSdkAar, reactNativeVersion, compileSdk }) {
   const wrapper = process.platform === 'win32'
     ? path.join(projectDir, 'android', 'gradlew.bat')
     : path.join(projectDir, 'android', 'gradlew');
   const command = process.env.FRESNICA_ADAPTER_GRADLE || wrapper;
-  return {
-    command,
-    args: [
-      '-p',
-      ANDROID_DIR,
-      `-PfresnicaNativeSdkAar=${path.resolve(nativeSdkAar)}`,
-      `-PfresnicaReactNativeVersion=${reactNativeVersion}`,
-      'clean',
-      'assembleRelease',
-    ],
-  };
+  const args = [
+    '-p',
+    path.join(projectDir, 'android'),
+    '--init-script',
+    ANDROID_INIT_SCRIPT,
+    `-PfresnicaAdapterProjectDir=${ANDROID_DIR}`,
+    `-PfresnicaNativeSdkAar=${path.resolve(nativeSdkAar)}`,
+    `-PfresnicaReactNativeVersion=${reactNativeVersion}`,
+  ];
+  if (compileSdk) {
+    args.push(`-PfresnicaCompileSdk=${compileSdk}`);
+  }
+  args.push(':fresnicaReactNativeAdapter:clean', ':fresnicaReactNativeAdapter:assembleRelease');
+  return { command, args };
 }
 
 async function ensurePath(filePath, label, kind) {
@@ -82,7 +86,7 @@ async function findReleaseAar() {
   return path.join(dir, release[0]);
 }
 
-export async function buildAndroidAdapter({ projectDir, nativeSdkAar, outDir }) {
+export async function buildAndroidAdapter({ projectDir, nativeSdkAar, outDir, compileSdk }) {
   const absoluteProject = path.resolve(projectDir);
   const absoluteNativeAar = path.resolve(nativeSdkAar);
   const absoluteOut = path.resolve(outDir);
@@ -94,6 +98,7 @@ export async function buildAndroidAdapter({ projectDir, nativeSdkAar, outDir }) 
     projectDir: absoluteProject,
     nativeSdkAar: absoluteNativeAar,
     reactNativeVersion,
+    compileSdk,
   });
   await ensureFile(invocation.command, 'consumer Gradle wrapper');
 
@@ -176,6 +181,7 @@ async function main(argv) {
       projectDir: args.project,
       nativeSdkAar: args['native-android-aar'],
       outDir: args.out,
+      compileSdk: args['android-compile-sdk'],
     });
     process.stdout.write(`Android React Native adapter: ${result.outputAar}\n`);
     process.stdout.write(`Compatibility manifest: ${result.manifestPath}\n`);

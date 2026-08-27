@@ -58,6 +58,14 @@ Consumer project
 - linking the Native SDK and generated adapter binaries into normal app builds;
 - application state, persistence, navigation, screens, network behavior and product orchestration.
 
+### Toolchain-neutral adapter rule
+
+The framework adapter must consume the application's toolchain rather than bring its own. In particular, canonical adapter source must not pin the consumer's Gradle, Android Gradle Plugin, Kotlin plugin, JDK, CocoaPods, or Xcode version merely because Fresnica CI uses a specific reference environment.
+
+Fresnica may declare capability constraints that are part of the real integration contract, such as `minSdk 26`, AndroidX, an exact framework version for a reproducible adapter binary, required host dependencies, or a minimum compiler/platform capability when the source genuinely depends on it. It may also publish a tested compatibility matrix. A tested version is evidence, not a requirement unless the underlying capability makes it one.
+
+For Android, the canonical build tool runs the consumer project's own `android/gradlew` and injects the adapter as a temporary subproject. Plugin resolution, repositories, `compileSdk`, AGP/Kotlin behavior, and other build-wide policy therefore come from the consumer project.
+
 ## Native SDK rule
 
 The Native SDK is a **binary product**. A normal consuming project must not build Rust Core or UniFFI as part of its application build.
@@ -113,7 +121,7 @@ For React Native, the desired consumer flow is:
 ```text
 Initial Mobile integration
   1. Pin Fresnica Native SDK version.
-  2. Pin Fresnica adapter source/tag compatible with its Binding API.
+  2. Pin a Fresnica adapter source version/commit compatible with its Binding API.
   3. Detect the Mobile project's React Native/native toolchain versions.
   4. Compile the canonical RN adapter source against that environment.
   5. Produce Android/iOS adapter binaries.
@@ -182,7 +190,7 @@ Every generated adapter binary set should have a machine-readable manifest. At m
   "frameworkVersion": "0.87.0",
   "fresnicaNativeSdkVersion": "0.2.1",
   "nativeBindingApiVersion": 2,
-  "adapterSourceVersion": "0.2.0"
+  "adapterSourceVersion": "0.2.1"
 }
 ```
 
@@ -243,7 +251,7 @@ Consumer application
   = pinned Native SDK + generated adapter binaries + compatibility manifest
 ```
 
-The first generalized release was `native-sdk-v0.1.0`. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.0. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
+The first generalized release was `native-sdk-v0.1.0`. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.1. Adapter 0.2.1 is a build-tooling compatibility patch: it keeps the same framework/API surface while removing Fresnica-owned Android Gradle/AGP/Kotlin version selection. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
 
 `bindings/mobile` stays only as migration/reference material until the independent Mobile repository has absorbed the #81-#84 donor behavior and equivalent tests.
 
@@ -252,7 +260,7 @@ The first generalized release was `native-sdk-v0.1.0`. The current Mobile securi
 The independent `fresnica-mobile` project should use this document as its integration starting point:
 
 1. choose and pin its React Native version;
-2. pin `native-sdk-v0.2.1` / Native Binding API 2 and matching adapter source 0.2.0;
+2. pin `native-sdk-v0.2.1` / Native Binding API 2 and matching adapter source 0.2.1;
 3. generate its RN adapter binaries once from the matching canonical adapter source;
 4. store the adapter binaries and manifest under Mobile ownership;
 5. run a native/framework smoke test such as `parseAccount`;

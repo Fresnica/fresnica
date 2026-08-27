@@ -26,7 +26,7 @@
   },
   "adapters": {
     "reactNative": {
-      "sourceVersion": "0.2.0",
+      "sourceVersion": "0.2.1",
       "requiresNativeBindingApiVersion": 2
     }
   },
