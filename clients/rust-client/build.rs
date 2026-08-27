@@ -49,6 +49,7 @@ fn main() {
         "sep10-small.patch",
         "sep10-anchor-protocol.patch",
         "cleanup-direct-resolvers.patch",
+        "sep10-test-identities.patch",
     ] {
         apply_patch(&root, &patches.join(name));
     }
