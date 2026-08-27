@@ -3,6 +3,7 @@ pub mod anchor_protocol;
 pub mod contacts;
 pub mod dex;
 pub mod horizon;
+pub mod ledger_authorization;
 pub mod payment;
 pub mod storage;
 pub mod transaction;
@@ -34,6 +35,11 @@ pub use dex::{
 pub use horizon::{
     balance_asset_label, operation_summary, HorizonClient, LedgerParameters, SubmissionError,
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
+};
+pub use ledger_authorization::{
+    plan_classic_ledger_authorization, AccountAuthorizationRequirement, AuthorizationScope,
+    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, LedgerAccountAuthorization,
+    LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
