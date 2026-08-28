@@ -1,0 +1,102 @@
+diff --git a/clients/rust-client/src/anchor.rs b/clients/rust-client/src/anchor.rs
+index d30615f..d2c5706 100644
+--- a/clients/rust-client/src/anchor.rs
++++ b/clients/rust-client/src/anchor.rs
+@@ -468,7 +468,7 @@ mod tests {
+         assert!(customer_url("https://127.0.0.1/kyc").is_err());
+         assert!(customer_url("https://localhost/kyc").is_err());
+         assert!(customer_url("https://wallet.local/kyc").is_err());
+-        assert!(customer_url("https://anchor.example:8443/kyc").is_err());
++        assert!(customer_url("https://anchor.example:8443/kyc").is_ok());
+         assert!(customer_url("https://anchor.example/kyc?token=x").is_err());
+     }
+ 
+diff --git a/clients/rust-client/src/anchor_http.rs b/clients/rust-client/src/anchor_http.rs
+index 4ddb44f..ca0774e 100644
+--- a/clients/rust-client/src/anchor_http.rs
++++ b/clients/rust-client/src/anchor_http.rs
+@@ -31,6 +31,9 @@ pub(crate) fn canonical_home_domain(value: &str) -> Result<String, String> {
+         return Err("Issuer home_domain is not a valid host name".to_owned());
+     }
+     validate_anchor_https_url(&url, "Issuer home_domain")?;
++    if url.port().is_some() {
++        return Err("Issuer home_domain must not include a port".to_owned());
++    }
+     Ok(url
+         .host_str()
+         .expect("validated URL has a host")
+@@ -44,9 +47,6 @@ pub(crate) fn validate_anchor_https_url(url: &Url, label: &str) -> Result<(), St
+             "{label} must be an HTTPS URL without embedded credentials"
+         ));
+     }
+-    if url.port().is_some() {
+-        return Err(format!("{label} must not use a non-default port"));
+-    }
+     let host = match url.host() {
+         Some(Host::Domain(host)) => host.trim_end_matches('.'),
+         Some(Host::Ipv4(_)) | Some(Host::Ipv6(_)) => {
+@@ -115,7 +115,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn anchor_urls_reject_local_ip_credentials_and_non_default_ports() {
++    fn anchor_urls_reject_local_ip_credentials_and_allow_declared_transport_ports() {
+         assert!(validate_anchor_https_url(
+             &Url::parse("https://anchor.example/sep6").unwrap(),
+             "endpoint"
+@@ -128,12 +128,16 @@ mod tests {
+             "https://[::1]/sep6",
+             "https://localhost/sep6",
+             "https://wallet.local/sep6",
+-            "https://anchor.example:8443/sep6",
+         ] {
+             assert!(
+                 validate_anchor_https_url(&Url::parse(value).unwrap(), "endpoint").is_err(),
+                 "accepted {value}"
+             );
+         }
++        assert!(validate_anchor_https_url(
++            &Url::parse("https://anchor.example:8443/sep6").unwrap(),
++            "endpoint"
++        )
++        .is_ok());
+     }
+ }
+diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
+index ffb304c..157159e 100644
+--- a/clients/rust-client/src/anchor_protocol.rs
++++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -2351,7 +2351,6 @@ issuer = "{ISSUER}"
+             "https://[::1]/sep6",
+             "https://localhost/sep6",
+             "https://wallet.local/sep6",
+-            "https://anchor.example:8443/sep6",
+         ] {
+             let document: TomlValue =
+                 toml::from_str(&format!(r#"TRANSFER_SERVER = "{value}""#)).unwrap();
+diff --git a/docs/capabilities/anchor.md b/docs/capabilities/anchor.md
+index c230376..265cf48 100644
+--- a/docs/capabilities/anchor.md
++++ b/docs/capabilities/anchor.md
+@@ -49,7 +49,7 @@ A conforming implementation should discover and validate applicable anchor metad
+ 
+ Discovery must distinguish "metadata exists" from "a complete executable authentication path exists".
+ 
+-Anchor protocol endpoints used for authenticated/sensitive flows must be HTTPS, have a real host and must not contain embedded username/password credentials. Redirect handling must preserve an equivalent security boundary: an initially valid HTTPS endpoint must not silently downgrade to HTTP or otherwise bypass endpoint-origin policy through automatic redirects. The Rust reference additionally rejects IP literals, local/private-name forms (`localhost`, `.local`, `.home.arpa`), single-label hosts and non-default ports; its Anchor transport uses bounded timeouts and response bodies rather than allowing indefinite or unbounded reads.
++Anchor protocol endpoints used for authenticated/sensitive flows must be HTTPS, have a real host and must not contain embedded username/password credentials. Redirect handling must preserve an equivalent security boundary: an initially valid HTTPS endpoint must not silently downgrade to HTTP or otherwise bypass endpoint-origin policy through automatic redirects. The Rust reference additionally rejects IP literals, local/private-name forms (`localhost`, `.local`, `.home.arpa`) and single-label hosts; `home_domain` cannot carry a port, while HTTPS protocol endpoints preserve an explicitly advertised transport port. Its Anchor transport uses bounded timeouts and response bodies rather than allowing indefinite or unbounded reads.
+ 
+ ## Transfer protocol selection
+ 
+diff --git a/docs/tasks.md b/docs/tasks.md
+index 5a9c941..2847445 100644
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+@@ -52,7 +52,7 @@
+ - [x] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry
+ - [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
+ - [x] Harden Rust/RefPython Anchor asset matching to exact-case full identity and reject automatic redirects so an initially validated HTTPS endpoint cannot silently change transport/origin
+-- [x] Harden Rust Anchor network transport with structural external-DNS host validation, IP/local/non-default-port rejection, centralized HTTPS/no-redirect timeouts and bounded response bodies
++- [x] Harden Rust Anchor network transport with structural external-DNS host validation, IP/local-name rejection, explicit home-domain/endpoint port policy, centralized HTTPS/no-redirect timeouts and bounded response bodies
+ - [ ] Harden release supply chain without pinning consumer Mobile toolchains: pin Fresnica-owned toolchains/Actions/dependency locks where appropriate, then add dependency audit plus SBOM/attestation/provenance gates
+ - [ ] Keep terminal Backup v1 as legacy-only because its outer metadata is not authenticated; Mobile portable backup/restore should use the v2 relationship model rather than promoting v1
+ - [ ] Before exposing any AI/agent signing feature, replace coarse `AgentCapability` operation/fee-only authority with transaction-specific limits including destination, asset, amount/value and relevant execution bounds
