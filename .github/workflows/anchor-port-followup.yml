@@ -1,0 +1,30 @@
+name: Anchor port policy follow-up
+
+on:
+  push:
+    branches:
+      - security/anchor-http-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/anchor-http-boundary
+          fetch-depth: 0
+      - name: Apply port policy follow-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check .anchor-port-policy.patch
+          git apply .anchor-port-policy.patch
+          rm .anchor-port-policy.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Preserve advertised Anchor endpoint ports"
+          git push origin HEAD:security/anchor-http-boundary
