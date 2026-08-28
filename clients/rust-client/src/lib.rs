@@ -1,4 +1,5 @@
 pub mod anchor;
+mod anchor_http;
 pub mod anchor_protocol;
 pub mod contacts;
 pub mod dex;

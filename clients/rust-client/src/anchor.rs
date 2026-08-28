@@ -4,9 +4,13 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use ureq::unversioned::multipart::{Form, Part};
 use url::Url;
+
+use crate::anchor_http::{
+    agent as anchor_http_agent, reject_anchor_redirect, validate_anchor_https_url,
+    MAX_ANCHOR_RESPONSE_BYTES,
+};
 use zeroize::Zeroizing;
 
-const MAX_ANCHOR_RESPONSE_BYTES: u64 = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -239,7 +243,7 @@ pub fn put_anchor_customer(
             }
             form = form.part(file.name.as_str(), part);
         }
-        let request = ureq::put(url.as_str())
+        let request = anchor_http_agent().put(url.as_str())
             .header("Authorization", authorization.as_str())
             .config()
             .http_status_as_error(false)
@@ -269,13 +273,13 @@ fn send_authenticated_json(
 ) -> Result<Value, String> {
     let authorization = Zeroizing::new(format!("Bearer {token}"));
     let response = match method {
-        "GET" => ureq::get(url.as_str())
+        "GET" => anchor_http_agent().get(url.as_str())
             .header("Authorization", authorization.as_str())
             .config()
             .http_status_as_error(false)
             .build()
             .call(),
-        "PUT" => ureq::put(url.as_str())
+        "PUT" => anchor_http_agent().put(url.as_str())
             .header("Authorization", authorization.as_str())
             .config()
             .http_status_as_error(false)
@@ -298,6 +302,7 @@ fn read_json_response(
     mut response: ureq::http::Response<ureq::Body>,
 ) -> Result<Value, String> {
     let status = response.status().as_u16();
+    reject_anchor_redirect(status, &endpoint_label(url))?;
     let value = response
         .body_mut()
         .with_config()
@@ -331,16 +336,9 @@ fn endpoint_label(url: &Url) -> String {
 fn customer_url(server: &str) -> Result<Url, String> {
     let mut url =
         Url::parse(server.trim()).map_err(|_| "SEP-12 server must be a valid HTTPS URL")?;
-    if url.scheme() != "https"
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(
-            "SEP-12 server must be an HTTPS URL without credentials, query, or fragment".to_owned(),
-        );
+    validate_anchor_https_url(&url, "SEP-12 server")?;
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("SEP-12 server must not contain a query or fragment".to_owned());
     }
     let path = format!("{}/customer", url.path().trim_end_matches('/'));
     url.set_path(&path);
@@ -467,6 +465,10 @@ mod tests {
         );
         assert!(customer_url("http://anchor.example/kyc").is_err());
         assert!(customer_url("https://user:secret@anchor.example/kyc").is_err());
+        assert!(customer_url("https://127.0.0.1/kyc").is_err());
+        assert!(customer_url("https://localhost/kyc").is_err());
+        assert!(customer_url("https://wallet.local/kyc").is_err());
+        assert!(customer_url("https://anchor.example:8443/kyc").is_err());
         assert!(customer_url("https://anchor.example/kyc?token=x").is_err());
     }
 
