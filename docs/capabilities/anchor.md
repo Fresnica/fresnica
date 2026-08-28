@@ -49,7 +49,7 @@ A conforming implementation should discover and validate applicable anchor metad
 
 Discovery must distinguish "metadata exists" from "a complete executable authentication path exists".
 
-Anchor protocol endpoints used for authenticated/sensitive flows must be HTTPS, have a real host and must not contain embedded username/password credentials. Redirect handling must preserve an equivalent security boundary: an initially valid HTTPS endpoint must not silently downgrade to HTTP or otherwise bypass endpoint-origin policy through automatic redirects.
+Anchor protocol endpoints used for authenticated/sensitive flows must be HTTPS, have a real host and must not contain embedded username/password credentials. Redirect handling must preserve an equivalent security boundary: an initially valid HTTPS endpoint must not silently downgrade to HTTP or otherwise bypass endpoint-origin policy through automatic redirects. The Rust reference additionally rejects IP literals, local/private-name forms (`localhost`, `.local`, `.home.arpa`) and single-label hosts; `home_domain` cannot carry a port, while HTTPS protocol endpoints preserve an explicitly advertised transport port. Its Anchor transport uses bounded timeouts and response bodies rather than allowing indefinite or unbounded reads.
 
 ## Transfer protocol selection
 

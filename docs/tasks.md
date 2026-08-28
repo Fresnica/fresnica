@@ -37,7 +37,7 @@
 - [x] Bound Core transaction XDR decoding by finite recursion depth and the actual encoded input length without turning Core into the Wallet/Dapp ingress-policy layer
 - [x] Define the 15-Unicode-scalar Fresnica passphrase baseline and enforce it in the shared Rust Wallet reference path for new protected signers while preserving unlock compatibility for existing weaker envelopes
 - [ ] Apply the same new-passphrase/re-protection policy in Mobile onboarding/settings; keep credential-strength policy in Wallet/Application rather than Core
-- [ ] Benchmark Scrypt cost on supported iOS/Android hardware before changing version-1 KDF parameters; any stronger KDF profile must use explicit versioned migration
+- [ ] MobileDev: during real iOS/Android integration, benchmark current v1 Scrypt cost on representative devices and report device/OS, latency and peak-memory evidence back to Fresnica; Mobile must not change KDF parameters, and any stronger profile requires an explicit versioned migration
 - [x] Align Rust SDEX decimal-price rationalization with the canonical bounded best-rational behavior, including semi-convergent recovery at signed-int32 boundaries (for example `2147483648` -> `2147483647/1`)
 - [x] Make Rust/RefPython SDEX BUY preflight derive price-dependent selling capacity from the same effective `Price { n, d }` that will be encoded, not independently from the requested decimal
 - [x] Align Rust/RefPython SDEX create/update review with the exact encoded Stellar `Price { n, d }` when decimal input requires rational approximation; requested price alone is not sufficient review truth
@@ -52,6 +52,10 @@
 - [x] Reject signing of already-expired prepared transactions and require re-prepare + re-review; add regression coverage for timebound expiry
 - [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
 - [x] Harden Rust/RefPython Anchor asset matching to exact-case full identity and reject automatic redirects so an initially validated HTTPS endpoint cannot silently change transport/origin
+- [x] Harden Rust Anchor network transport with structural external-DNS host validation, IP/local-name rejection, explicit home-domain/endpoint port policy, centralized HTTPS/no-redirect timeouts and bounded response bodies
+- [ ] Harden release supply chain without pinning consumer Mobile toolchains: pin Fresnica-owned toolchains/Actions/dependency locks where appropriate, then add dependency audit plus SBOM/attestation/provenance gates
+- [ ] Keep terminal Backup v1 as legacy-only because its outer metadata is not authenticated; Mobile portable backup/restore should use the v2 relationship model rather than promoting v1
+- [ ] Before exposing any AI/agent signing feature, replace coarse `AgentCapability` operation/fee-only authority with transaction-specific limits including destination, asset, amount/value and relevant execution bounds
 - [x] Make direct-Classic SEP-10 fail explicitly before signing when the available local signer cannot satisfy the supported direct path: Rust checks current master weight against Horizon medium threshold and RefPython rejects an attached delegated signer
 - [x] Route Rust Classic SEP-10 through reusable Ledger Authorization + Signing Coordination for local software Ed25519 multisig, including medium-threshold evaluation and server-key exclusion
 - [x] Add cross-language asset-identity vectors for protocol-valid case-sensitive issued codes, including values that high-level SDK convenience constructors may normalize
