@@ -1,0 +1,243 @@
+diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
+index 157159e..5ac2db4 100644
+--- a/clients/rust-client/src/anchor_protocol.rs
++++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -594,26 +594,69 @@ fn sep6_request_fields(
+     if fields.contains_key("funding_method") {
+         return Ok(fields);
+     }
+-    let Some(methods) = sep6_info(capabilities, kind)
++    if let Some(methods) = sep6_info(capabilities, kind)
+         .get("funding_methods")
+         .and_then(JsonValue::as_array)
+-    else {
++    {
++        let methods = methods
++            .iter()
++            .filter_map(JsonValue::as_str)
++            .map(str::trim)
++            .filter(|value| !value.is_empty())
++            .collect::<Vec<_>>();
++        return match methods.as_slice() {
++            [method] => {
++                fields.insert("funding_method".to_owned(), (*method).to_owned());
++                Ok(fields)
++            }
++            [] => Ok(fields),
++            _ => Err(format!(
++                "SEP-6 {} requires an explicit funding_method because multiple methods are advertised",
++                kind.endpoint()
++            )),
++        };
++    }
++
++    if fields.contains_key("type") {
+         return Ok(fields);
++    }
++
++    let legacy_types = match kind {
++        AnchorTransferKind::Deposit => sep6_info(capabilities, kind)
++            .get("fields")
++            .and_then(|fields| fields.get("type"))
++            .and_then(|field| field.get("choices"))
++            .and_then(JsonValue::as_array)
++            .map(|choices| {
++                choices
++                    .iter()
++                    .filter_map(JsonValue::as_str)
++                    .map(str::trim)
++                    .filter(|value| !value.is_empty())
++                    .collect::<Vec<_>>()
++            })
++            .unwrap_or_default(),
++        AnchorTransferKind::Withdraw => sep6_info(capabilities, kind)
++            .get("types")
++            .and_then(JsonValue::as_object)
++            .map(|types| {
++                types
++                    .keys()
++                    .map(String::as_str)
++                    .map(str::trim)
++                    .filter(|value| !value.is_empty())
++                    .collect::<Vec<_>>()
++            })
++            .unwrap_or_default(),
+     };
+-    let methods = methods
+-        .iter()
+-        .filter_map(JsonValue::as_str)
+-        .map(str::trim)
+-        .filter(|value| !value.is_empty())
+-        .collect::<Vec<_>>();
+-    match methods.as_slice() {
+-        [method] => {
+-            fields.insert("funding_method".to_owned(), (*method).to_owned());
++    match legacy_types.as_slice() {
++        [legacy_type] => {
++            fields.insert("type".to_owned(), (*legacy_type).to_owned());
+             Ok(fields)
+         }
+         [] => Ok(fields),
+         _ => Err(format!(
+-            "SEP-6 {} requires an explicit funding_method because multiple methods are advertised",
++            "SEP-6 {} requires an explicit type because multiple legacy types are advertised",
+             kind.endpoint()
+         )),
+     }
+@@ -2093,6 +2136,118 @@ issuer = "{ISSUER}"
+         );
+     }
+ 
++    #[test]
++    fn sep6_preserves_legacy_type_based_info_shapes() {
++        let document = format!(
++            r#"TRANSFER_SERVER = "https://anchor.example/sep6"
++
++[[CURRENCIES]]
++code = "USD"
++issuer = "{ISSUER}"
++"#
++        );
++        let capabilities = capabilities_from_document(
++            &asset(),
++            "anchor.example",
++            &document,
++            |url| match url {
++                "https://anchor.example/sep6/info" => Ok(serde_json::json!({
++                    "deposit": {
++                        "USD": {
++                            "enabled": true,
++                            "fields": {
++                                "type": {"choices": ["crypto"]}
++                            }
++                        }
++                    },
++                    "withdraw": {
++                        "USD": {
++                            "enabled": true,
++                            "types": {
++                                "crypto": {
++                                    "fields": {
++                                        "dest": {"description": "destination address"},
++                                        "dest_extra": {
++                                            "description": "destination tag",
++                                            "optional": true
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                    }
++                })),
++                _ => Err(format!("unexpected URL: {url}")),
++            },
++        )
++        .unwrap();
++
++        assert!(capabilities.sep6_deposit);
++        assert!(capabilities.sep6_withdraw);
++        assert_eq!(
++            capabilities.sep6_withdraw_info["types"]["crypto"]["fields"]["dest"]
++                ["description"],
++            "destination address"
++        );
++
++        assert_eq!(
++            select_anchor_transfer_protocol(&capabilities, AnchorTransferKind::Deposit).unwrap(),
++            AnchorProtocol::Sep6
++        );
++        assert_eq!(
++            select_anchor_transfer_protocol(&capabilities, AnchorTransferKind::Withdraw).unwrap(),
++            AnchorProtocol::Sep6
++        );
++        let deposit_fields =
++            sep6_request_fields(&capabilities, AnchorTransferKind::Deposit, &BTreeMap::new())
++                .unwrap();
++        assert_eq!(deposit_fields.get("type").map(String::as_str), Some("crypto"));
++
++        let mut withdraw_fields = BTreeMap::new();
++        withdraw_fields.insert("dest".to_owned(), "rExample".to_owned());
++        let withdraw_fields =
++            sep6_request_fields(&capabilities, AnchorTransferKind::Withdraw, &withdraw_fields)
++                .unwrap();
++        assert_eq!(withdraw_fields.get("type").map(String::as_str), Some("crypto"));
++        assert_eq!(
++            withdraw_fields.get("dest").map(String::as_str),
++            Some("rExample")
++        );
++
++        let mut multiple = capabilities.clone();
++        multiple.sep6_withdraw_info = serde_json::json!({
++            "enabled": true,
++            "types": {
++                "crypto": {},
++                "bank_account": {}
++            }
++        });
++        assert_eq!(
++            sep6_request_fields(&multiple, AnchorTransferKind::Withdraw, &BTreeMap::new())
++                .unwrap_err(),
++            "SEP-6 withdraw requires an explicit type because multiple legacy types are advertised"
++        );
++    }
++
++    #[test]
++    fn sep6_caller_selected_legacy_type_is_preserved() {
++        let mut capabilities = transfer_capabilities();
++        capabilities.sep6_withdraw_info = serde_json::json!({
++            "enabled": true,
++            "types": {
++                "crypto": {},
++                "bank_account": {}
++            }
++        });
++        let mut fields = BTreeMap::new();
++        fields.insert("type".to_owned(), "crypto".to_owned());
++        fields.insert("dest".to_owned(), "rExample".to_owned());
++        assert_eq!(
++            sep6_request_fields(&capabilities, AnchorTransferKind::Withdraw, &fields).unwrap(),
++            fields
++        );
++    }
++
+     #[test]
+     fn sep6_transport_requires_token_when_anchor_requires_authentication() {
+         let capabilities = transfer_capabilities();
+diff --git a/docs/capabilities/anchor.md b/docs/capabilities/anchor.md
+index 265cf48..c985e5c 100644
+--- a/docs/capabilities/anchor.md
++++ b/docs/capabilities/anchor.md
+@@ -36,6 +36,12 @@ The shared Classic `G...` account path covers:
+ 
+ SEP-45 contract-account execution is deliberately outside this Classic normative path until its Soroban authorization semantics are specified separately. Official SEP/auth libraries supporting additional account families do not automatically widen Fresnica's current scope: unsupported `M...`/contract/delegated paths must fail explicitly and must not be demuxed/reinterpreted into the direct Classic `G...` path.
+ 
++## Compatibility policy
++
++Fresnica targets deployed anchors, not only the latest wording of each SEP. A newer SEP version is the preferred interoperability contract, but it is not by itself a reason to reject an older deployed field shape or optional-metadata model that can still be executed safely and unambiguously.
++
++Compatibility should be structural rather than provider-specific: preserve recognized legacy protocol fields and semantics, and add regression coverage for real deployed patterns instead of hard-coding domain-name exceptions. Compatibility must not weaken HTTPS/origin controls, full asset identity, authentication/signature verification, exact transaction binding, token handling or resource limits.
++
+ ## SEP-1 discovery
+ 
+ A conforming implementation should discover and validate applicable anchor metadata from the asset issuer's `home_domain`, including the endpoints needed for supported flows such as:
+@@ -102,6 +108,8 @@ SEP-6 initiation/status must respect the anchor's advertised `/info` authenticat
+ 
+ SEP-6 transport fields are protocol mechanics; product screens may collect equivalent information in a platform-appropriate way.
+ 
++Legacy SEP-6 compatibility is intentional. The reference path accepts older `fields.type.choices` / withdrawal `types` metadata alongside current `funding_methods`, preserves caller-supplied legacy fields such as `type`, `dest` and `dest_extra`, and does not require later optional metadata solely to make an otherwise safe older flow executable. When exactly one legacy type is advertised it may be selected automatically; multiple advertised choices still require an explicit user/product choice.
++
+ ## Transaction status
+ 
+ Status lookup is read-only by default.
+diff --git a/docs/tasks.md b/docs/tasks.md
+index 2847445..e0ea430 100644
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+@@ -53,6 +53,7 @@
+ - [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
+ - [x] Harden Rust/RefPython Anchor asset matching to exact-case full identity and reject automatic redirects so an initially validated HTTPS endpoint cannot silently change transport/origin
+ - [x] Harden Rust Anchor network transport with structural external-DNS host validation, IP/local-name rejection, explicit home-domain/endpoint port policy, centralized HTTPS/no-redirect timeouts and bounded response bodies
++- [x] Define Anchor compatibility as "legacy protocol semantics where safe, no security downgrade" and lock 2019-era SEP-6 `type`/`types` metadata compatibility with Rust regression coverage instead of provider-specific domain exceptions
+ - [ ] Harden release supply chain without pinning consumer Mobile toolchains: pin Fresnica-owned toolchains/Actions/dependency locks where appropriate, then add dependency audit plus SBOM/attestation/provenance gates
+ - [ ] Keep terminal Backup v1 as legacy-only because its outer metadata is not authenticated; Mobile portable backup/restore should use the v2 relationship model rather than promoting v1
+ - [ ] Before exposing any AI/agent signing feature, replace coarse `AgentCapability` operation/fee-only authority with transaction-specific limits including destination, asset, amount/value and relevant execution bounds
