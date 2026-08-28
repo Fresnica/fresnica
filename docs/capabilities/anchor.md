@@ -36,6 +36,12 @@ The shared Classic `G...` account path covers:
 
 SEP-45 contract-account execution is deliberately outside this Classic normative path until its Soroban authorization semantics are specified separately. Official SEP/auth libraries supporting additional account families do not automatically widen Fresnica's current scope: unsupported `M...`/contract/delegated paths must fail explicitly and must not be demuxed/reinterpreted into the direct Classic `G...` path.
 
+## Compatibility policy
+
+Fresnica targets deployed anchors, not only the latest wording of each SEP. A newer SEP version is the preferred interoperability contract, but it is not by itself a reason to reject an older deployed field shape or optional-metadata model that can still be executed safely and unambiguously.
+
+Compatibility should be structural rather than provider-specific: preserve recognized legacy protocol fields and semantics, and add regression coverage for real deployed patterns instead of hard-coding domain-name exceptions. Compatibility must not weaken HTTPS/origin controls, full asset identity, authentication/signature verification, exact transaction binding, token handling or resource limits.
+
 ## SEP-1 discovery
 
 A conforming implementation should discover and validate applicable anchor metadata from the asset issuer's `home_domain`, including the endpoints needed for supported flows such as:
@@ -101,6 +107,8 @@ SEP-24 status/authentication behavior must follow the SEP rather than UI assumpt
 SEP-6 initiation/status must respect the anchor's advertised `/info` authentication requirements and field semantics.
 
 SEP-6 transport fields are protocol mechanics; product screens may collect equivalent information in a platform-appropriate way.
+
+Legacy SEP-6 compatibility is intentional. The reference path accepts older `fields.type.choices` / withdrawal `types` metadata alongside current `funding_methods`, preserves caller-supplied legacy fields such as `type`, `dest` and `dest_extra`, and does not require later optional metadata solely to make an otherwise safe older flow executable. When exactly one legacy type is advertised it may be selected automatically; multiple advertised choices still require an explicit user/product choice.
 
 ## Transaction status
 

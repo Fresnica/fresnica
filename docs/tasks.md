@@ -53,6 +53,7 @@
 - [x] Make Contacts resolution prefer a valid direct chain identity over alias lookup so an address-like contact cannot shadow a pasted destination
 - [x] Harden Rust/RefPython Anchor asset matching to exact-case full identity and reject automatic redirects so an initially validated HTTPS endpoint cannot silently change transport/origin
 - [x] Harden Rust Anchor network transport with structural external-DNS host validation, IP/local-name rejection, explicit home-domain/endpoint port policy, centralized HTTPS/no-redirect timeouts and bounded response bodies
+- [x] Define Anchor compatibility as "legacy protocol semantics where safe, no security downgrade" and lock 2019-era SEP-6 `type`/`types` metadata compatibility with Rust regression coverage instead of provider-specific domain exceptions
 - [ ] Harden release supply chain without pinning consumer Mobile toolchains: pin Fresnica-owned toolchains/Actions/dependency locks where appropriate, then add dependency audit plus SBOM/attestation/provenance gates
 - [ ] Keep terminal Backup v1 as legacy-only because its outer metadata is not authenticated; Mobile portable backup/restore should use the v2 relationship model rather than promoting v1
 - [ ] Before exposing any AI/agent signing feature, replace coarse `AgentCapability` operation/fee-only authority with transaction-specific limits including destination, asset, amount/value and relevant execution bounds

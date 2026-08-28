@@ -594,26 +594,69 @@ fn sep6_request_fields(
     if fields.contains_key("funding_method") {
         return Ok(fields);
     }
-    let Some(methods) = sep6_info(capabilities, kind)
+    if let Some(methods) = sep6_info(capabilities, kind)
         .get("funding_methods")
         .and_then(JsonValue::as_array)
-    else {
+    {
+        let methods = methods
+            .iter()
+            .filter_map(JsonValue::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        return match methods.as_slice() {
+            [method] => {
+                fields.insert("funding_method".to_owned(), (*method).to_owned());
+                Ok(fields)
+            }
+            [] => Ok(fields),
+            _ => Err(format!(
+                "SEP-6 {} requires an explicit funding_method because multiple methods are advertised",
+                kind.endpoint()
+            )),
+        };
+    }
+
+    if fields.contains_key("type") {
         return Ok(fields);
+    }
+
+    let legacy_types = match kind {
+        AnchorTransferKind::Deposit => sep6_info(capabilities, kind)
+            .get("fields")
+            .and_then(|fields| fields.get("type"))
+            .and_then(|field| field.get("choices"))
+            .and_then(JsonValue::as_array)
+            .map(|choices| {
+                choices
+                    .iter()
+                    .filter_map(JsonValue::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        AnchorTransferKind::Withdraw => sep6_info(capabilities, kind)
+            .get("types")
+            .and_then(JsonValue::as_object)
+            .map(|types| {
+                types
+                    .keys()
+                    .map(String::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
     };
-    let methods = methods
-        .iter()
-        .filter_map(JsonValue::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match methods.as_slice() {
-        [method] => {
-            fields.insert("funding_method".to_owned(), (*method).to_owned());
+    match legacy_types.as_slice() {
+        [legacy_type] => {
+            fields.insert("type".to_owned(), (*legacy_type).to_owned());
             Ok(fields)
         }
         [] => Ok(fields),
         _ => Err(format!(
-            "SEP-6 {} requires an explicit funding_method because multiple methods are advertised",
+            "SEP-6 {} requires an explicit type because multiple legacy types are advertised",
             kind.endpoint()
         )),
     }
@@ -2090,6 +2133,118 @@ issuer = "{ISSUER}"
         assert_eq!(
             sep6_request_fields(&many, AnchorTransferKind::Deposit, &BTreeMap::new()).unwrap_err(),
             "SEP-6 deposit requires an explicit funding_method because multiple methods are advertised"
+        );
+    }
+
+    #[test]
+    fn sep6_preserves_legacy_type_based_info_shapes() {
+        let document = format!(
+            r#"TRANSFER_SERVER = "https://anchor.example/sep6"
+
+[[CURRENCIES]]
+code = "USD"
+issuer = "{ISSUER}"
+"#
+        );
+        let capabilities = capabilities_from_document(
+            &asset(),
+            "anchor.example",
+            &document,
+            |url| match url {
+                "https://anchor.example/sep6/info" => Ok(serde_json::json!({
+                    "deposit": {
+                        "USD": {
+                            "enabled": true,
+                            "fields": {
+                                "type": {"choices": ["crypto"]}
+                            }
+                        }
+                    },
+                    "withdraw": {
+                        "USD": {
+                            "enabled": true,
+                            "types": {
+                                "crypto": {
+                                    "fields": {
+                                        "dest": {"description": "destination address"},
+                                        "dest_extra": {
+                                            "description": "destination tag",
+                                            "optional": true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })),
+                _ => Err(format!("unexpected URL: {url}")),
+            },
+        )
+        .unwrap();
+
+        assert!(capabilities.sep6_deposit);
+        assert!(capabilities.sep6_withdraw);
+        assert_eq!(
+            capabilities.sep6_withdraw_info["types"]["crypto"]["fields"]["dest"]
+                ["description"],
+            "destination address"
+        );
+
+        assert_eq!(
+            select_anchor_transfer_protocol(&capabilities, AnchorTransferKind::Deposit).unwrap(),
+            AnchorProtocol::Sep6
+        );
+        assert_eq!(
+            select_anchor_transfer_protocol(&capabilities, AnchorTransferKind::Withdraw).unwrap(),
+            AnchorProtocol::Sep6
+        );
+        let deposit_fields =
+            sep6_request_fields(&capabilities, AnchorTransferKind::Deposit, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(deposit_fields.get("type").map(String::as_str), Some("crypto"));
+
+        let mut withdraw_fields = BTreeMap::new();
+        withdraw_fields.insert("dest".to_owned(), "rExample".to_owned());
+        let withdraw_fields =
+            sep6_request_fields(&capabilities, AnchorTransferKind::Withdraw, &withdraw_fields)
+                .unwrap();
+        assert_eq!(withdraw_fields.get("type").map(String::as_str), Some("crypto"));
+        assert_eq!(
+            withdraw_fields.get("dest").map(String::as_str),
+            Some("rExample")
+        );
+
+        let mut multiple = capabilities.clone();
+        multiple.sep6_withdraw_info = serde_json::json!({
+            "enabled": true,
+            "types": {
+                "crypto": {},
+                "bank_account": {}
+            }
+        });
+        assert_eq!(
+            sep6_request_fields(&multiple, AnchorTransferKind::Withdraw, &BTreeMap::new())
+                .unwrap_err(),
+            "SEP-6 withdraw requires an explicit type because multiple legacy types are advertised"
+        );
+    }
+
+    #[test]
+    fn sep6_caller_selected_legacy_type_is_preserved() {
+        let mut capabilities = transfer_capabilities();
+        capabilities.sep6_withdraw_info = serde_json::json!({
+            "enabled": true,
+            "types": {
+                "crypto": {},
+                "bank_account": {}
+            }
+        });
+        let mut fields = BTreeMap::new();
+        fields.insert("type".to_owned(), "crypto".to_owned());
+        fields.insert("dest".to_owned(), "rExample".to_owned());
+        assert_eq!(
+            sep6_request_fields(&capabilities, AnchorTransferKind::Withdraw, &fields).unwrap(),
+            fields
         );
     }
 
