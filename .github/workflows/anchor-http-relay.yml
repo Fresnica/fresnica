@@ -1,0 +1,31 @@
+name: Anchor HTTP relay
+
+on:
+  push:
+    branches:
+      - security/anchor-http-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/anchor-http-boundary
+          fetch-depth: 0
+      - name: Apply staged patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .anchor-http.patch.00 .anchor-http.patch.01 .anchor-http.patch.02 > /tmp/anchor-http.patch
+          git apply --check /tmp/anchor-http.patch
+          git apply /tmp/anchor-http.patch
+          rm .anchor-http.patch.00 .anchor-http.patch.01 .anchor-http.patch.02
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden Anchor network boundary"
+          git push origin HEAD:security/anchor-http-boundary
