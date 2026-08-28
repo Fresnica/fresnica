@@ -23,3 +23,25 @@ test('adapter contract stays pinned to the Native SDK binding/version', async ()
   assert.equal(String(contract.nativeBindingApiVersion), bindingVersion);
   assert.equal(contract.adapterSourceVersion, adapterPackage.version);
 });
+
+test('Android and Apple export the contract JS module name', async () => {
+  const [contract, androidModule, appleBridge] = await Promise.all([
+    readFile(path.join(ADAPTER_DIR, 'adapter-contract.json'), 'utf8').then(JSON.parse),
+    readFile(
+      path.join(
+        ADAPTER_DIR,
+        'android/src/main/kotlin/com/fresnica/sdk/reactnative/FresnicaCoreModule.kt',
+      ),
+      'utf8',
+    ),
+    readFile(path.join(ADAPTER_DIR, 'apple/FresnicaCoreModule.m'), 'utf8'),
+  ]);
+
+  const androidName = androidModule.match(/const val NAME = "([^"]+)"/)?.[1];
+  const appleName = appleBridge.match(
+    /RCT_EXTERN_REMAP_MODULE\(([^,]+),\s*FresnicaCoreModule,\s*NSObject\)/,
+  )?.[1]?.trim();
+
+  assert.equal(androidName, contract.jsModuleName);
+  assert.equal(appleName, contract.jsModuleName);
+});

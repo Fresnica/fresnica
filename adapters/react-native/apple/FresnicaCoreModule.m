@@ -1,8 +1,9 @@
 #import <React/RCTBridgeModule.h>
 
-// Swift implementation lives in FresnicaCoreModule.swift. RCT_EXTERN_MODULE keeps the
-// Xaman-compatible Objective-C React Native bridge thin and does not expose native key material.
-@interface RCT_EXTERN_MODULE(FresnicaCoreModule, NSObject)
+// Swift implementation lives in FresnicaCoreModule.swift. RCT_EXTERN_REMAP_MODULE keeps the
+// Xaman-compatible Objective-C React Native bridge thin, exports the shared FresnicaCore JS name,
+// and does not expose native key material.
+@interface RCT_EXTERN_REMAP_MODULE(FresnicaCore, FresnicaCoreModule, NSObject)
 
 RCT_EXTERN_METHOD(parseAccount:(NSString *)address
                   resolver:(RCTPromiseResolveBlock)resolve
