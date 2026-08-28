@@ -2351,7 +2351,6 @@ issuer = "{ISSUER}"
             "https://[::1]/sep6",
             "https://localhost/sep6",
             "https://wallet.local/sep6",
-            "https://anchor.example:8443/sep6",
         ] {
             let document: TomlValue =
                 toml::from_str(&format!(r#"TRANSFER_SERVER = "{value}""#)).unwrap();

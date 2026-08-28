@@ -31,6 +31,9 @@ pub(crate) fn canonical_home_domain(value: &str) -> Result<String, String> {
         return Err("Issuer home_domain is not a valid host name".to_owned());
     }
     validate_anchor_https_url(&url, "Issuer home_domain")?;
+    if url.port().is_some() {
+        return Err("Issuer home_domain must not include a port".to_owned());
+    }
     Ok(url
         .host_str()
         .expect("validated URL has a host")
@@ -43,9 +46,6 @@ pub(crate) fn validate_anchor_https_url(url: &Url, label: &str) -> Result<(), St
         return Err(format!(
             "{label} must be an HTTPS URL without embedded credentials"
         ));
-    }
-    if url.port().is_some() {
-        return Err(format!("{label} must not use a non-default port"));
     }
     let host = match url.host() {
         Some(Host::Domain(host)) => host.trim_end_matches('.'),
@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn anchor_urls_reject_local_ip_credentials_and_non_default_ports() {
+    fn anchor_urls_reject_local_ip_credentials_and_allow_declared_transport_ports() {
         assert!(validate_anchor_https_url(
             &Url::parse("https://anchor.example/sep6").unwrap(),
             "endpoint"
@@ -128,12 +128,16 @@ mod tests {
             "https://[::1]/sep6",
             "https://localhost/sep6",
             "https://wallet.local/sep6",
-            "https://anchor.example:8443/sep6",
         ] {
             assert!(
                 validate_anchor_https_url(&Url::parse(value).unwrap(), "endpoint").is_err(),
                 "accepted {value}"
             );
         }
+        assert!(validate_anchor_https_url(
+            &Url::parse("https://anchor.example:8443/sep6").unwrap(),
+            "endpoint"
+        )
+        .is_ok());
     }
 }

@@ -468,7 +468,7 @@ mod tests {
         assert!(customer_url("https://127.0.0.1/kyc").is_err());
         assert!(customer_url("https://localhost/kyc").is_err());
         assert!(customer_url("https://wallet.local/kyc").is_err());
-        assert!(customer_url("https://anchor.example:8443/kyc").is_err());
+        assert!(customer_url("https://anchor.example:8443/kyc").is_ok());
         assert!(customer_url("https://anchor.example/kyc?token=x").is_err());
     }
 
