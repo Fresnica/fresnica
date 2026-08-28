@@ -1,4 +1,17 @@
-satisfied_ed25519_conditions, AccountAuthorizationRequirement, LedgerAccountAuthorization,
+diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
+index 5d79419..ffb304c 100644
+--- a/clients/rust-client/src/anchor_protocol.rs
++++ b/clients/rust-client/src/anchor_protocol.rs
+@@ -15,6 +15,10 @@ use ureq::unversioned::multipart::Form;
+ use url::Url;
+ use zeroize::Zeroizing;
+ 
++use crate::anchor_http::{
++    agent as anchor_http_agent, canonical_home_domain, reject_anchor_redirect,
++    validate_anchor_https_url, MAX_ANCHOR_RESPONSE_BYTES,
++};
+ use crate::ledger_authorization::{
+     satisfied_ed25519_conditions, AccountAuthorizationRequirement, LedgerAccountAuthorization,
      LedgerAuthorizationPlan, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 @@ -26,7 +30,6 @@ use crate::transaction::{
      transaction_xdr_bytes,
@@ -210,4 +223,91 @@ satisfied_ed25519_conditions, AccountAuthorizationRequirement, LedgerAccountAuth
 @@ -1323,35 +1307,31 @@ fn asset_enabled(section: Option<&JsonValue>, code: &str) -> bool {
  }
  
- fn fetch
+ fn fetch_text(url: &str, label: &str) -> Result<String, String> {
+-    let mut response = ureq::get(url)
+-        .config()
+-        .https_only(true)
+-        .max_redirects(0)
+-        .build()
++    let parsed = Url::parse(url).map_err(|_| format!("Unable to load {label} from invalid URL {url}"))?;
++    validate_anchor_https_url(&parsed, label)?;
++    let mut response = anchor_http_agent().get(url)
+         .call()
+         .map_err(|error| format!("Unable to load {label} from {url}: {error}"))?;
+     reject_anchor_redirect(response.status().as_u16(), url)?;
+     response
+         .body_mut()
+         .with_config()
+-        .limit(MAX_ANCHOR_DOCUMENT_BYTES)
++        .limit(MAX_ANCHOR_RESPONSE_BYTES)
+         .read_to_string()
+         .map_err(|error| format!("Unable to read {label} from {url}: {error}"))
+ }
+ 
+ fn fetch_json(url: &str) -> Result<JsonValue, String> {
+-    let mut response = ureq::get(url)
+-        .config()
+-        .https_only(true)
+-        .max_redirects(0)
+-        .build()
++    let parsed = Url::parse(url).map_err(|_| format!("Unable to load invalid URL {url}"))?;
++    validate_anchor_https_url(&parsed, "Anchor endpoint")?;
++    let mut response = anchor_http_agent().get(url)
+         .call()
+         .map_err(|error| format!("Unable to load {url}: {error}"))?;
+     reject_anchor_redirect(response.status().as_u16(), url)?;
+     response
+         .body_mut()
+         .with_config()
+-        .limit(MAX_ANCHOR_DOCUMENT_BYTES)
++        .limit(MAX_ANCHOR_RESPONSE_BYTES)
+         .read_json::<JsonValue>()
+         .map_err(|error| format!("Invalid JSON from {url}: {error}"))
+ }
+@@ -1367,15 +1347,6 @@ fn endpoint_label(url: &Url) -> String {
+     sanitized.to_string()
+ }
+ 
+-fn reject_anchor_redirect(status: u16, endpoint: &str) -> Result<(), String> {
+-    if (300..400).contains(&status) {
+-        return Err(format!(
+-            "Anchor endpoint {endpoint} returned HTTP {status}; redirects are not allowed"
+-        ));
+-    }
+-    Ok(())
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use std::sync::OnceLock;
+@@ -2374,6 +2345,18 @@ issuer = "{ISSUER}"
+         let credentialed: TomlValue =
+             toml::from_str(r#"TRANSFER_SERVER = "https://user:pass@anchor.example/sep6""#).unwrap();
+         assert!(endpoint(&credentialed, "TRANSFER_SERVER").is_err());
++
++        for value in [
++            "https://127.0.0.1/sep6",
++            "https://[::1]/sep6",
++            "https://localhost/sep6",
++            "https://wallet.local/sep6",
++            "https://anchor.example:8443/sep6",
++        ] {
++            let document: TomlValue =
++                toml::from_str(&format!(r#"TRANSFER_SERVER = "{value}""#)).unwrap();
++            assert!(endpoint(&document, "TRANSFER_SERVER").is_err(), "accepted {value}");
++        }
+     }
+ 
+     #[test]
+@@ -2388,8 +2371,8 @@ issuer = "{ISSUER}"
+ 
+     #[test]
+     fn home_domain_rejects_urls_and_paths() {
+-        assert_eq!(valid_domain("Anchor.Example.").unwrap(), "anchor.example");
+-        assert!(valid_domain("https://anchor.example").is_err());
+-        assert!(valid_domain("anchor.example/path").is_err());
++        assert_eq!(canonical_home_domain("Anchor.Example.").unwrap(), "anchor.example");
++        assert!(canonical_home_domain("https://anchor.example").is_err());
++        assert!(canonical_home_domain("anchor.example/path").is_err());
+     }
+ }
