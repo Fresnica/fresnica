@@ -83,7 +83,7 @@ index 72ec814..d30615f 100644
  
 diff --git a/clients/rust-client/src/anchor_http.rs b/clients/rust-client/src/anchor_http.rs
 new file mode 100644
-index 0000000..891e56e
+index 0000000..4ddb44f
 --- /dev/null
 +++ b/clients/rust-client/src/anchor_http.rs
 @@ -0,0 +1,139 @@
@@ -167,8 +167,8 @@ index 0000000..891e56e
 +            !label.is_empty()
 +                && label.len() <= 63
 +                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-+                && label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-+                && label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
++                && label.as_bytes().first().is_some_and(|byte| byte.is_ascii_alphanumeric())
++                && label.as_bytes().last().is_some_and(|byte| byte.is_ascii_alphanumeric())
 +        })
 +        && host != "localhost"
 +        && !host.ends_with(".localhost")
@@ -226,17 +226,13 @@ index 0000000..891e56e
 +        }
 +    }
 +}
-diff --git a/clients/rust-client/src/anchor_protocol.rs b/clients/rust-client/src/anchor_protocol.rs
-index 5d79419..ffb304c 100644
---- a/clients/rust-client/src/anchor_protocol.rs
-+++ b/clients/rust-client/src/anchor_protocol.rs
-@@ -15,6 +15,10 @@ use ureq::unversioned::multipart::Form;
- use url::Url;
- use zeroize::Zeroizing;
- 
-+use crate::anchor_http::{
-+    agent as anchor_http_agent, canonical_home_domain, reject_anchor_redirect,
-+    validate_anchor_https_url, MAX_ANCHOR_RESPONSE_BYTES,
-+};
- use crate::ledger_authorization::{
-    
+diff --git a/clients/rust-client/src/lib.rs b/clients/rust-client/src/lib.rs
+index 9e30f7f..6416b90 100644
+--- a/clients/rust-client/src/lib.rs
++++ b/clients/rust-client/src/lib.rs
+@@ -1,4 +1,5 @@
+ pub mod anchor;
++mod anchor_http;
+ pub mod anchor_protocol;
+ pub mod contacts;
+ pub mod dex;
