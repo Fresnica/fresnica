@@ -75,7 +75,7 @@ test('Apple adapter targets Native SDK and preserves the reviewed bridge surface
   assert.equal((source.match(/@unknown default:/g) ?? []).length, 2, 'Swift 6 error mapping must tolerate future Native SDK enum cases');
   assert.doesNotMatch(source, /MobileCoreApi|MobileCoreError/);
   assert.doesNotMatch(source, /class FresnicaSignerAuthorization|class FresnicaWalletUnlockKeyStore/);
-  assert.match(shim, /RCT_EXTERN_MODULE\(FresnicaCoreModule/);
+  assert.match(shim, /RCT_EXTERN_REMAP_MODULE\(FresnicaCore,\s*FresnicaCoreModule,\s*NSObject\)/);
   for (const method of REQUIRED_METHODS) {
     assert.match(source, new RegExp(`@objc\\(${method}`), `missing Apple framework method ${method}`);
     assert.match(shim, new RegExp(`RCT_EXTERN_METHOD\\(${method}`), `missing Apple shim method ${method}`);
