@@ -9,3 +9,9 @@ It owns one-request/one-response JSON/base64 transport and stable process error/
 Binary: `fresnica-process`; environment discovery: `FRESNICA_PROCESS_BIN`. API v1 operations are version, parse-account, protect-secret/mnemonic, generate/derive mnemonic signer, reprotect, derive/validate unlock key, sign with unlock key or fresh passphrase, reveal, and external Ed25519 prepare/apply.
 
 Desktop selection: Rust/Tauri backend -> direct SDK; Swift/native -> Native SDK; Electron/non-Rust -> Process Binding when a managed sidecar is appropriate. The host owns process integrity/update, secure storage and OS authorization.
+
+## Security classification
+
+The Process Binding is a privileged owner/host surface. Its one-shot transport reduces accidental argv/environment leakage, but it does not authenticate the parent process and it intentionally returns owner-sensitive results for operations such as mnemonic generation, Reveal and unlock-key derivation. The host must prevent untrusted renderers/plugins/processes from invoking the binary or observing its pipes, logs, crash reports and temporary state.
+
+It must not be reused as Agent Access or exposed through remote RPC/MCP. Agent Access requires a separate transaction-policy surface that never offers Reveal, passphrase, secret/mnemonic or raw-unlock-key operations. Before a non-RefPython Desktop product adopts Process Binding, review whether that host needs the full owner API or a narrower operation profile.
