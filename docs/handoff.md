@@ -1,14 +1,10 @@
 # Fresnica Project Handoff
 
-Updated: 2026-08-26
+Updated: 2026-08-31
 
-This is the **continuation/state document** for Fresnica. Stable architecture and security rules are not duplicated here; start at [`README.md`](README.md) and the five common contracts.
-
-Do not treat any SHA in a handoff as permanently current. Verify GitHub `main`, current CI and release metadata before development.
+This is the continuation/state document for the shared Fresnica repository. Stable architecture and security rules live in the common contracts; start at the [repository README](../README.md) and [`docs/README.md`](README.md). Verify GitHub `main`, current CI and release metadata before development rather than treating a handoff SHA as permanent truth.
 
 ## 1. Canonical architecture
-
-Cross-project vocabulary is fixed as:
 
 ```text
 Application Flows
@@ -16,12 +12,12 @@ Application Flows
   -> Fresnica SDK/Core + Stellar/network/repository/platform ports
 ```
 
-- **Flow**: user goal, product sequence, confirmation, UI/UX.
-- **Capability**: shared wallet/application semantic contract.
-- **Fresnica Core**: Rust cryptographic/security authority.
-- **Port/infrastructure**: platform/network/storage mechanisms.
+- **Flow** owns product sequence, confirmation and UI/UX.
+- **Capability** owns shared wallet/application semantics.
+- **Fresnica Core** is the Rust cryptographic/security authority.
+- **Ports/infrastructure** own platform, network and storage mechanisms.
 
-Read:
+The five common contracts remain authoritative:
 
 1. [`architecture.md`](architecture.md)
 2. [`application-flows.md`](application-flows.md)
@@ -29,39 +25,43 @@ Read:
 4. [`core-security-boundary.md`](core-security-boundary.md)
 5. [`platform-implementation.md`](platform-implementation.md)
 
-`Service` is an older implementation term. Mobile may use local `Feature` organization, but `Feature` is not the cross-platform Capability name.
+Independent products consume these contracts and may contribute evidence-backed contract changes. Product implementation work does not belong in this shared repository merely because a checklist mentions a platform.
 
-## 2. Core / SDK baseline
+## 2. Current Core / SDK baseline
 
-The Core/SDK foundation is established and should be treated as stable unless a concrete compatibility/security need requires change.
-
-Current Mobile/native baseline:
+The Core/SDK foundation is established and should remain stable unless a concrete security, protocol or consumer-compatibility need requires change.
 
 ```text
 Native SDK release       native-sdk-v0.2.1
 Native Binding API       2
 Universal SDK API        3
 Core Client API          3
+Process Binding API      1 (pre-release)
 RN adapter source        0.2.1
 ```
 
-Key validated delivery paths include:
+Current supported integration paths are:
 
-- generalized Native SDK / UniFFI layer;
-- Android direct-consumer AAR;
-- Apple iOS/macOS `FresnicaSDK.xcframework` + FFI XCFramework;
-- independent Swift consumer import/typecheck;
-- React Native 0.87 Apple/CocoaPods adapter consumer;
-- WASM package/runtime conformance;
-- Testnet smart-account/WebAuthn provider fixture and confirmed transfer flow.
+```text
+Rust application       -> fresnica-sdk -> Core
+Native application     -> Native SDK / UniFFI -> fresnica-sdk -> Core
+Web application        -> filtered WASM binding -> fresnica-sdk -> Core
+Trusted process host   -> Process Binding -> fresnica-sdk -> Core
+```
 
-`mobile-sdk-v0.1.0` and `native-sdk-v0.1.0` are compatibility/history, not new-project baselines.
+PR #122 simplified these boundaries:
 
-See [`sdk/README.md`](sdk/README.md) and [`platforms/mobile/README.md`](platforms/mobile/README.md).
+- the optional Process Binding is the single SDK-level subprocess adapter;
+- duplicate Core/SDK bridge binaries were retired;
+- Payment, Trustline and SDEX asset identity share a thin wrapper over `stellar_xdr::Asset`;
+- the frozen legacy `bindings/mobile` facade and active compatibility CI were retired;
+- Anchor HTTP transport policy was centralized;
+- the current network adapter is explicitly `HorizonGateway`, with staged RPC/Portfolio migration documented;
+- RefPython is governed as an executable product-semantics laboratory rather than a second security authority.
+
+Historical `mobile-sdk-v0.1.0` and `native-sdk-v0.1.0` artifacts remain compatibility evidence, not new-project baselines.
 
 ## 3. Security model that must not regress
-
-The authoritative short contract is [`core-security-boundary.md`](core-security-boundary.md).
 
 The critical identity rule remains:
 
@@ -71,185 +71,65 @@ Account identity != Signer capability != Recovery source
 
 Consequences include:
 
-- watch-only requires no local secret/mnemonic/passcode for reads;
-- attaching secret/mnemonic material verifies derived signer identity before persistence mutation;
-- detaching a local signer preserves account identity;
-- `C...` contract identity is not an Ed25519 signer public key;
+- watch-only reads require no secret, mnemonic or wallet passphrase;
+- attaching signing material verifies derived signer identity before persistence mutation;
+- detaching a signer preserves account identity;
+- a `C...` account identity is not an Ed25519 signer key;
 - routine signing and Reveal/Export have different authorization privilege;
-- system auth is a platform authorization mechanism, not a replacement wallet cryptographic format;
+- System Auth is device-local authorization, not a wallet encryption format;
 - ordinary application/JS state must not receive private keys, mnemonics or native unlock keys.
 
-Detailed references are indexed in [`core/README.md`](core/README.md).
+### Process Binding
 
-## 4. Application Capability status
+The Process Binding is a **privileged owner/host surface**. API v1 transports passphrases, mnemonics, secrets, Reveal results and `WalletUnlockKey` values over one-shot stdin/stdout. It must not be exposed directly as a remote service, MCP tool, browser/renderer API, untrusted plugin interface or Agent Access API. A future Agent Access surface must be narrower and must not inherit owner-only Reveal, key-derivation or passphrase operations.
 
-The authoritative catalog/maturity is [`application-capabilities.md`](application-capabilities.md) and [`capabilities/README.md`](capabilities/README.md). The current catalog contains **19 Capabilities: 9 Normative and 10 Defined**.
+### Agent Access
 
-### Normative / current strong semantics
+The current Core `AgentCapability` is dormant and has no production SDK/binding/transport consumer. Its operation-type/fee/count/expiry checks are useful prototype evidence but are insufficient authorization for autonomous signing because they do not constrain destination, asset, amount/value or operation-specific execution semantics. Do not expose it. Replace it with transaction-specific policy after a threat model and negative regression suite.
 
-- Account;
-- Signer;
-- Balance / Availability;
-- Payment;
-- Transaction;
-- Trustline;
-- SDEX;
-- Anchor common Classic path;
-- Signing Coordination.
+### Known open security work
 
-The Rust reference implementation in `clients/rust-client` currently exercises most of these for CLI/TUI.
+1. Pin and harden the Fresnica-owned release supply chain; add dependency audit, SBOM and provenance/attestation without forcing consumer product toolchains.
+2. Keep terminal Backup v1 legacy-only because outer wallet metadata is not authenticated; portable products should use the v2 relationship/revalidation model.
+3. Review the privileged Process Binding before using it outside RefPython/conformance hosts.
+4. Design transaction-specific Agent Access before any AI/agent signing exposure.
 
-Important implemented semantics include:
+## 4. Capability and reference status
 
-- network-scoped account/wallet state;
-- watch-only/local-signer enforcement;
-- exact seven-decimal/stroop transaction amounts;
-- reserve/liability/fee preflight;
-- `CreateAccount` vs `Payment` selection;
-- trustline add/limit/remove rules;
-- SDEX BUY/SELL direction preservation, exact `price_r`, order-book normalization, trades/fills/candles;
-- transaction pending/uncertain-submission guard;
-- SEP-1 / Classic SEP-10 / SEP-24 / SEP-6 / status / common SEP-12 Anchor behavior.
+The catalog remains **19 Capabilities: 9 Normative and 10 Defined**. See [`application-capabilities.md`](application-capabilities.md) and [`capabilities/README.md`](capabilities/README.md).
 
-### Defined / intentionally not over-standardized
+The Rust `clients/rust-client` crate is a reusable reference implementation for CLI/TUI; it is not mandatory runtime code for Mobile, Web or Desktop. RefPython leads uncertain product semantics through the documented Experimental -> Candidate -> Normative -> Implemented path, while cryptography, ABI, protocol security fixes and platform security boundaries remain owned by their authoritative layers.
 
-- Wallet aggregate;
-- Backup / Restore;
-- Asset Discovery / Catalog;
-- History / Activity;
-- Contacts / Destination Resolution;
-- Application Security;
-- Dapp Interaction;
-- Ledger Authorization;
-- Hardware / External Signer Interaction;
-- Network / Gateway.
+See [`development/refpython-laboratory.md`](development/refpython-laboratory.md).
 
-These names/boundaries are shared, but mature implementation behavior should be recorded as Reference Semantics rather than hidden in platform code. `fresnica-mobile` and future Web/Desktop projects may lead contract upgrades through evidence-backed documentation PRs that link to their own implementation/tests; source co-location is not required. Normative Capabilities may likewise accept explicitly non-normative Reference extensions until independent evidence is strong enough for promotion.
+## 5. Network / Anchor direction
 
-## 5. Rust engineering clients
+`HorizonGateway` is the current provider adapter, not a permanent shared contract. Provider JSON should terminate at the gateway/normalization boundary. Endpoint families may move to RPC, Portfolio or another history provider only when equivalent semantics, network identity and uncertain-submission behavior are preserved.
 
-`clients/rust-client` is the Rust Capability reference/reusable implementation. It is not mandatory runtime code for Mobile/Web/Desktop.
+Anchor currently covers SEP-1, Classic SEP-10, SEP-24-preferred / SEP-6-fallback transfer initiation, transaction status, reviewed withdrawal handoff and common scalar/binary SEP-12 updates. SEP-45 execution, uncommon nested SEP-12 values/files and provider-backed external signer collection remain demand-driven.
 
-### Rust CLI
+## 6. Validation baseline
 
-The CLI is the reference native command client. It consumes shared Capability behavior rather than keeping protocol/business logic in command handlers.
+PR #122 passed the repository's full pull-request matrix, including Core, SDK, Process Binding, Rust client/CLI/TUI, RefPython, Native/Apple/Android packaging, React Native adapter, WASM and compatibility gates. The resulting `main` successfully produced Main bundle run #46.
 
-### Rust TUI
+The Main bundle is the preferred GitHub-to-isolated-development baseline. Do not upgrade static analysis or formatting into a claim that compilation/platform validation passed; cite the actual workflow that ran.
 
-The TUI is an engineering/reference UI over the same Rust Capability implementation. Current shared functionality includes:
+## 7. Immediate next work
 
-- wallet/account selection and watch-only state;
-- balances/activity;
-- reviewed Payment and Trustline writes;
-- SDEX offer create/update/cancel;
-- open offers;
-- pair order book;
-- recent trades;
-- candles.
+The shared repository should now prioritize security and protocol correctness rather than product-specific implementation:
 
-Further terminal UI work such as account-fill presentation is optional product work, not an architecture blocker.
+1. keep this handoff/tasks baseline current after architectural changes;
+2. perform a focused security verification pass using source review, CodebaseMemory call tracing and executable regression/PoC tests;
+3. harden the active release supply chain;
+4. lock Backup v1 to legacy/reference use and test metadata-tampering behavior;
+5. threat-model and design transaction-specific Agent Access, then implement only a narrow first operation family;
+6. keep hardware/provider transports, uncommon SEP extensions and extra platform packages demand-driven.
 
-See [`platforms/terminal/README.md`](platforms/terminal/README.md).
+## 8. Start here next session
 
-## 6. Anchor / SEP status
-
-The common Classic Anchor Capability contract includes:
-
-- SEP-1 discovery;
-- validated two-phase SEP-10 challenge/sign/exchange;
-- SEP-24 preferred transfer initiation;
-- SEP-6 fallback;
-- transaction status;
-- reviewed withdrawal payment handoff;
-- common SEP-12 customer status and scalar/binary updates.
-
-The Rust Anchor path keeps protocol/transport semantics in `fresnica-client`; CLI remains product/prompt/rendering orchestration. Rust and RefPython require exact-case `code + issuer` asset identity and reject automatic Anchor redirects. The Rust reference path now uses reusable Ledger Authorization + Signing Coordination for local Ed25519 multisig/delegated SEP-10, models `PreconditionsV2.extraSigners`, and recognizes already-present Ed25519, pre-authorized transaction, Hash-X and signed-payload authorization material. Provider-backed collection for Hash-X, signed-payload and external/hardware signers remains demand-driven; RefPython remains a narrower behavioral reference rather than evidence of general multisig support.
-
-Still demand-driven/deferred:
-
-- SEP-45 contract-account authentication execution;
-- uncommon nested SEP-12 values + `/customer/files` file-ID workflow;
-- concrete-anchor compatibility fixes discovered in real integration.
-
-See [`capabilities/anchor.md`](capabilities/anchor.md).
-
-## 7. Mobile boundary
-
-The independent `fresnica-mobile` product can proceed without waiting for another shared Rust application layer.
-
-Recommended reading:
-
-```text
-docs/README.md
-  -> five common contracts
-  -> platforms/mobile/README.md
-  -> fresnica-mobile Feature-first design
-```
-
-Mobile mapping:
-
-```text
-Mobile Feature
-  -> implements Application Flow(s)
-  -> consumes Mobile Capability implementations
-  -> uses Stellar JS SDK/gateways/repositories as appropriate
-  -> delegates Core-owned security operations to Fresnica Native SDK
-```
-
-Mobile is **not required to link `fresnica-client`**. If Mobile discovers stable cross-platform semantics, update the common Capability contract rather than mechanically copying Rust internals.
-
-## 8. Experimental / deferred product areas
-
-Do not implement these merely to close a checklist:
-
-- Dapp transport/session details;
-- production hardware/Ledger provider while exact XDR/provider compatibility remains gated;
-- SEP-45 execution;
-- uncommon SEP-12 nested/file-ID workflow;
-- generic Windows/Linux non-Rust SDK packaging without a chosen consumer language/API;
-- platform-specific Flow/UI work not required by an active product.
-
-Passkey/smart-account work remains provider/Testnet-specific reference material and must not be confused with the protected Ed25519 software-signer model.
-
-## 9. Validation state
-
-The SEP-12 shared-customer batch at commit `7b6972b` was validated on a real GitHub Rust runner with:
-
-- SDK boundary check;
-- rust-client tests;
-- CLI tests;
-- TUI tests;
-- rust-client release build;
-- CLI release build;
-- TUI release build.
-
-The later Anchor protocol extraction (`2c076d7` in the current development history at the time of this handoff) has passed local/static checks but still requires the same real Rust cargo gate after it reaches GitHub.
-
-Do not upgrade static/rustfmt checks into a claim that Rust compilation passed.
-
-## 10. CI / synchronization
-
-Normal `main` pushes intentionally use the lightweight `Main bundle` workflow rather than every expensive platform validation suite.
-
-The workflow publishes a verified `fresnica-main-bundle` artifact and `main-bundle` commit status. Use that exact bundle as the preferred GitHub -> development baseline.
-
-Real Rust/Apple/Android/Web/platform gates should run at meaningful validation boundaries, not on every documentation or small implementation commit.
-
-## 11. Immediate next work
-
-The shared Core/SDK foundation is complete enough to hand product pressure to the independent `fresnica-mobile` project. Do not keep adding generic shared abstractions merely to close remaining checkboxes.
-
-1. Land the current validated checkpoint and use the resulting `main-bundle` as the new baseline.
-2. Let `fresnica-mobile` consume the pinned Native SDK and common Capability contracts while owning Realm, Horizon/network orchestration, platform auth and product UX.
-3. Change Core/SDK only for a concrete security/protocol defect or evidence from a real Mobile/Web/Desktop integration.
-4. Keep external/hardware signer transport, uncommon SEP extensions and additional platform packages demand-driven until a real consumer exists.
-5. Preserve API/version compatibility, conformance fixtures and release gates while the product layer matures.
-
-## 12. Start here next session
-
-1. Verify GitHub `main` and relevant CI/release state.
-2. Read [`docs/README.md`](README.md) and the five common contracts.
-3. Read [`roadmap.md`](roadmap.md) / [`tasks.md`](tasks.md) only for current project state.
-4. If changing a Capability, read its file under [`capabilities/`](capabilities/README.md).
-5. If changing signer/passcode/system-auth behavior, read [`core-security-boundary.md`](core-security-boundary.md) plus the relevant Core/platform detail.
-6. Preserve the current Core/SDK security authority and avoid source-level cross-platform symmetry for its own sake.
+1. Verify GitHub `main`, CI and release state.
+2. Restore the newest successful Main bundle when isolated code execution is needed.
+3. Read the five common contracts and the relevant Capability file.
+4. For security work, read [`core-security-boundary.md`](core-security-boundary.md), [`sdk/process-binding.md`](sdk/process-binding.md), and the affected Core/SDK source.
+5. Use CodebaseMemory for orientation and call/blast-radius analysis, then verify every important conclusion against source.
+6. Preserve exact-review/exact-sign semantics and fail closed on unsupported transaction forms.
