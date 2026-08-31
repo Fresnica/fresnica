@@ -79,9 +79,11 @@ See [`docs/core/secret-export.md`](../../docs/core/secret-export.md).
 
 ## Agent Access boundary
 
-Agent Access authorizes use of an existing signer; it does not give an agent wallet secret material. `AgentCapability` binds a Classic G account to one network, an explicit Stellar `OperationType` allowlist, maximum operation count, total transaction-fee ceiling, and optional expiry.
+Agent Access authorizes use of an existing signer; it must never give an agent wallet secret material, wallet passphrase, Reveal capability or raw `WalletUnlockKey`.
 
-The current slice is deliberately fail-closed and operation-level. Destination, asset, amount, market, contract, and argument constraints must be added before broad autonomous capabilities are exposed.
+The current `AgentCapability` is dormant prototype evidence only. It binds a Classic G account to one network, an `OperationType` allowlist, maximum operation count, fee ceiling and optional signing-time expiry, but it has no production SDK/binding/transport consumer. Operation type is not transaction authority: destination, asset, amount/value, market, contract arguments, transaction timebounds and stateful replay/budget limits are not yet constrained.
+
+Do not expose or extend this prototype as a generic operation allowlist. A future design should separate stateful grant/token/revocation accounting from deterministic Core transaction-policy evaluation, require the exact authorized envelope to be the envelope signed, and begin with a narrow operation-specific policy plus negative tests. Process Binding is a privileged owner interface and is not the Agent Access transport.
 
 ## Validation
 
