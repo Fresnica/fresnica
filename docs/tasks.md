@@ -11,8 +11,10 @@ This file tracks current shared-repository work. Product-host implementation bel
 - [ ] Add executable Backup v1 metadata-mutation regressions and keep v1 terminal/legacy-only
 - [ ] Pin Fresnica-owned release Actions/toolchains/dependencies where appropriate
 - [ ] Add dependency audit, SBOM and provenance/attestation to the Native SDK release path
-- [ ] Threat-model Agent Access and define the narrow first transaction-specific policy before implementation
-- [ ] Bind Agent transaction timebounds to grant expiry and define atomic replay/use/budget accounting outside stateless Core evaluation
+- [x] Evaluate Soneso Stellar Agent Wallet as the preferred Agent execution/policy/MCP layer and document the no-duplication boundary
+- [ ] Propose an exact-envelope Classic signing backend to the upstream Stellar Agent Wallet while preserving its default keyring behavior
+- [ ] Implement a narrow Fresnica protected-signer backend only after that exact-envelope seam exists
+- [ ] Prove one bounded Testnet Payment through upstream MCP/policy/approval/audit and Fresnica exact-XDR signing
 
 ### Protocol and provider work — demand-driven
 
@@ -87,10 +89,15 @@ These are shared-contract inputs, not implementation tasks for this repository.
 
 - [x] Dormant Core prototype proves exact-envelope authorization-then-sign and fail-closed source/network/fee/count/type checks
 - [x] CodebaseMemory/source audit confirms no production SDK, binding or transport consumer
-- [ ] Replace operation-type authority with operation-specific semantic policies before exposure
-- [ ] First implementation should be narrow, test-led and deny unsupported operations by default
-- [ ] Agent credentials must authorize signer use without exposing wallet passphrase, mnemonic, secret, Reveal or raw `WalletUnlockKey`
-- [ ] MCP, daemon, CLI and compatibility adapters must converge on one authorization path rather than bypass it
+- [x] Reuse assessment confirms that Stellar Agent Wallet already owns MCP, policy, approval, nonce/replay, audit, RPC construction and submission
+- [x] Decide that Fresnica remains the protected signer authority and must not duplicate the upstream Agent stack
+- [x] Reject a raw-hash `Signer` adapter because it would weaken Fresnica exact-XDR/network signing semantics
+- [x] Reject decrypting Fresnica material into an S-strkey stored in the upstream keyring
+- [ ] Add an upstream application-level exact-envelope signer backend; keep Account source and expected Signer identity separate
+- [ ] Add returned-envelope validation so a backend may add valid signature material but may not mutate the approved transaction
+- [ ] Implement the Fresnica backend without exposing passphrase, mnemonic, secret, Reveal or raw `WalletUnlockKey` to MCP
+- [ ] Execute the one-Payment Testnet acceptance and mutation suite before expanding operation scope
+- [ ] Keep the current operation-type `AgentCapability` dormant; replace or remove it rather than promoting a parallel policy engine
 
 ## Historical Mobile binding
 
