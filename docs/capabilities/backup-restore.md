@@ -90,8 +90,7 @@ Restore staging follows these rules:
 
 Reference evidence:
 
-- [`bindings/mobile/react-native/src/portable-backup.ts`](../../bindings/mobile/react-native/src/portable-backup.ts)
-- [`bindings/mobile/react-native/test/portable-backup.test.ts`](../../bindings/mobile/react-native/test/portable-backup.test.ts)
+- historical `mobile-sdk-v0.1.0` portable-backup donor implementation and tests (Git/tagged release)
 - [`spec/test-vectors/portable-backup-v2.json`](../../spec/test-vectors/portable-backup-v2.json)
 
 Backup / Restore remains Defined: the graph/activation model now has non-terminal implementation evidence, but Recovery Source activation and a real host-application persistence/migration integration are still intentionally unresolved.

@@ -1,9 +1,10 @@
 pub mod anchor;
 mod anchor_http;
 pub mod anchor_protocol;
+mod asset;
 pub mod contacts;
 pub mod dex;
-pub mod horizon;
+pub mod horizon_gateway;
 pub mod ledger_authorization;
 pub mod payment;
 pub mod signing_coordination;
@@ -34,8 +35,8 @@ pub use dex::{
     OfferRequest, OfferReview, OfferReviewDetails, OfferSide, OpenOffer, OpenOffersSnapshot,
     OrderBookLevel, OrderBookSnapshot, PairTrade, PairTradesSnapshot, PreparedOffer, TradeCandle,
 };
-pub use horizon::{
-    balance_asset_label, operation_summary, HorizonClient, LedgerParameters, SubmissionError,
+pub use horizon_gateway::{
+    balance_asset_label, operation_summary, HorizonGateway, LedgerParameters, SubmissionError,
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
 };
 pub use ledger_authorization::{
@@ -57,7 +58,7 @@ pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, B
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
-    minimum_balance_stroops, network_client, network_passphrase, parse_positive_stroops,
+    minimum_balance_stroops, network_gateway, network_passphrase, parse_positive_stroops,
     parse_stroops, parse_transaction_xdr, resolve_write_wallet, sign_and_submit,
     sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
 };

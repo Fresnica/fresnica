@@ -1,0 +1,34 @@
+name: Required CI
+on: [workflow_dispatch, pull_request]
+permissions: {contents: read}
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with: {version: "0.12.5", enable-cache: true}
+      - run: node sdk/compatibility/validate.mjs
+      - run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+      - name: Check changed Rust surfaces
+        run: |
+          for m in sdk/rust bindings/process clients/rust-client clients/rust-cli clients/rust-tui; do
+            cargo fmt --manifest-path "$m/Cargo.toml" -- --check
+          done
+      - name: Test and build Rust surfaces
+        run: |
+          for m in core/rust sdk/rust bindings/process clients/rust-client clients/rust-cli clients/rust-tui; do
+            cargo test --manifest-path "$m/Cargo.toml"
+          done
+          cargo build --release --manifest-path bindings/process/Cargo.toml --bin fresnica-process
+          cargo build --release --manifest-path clients/rust-cli/Cargo.toml --bin fresnica
+      - working-directory: reference/python
+        run: uv python install 3.11 && uv sync --locked && uv run pytest -q
+        env:
+          FRESNICA_PROCESS_BIN: ${{ github.workspace }}/bindings/process/target/release/fresnica-process
+          FRESNICA_RUST_CLI_BIN: ${{ github.workspace }}/clients/rust-cli/target/release/fresnica

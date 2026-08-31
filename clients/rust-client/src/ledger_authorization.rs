@@ -10,7 +10,7 @@ use stellar_xdr::{
     TransactionEnvelope,
 };
 
-use crate::horizon::HorizonClient;
+use crate::horizon_gateway::HorizonGateway;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthorizationThreshold {
@@ -270,7 +270,7 @@ pub fn plan_classic_ledger_authorization(
 }
 
 pub fn load_classic_ledger_authorization_plan(
-    horizon: &HorizonClient,
+    horizon: &HorizonGateway,
     envelope: &TransactionEnvelope,
 ) -> Result<LedgerAuthorizationPlan, String> {
     load_classic_ledger_authorization_plan_with(envelope, |account_id| {

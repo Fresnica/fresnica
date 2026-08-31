@@ -168,4 +168,4 @@ The underlying `FresnicaSDK.xcframework` iOS path has passed real macOS/Xcode va
 
 ## Legacy Mobile code
 
-`bindings/mobile/platform/**` is frozen v0.1.0 compatibility/integration donor material. New framework work belongs here and targets the released `fresnica-native-sdk`; do not add new product behavior to `fresnica-mobile-core`.
+The v0.1.0 `bindings/mobile/platform/**` donor source has been retired from `main` and remains available through Git/tagged releases. New framework work belongs here and targets the released `fresnica-native-sdk`.

@@ -253,7 +253,7 @@ Consumer application
 
 The first generalized release was `native-sdk-v0.1.0`. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.1. Adapter 0.2.1 is a build-tooling compatibility patch: it keeps the same framework/API surface while removing Fresnica-owned Android Gradle/AGP/Kotlin version selection. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
 
-`bindings/mobile` stays only as migration/reference material until the independent Mobile repository has absorbed the #81-#84 donor behavior and equivalent tests.
+The transitional `bindings/mobile` source is retired from `main`; #81-#84 semantics remain migration acceptance criteria and history remains in Git/tags.
 
 ## Mobile onboarding baseline
 

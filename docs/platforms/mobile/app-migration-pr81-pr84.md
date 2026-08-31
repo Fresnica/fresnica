@@ -39,8 +39,8 @@ These are architecture/security contracts, not implementation details:
 
 Source:
 
-- `bindings/mobile/react-native/src/wallet-lifecycle.ts`
-- `bindings/mobile/react-native/test/wallet-lifecycle.test.ts`
+- historical v0.1.0 `wallet-lifecycle.ts` donor implementation
+- historical v0.1.0 wallet-lifecycle tests
 
 ### Absorb into the Mobile project
 
@@ -76,9 +76,9 @@ Downgrade removes account-to-signer references first. A signer record is deleted
 
 Source:
 
-- `bindings/mobile/react-native/src/realm-wallet-store.ts`
+- historical v0.1.0 `realm-wallet-store.ts` donor implementation
 - updates in `wallet-lifecycle.ts` for staged/atomic `reprotectAllProtectedSigners`
-- related tests under `bindings/mobile/react-native/test/`
+- related historical v0.1.0 tests
 
 ### Absorb into the Mobile project
 
@@ -130,8 +130,8 @@ The CI path-filter changes from PR #82 belong to the `fresnica` SDK repository. 
 
 Source:
 
-- `bindings/mobile/react-native/src/account-provisioning.ts`
-- `bindings/mobile/react-native/test/account-provisioning.test.ts`
+- historical v0.1.0 `account-provisioning.ts` donor implementation
+- historical v0.1.0 account-provisioning tests
 
 ### Absorb into the Mobile project
 
@@ -170,8 +170,8 @@ The normal first mnemonic-backed signer uses `index = 0`. If the user adds anoth
 
 Source:
 
-- `bindings/mobile/react-native/src/signer-export.ts`
-- `bindings/mobile/react-native/test/signer-export.test.ts`
+- historical v0.1.0 `signer-export.ts` donor implementation
+- historical v0.1.0 signer-export tests
 
 ### Absorb into the Mobile project
 
@@ -221,9 +221,9 @@ The canonical RN adapter source remains Fresnica-owned, but Mobile compiles it *
 8. Absorb #84 explicit Reveal/Export UX; system auth alone never authorizes it.
 9. Add the Defined Ledger Authorization Capability so `hasLocalSigner` can be combined with actual on-chain authorization for the prepared transaction.
 
-## Completion criteria before deleting donor TypeScript from `fresnica`
+## Retired donor acceptance criteria
 
-The donor `bindings/mobile/react-native/src/*.ts` application orchestration may be removed from `fresnica` after the independent Mobile repository has tests proving:
+The donor TypeScript has now been removed from `main`. The following criteria remain the checklist the independent Mobile implementation must prove before the historical donor behavior is considered fully absorbed:
 
 - the pinned Native SDK + generated adapter binary integration is reproducible from the recorded manifest;
 - normal Mobile builds do not compile Rust/Core/UniFFI or adapter source;
@@ -236,4 +236,4 @@ The donor `bindings/mobile/react-native/src/*.ts` application orchestration may 
 - fresh-passcode-only Reveal/Export;
 - no secret/mnemonic/WalletUnlockKey persisted in application state.
 
-Until then these files remain migration reference, not the place for new Mobile product work.
+The source-level donor remains available in Git history/tagged releases only; new product work belongs in the independent Mobile repository.

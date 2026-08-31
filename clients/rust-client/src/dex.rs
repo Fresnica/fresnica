@@ -1,12 +1,10 @@
-use std::str::FromStr;
-
 use serde::Serialize;
 use serde_json::Value;
 use stellar_xdr::{
-    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, ChangeTrustAsset,
     ChangeTrustOp, ManageBuyOfferOp, ManageSellOfferOp, OperationBody, Price, TransactionEnvelope,
 };
 
+use crate::asset::AssetId;
 use crate::{
     account_sequence, balance_stroops, build_operation_envelope, format_stroops,
     minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
@@ -36,11 +34,7 @@ impl OfferSide {
         }
     }
 
-    fn assets<'a>(
-        self,
-        base: &'a OfferAsset,
-        counter: &'a OfferAsset,
-    ) -> (&'a OfferAsset, &'a OfferAsset) {
+    fn assets<'a>(self, base: &'a AssetId, counter: &'a AssetId) -> (&'a AssetId, &'a AssetId) {
         match self {
             Self::Buy => (counter, base),
             Self::Sell => (base, counter),
@@ -262,12 +256,12 @@ impl OpenOffer {
         let seller = text(&raw, "seller")
             .ok_or_else(|| "Horizon returned malformed offer seller".to_owned())?
             .to_owned();
-        let selling = OfferAsset::from_horizon(
+        let selling = AssetId::from_horizon(
             raw.get("selling")
                 .ok_or_else(|| "Horizon returned malformed offer selling asset".to_owned())?,
         )?
         .display();
-        let buying = OfferAsset::from_horizon(
+        let buying = AssetId::from_horizon(
             raw.get("buying")
                 .ok_or_else(|| "Horizon returned malformed offer buying asset".to_owned())?,
         )?
@@ -308,11 +302,11 @@ impl FresnicaClient {
         base_text: &str,
         counter_text: &str,
     ) -> Result<OrderBookSnapshot, String> {
-        let base = OfferAsset::parse(base_text)?;
-        let counter = OfferAsset::parse(counter_text)?;
+        let base = AssetId::parse(base_text)?;
+        let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
         let raw = self
-            .horizon()
+            .gateway()
             .get_order_book(&base.query("selling"), &counter.query("buying"))?;
         let bids = order_book_rows(&raw, "bids")?
             .iter()
@@ -340,7 +334,7 @@ impl FresnicaClient {
         }
         let wallet = self.resolve_wallet(wallet_name)?;
         let offers = self
-            .horizon()
+            .gateway()
             .get_offers(&wallet.address, limit)?
             .into_iter()
             .map(OpenOffer::from_horizon)
@@ -355,11 +349,11 @@ impl FresnicaClient {
         limit: usize,
     ) -> Result<PairTradesSnapshot, String> {
         validate_page_limit(limit, "trades")?;
-        let base = OfferAsset::parse(base_text)?;
-        let counter = OfferAsset::parse(counter_text)?;
+        let base = AssetId::parse(base_text)?;
+        let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
         let trades = self
-            .horizon()
+            .gateway()
             .get_trades(&base.query("base"), &counter.query("counter"), limit)?
             .into_iter()
             .map(pair_trade_from_horizon)
@@ -378,7 +372,7 @@ impl FresnicaClient {
     ) -> Result<AccountFillsSnapshot, String> {
         validate_page_limit(limit, "fills")?;
         let wallet = self.resolve_wallet(wallet_name)?;
-        let records = self.horizon().get_account_trades(&wallet.address, limit)?;
+        let records = self.gateway().get_account_trades(&wallet.address, limit)?;
         let fills = compress_account_trades(&records, &wallet.address)?;
         Ok(AccountFillsSnapshot { wallet, fills })
     }
@@ -404,11 +398,11 @@ impl FresnicaClient {
         if let Some(value) = offset {
             validate_candle_offset(value, resolution_ms)?;
         }
-        let base = OfferAsset::parse(base_text)?;
-        let counter = OfferAsset::parse(counter_text)?;
+        let base = AssetId::parse(base_text)?;
+        let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
         let candles = self
-            .horizon()
+            .gateway()
             .get_trade_aggregations(
                 &base.query("base"),
                 &counter.query("counter"),
@@ -480,7 +474,7 @@ impl FresnicaClient {
             &prepared.wallet,
             self.network(),
             &mut envelope,
-            self.horizon(),
+            self.gateway(),
             passcode,
         )
     }
@@ -496,16 +490,16 @@ impl FresnicaClient {
         allow_trustline: bool,
     ) -> Result<PreparedOffer, String> {
         let wallet =
-            resolve_write_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
-        let base = OfferAsset::parse(base_text)?;
-        let counter = OfferAsset::parse(counter_text)?;
+            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let base = AssetId::parse(base_text)?;
+        let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
         let amount = parse_offer_value(amount_text, "amount")?;
         let price_stroops = parse_offer_value(price_text, "price")?;
         let price = stellar_price(price_stroops)?;
 
-        let account = self.horizon().get_account(&wallet.address)?;
-        let ledger = self.horizon().get_ledger_parameters()?;
+        let account = self.gateway().get_account(&wallet.address)?;
+        let ledger = self.gateway().get_ledger_parameters()?;
         let (selling, buying) = side.assets(&base, &counter);
         let adds_trustline = !account_can_hold(&account, buying, &wallet.address);
         ensure_full_offer_authorization(&account, selling, &wallet.address)?;
@@ -522,7 +516,7 @@ impl FresnicaClient {
             let issuer = buying
                 .issuer()
                 .ok_or_else(|| "issued receiving asset is missing an issuer".to_owned())?;
-            let issuer_account = self.horizon().get_account(issuer)?;
+            let issuer_account = self.gateway().get_account(&issuer)?;
             if issuer_requires_authorization(&issuer_account)? {
                 return Err(format!(
                     "Receiving trustline for {} requires issuer authorization before an offer can be created",
@@ -616,30 +610,30 @@ impl FresnicaClient {
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
         let wallet =
-            resolve_write_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
-        let base = OfferAsset::parse(base_text)?;
-        let counter = OfferAsset::parse(counter_text)?;
+            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let base = AssetId::parse(base_text)?;
+        let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
         let amount = parse_offer_value(amount_text, "amount")?;
         let price_stroops = parse_offer_value(price_text, "price")?;
         let price = stellar_price(price_stroops)?;
 
-        let raw_offer = self.horizon().get_offer(offer_id)?;
+        let raw_offer = self.gateway().get_offer(offer_id)?;
         ensure_offer_owner(&raw_offer, &wallet)?;
-        let stored_selling = OfferAsset::from_horizon(
+        let stored_selling = AssetId::from_horizon(
             raw_offer
                 .get("selling")
                 .ok_or_else(|| "Horizon returned malformed offer selling asset".to_owned())?,
         )?;
-        let stored_buying = OfferAsset::from_horizon(
+        let stored_buying = AssetId::from_horizon(
             raw_offer
                 .get("buying")
                 .ok_or_else(|| "Horizon returned malformed offer buying asset".to_owned())?,
         )?;
         let side = infer_side(&stored_selling, &stored_buying, &base, &counter)?;
 
-        let account = self.horizon().get_account(&wallet.address)?;
-        let ledger = self.horizon().get_ledger_parameters()?;
+        let account = self.gateway().get_account(&wallet.address)?;
+        let ledger = self.gateway().get_ledger_parameters()?;
         let (selling, buying) = side.assets(&base, &counter);
         ensure_full_offer_authorization(&account, selling, &wallet.address)?;
         ensure_full_offer_authorization(&account, buying, &wallet.address)?;
@@ -708,15 +702,15 @@ impl FresnicaClient {
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
         let wallet =
-            resolve_write_wallet(self.storage(), self.horizon(), self.network(), wallet_name)?;
-        let raw_offer = self.horizon().get_offer(offer_id)?;
+            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let raw_offer = self.gateway().get_offer(offer_id)?;
         ensure_offer_owner(&raw_offer, &wallet)?;
-        let selling = OfferAsset::from_horizon(
+        let selling = AssetId::from_horizon(
             raw_offer
                 .get("selling")
                 .ok_or_else(|| "Horizon returned malformed offer selling asset".to_owned())?,
         )?;
-        let buying = OfferAsset::from_horizon(
+        let buying = AssetId::from_horizon(
             raw_offer
                 .get("buying")
                 .ok_or_else(|| "Horizon returned malformed offer buying asset".to_owned())?,
@@ -727,14 +721,14 @@ impl FresnicaClient {
         // selling/buying orientation. It does not require knowing whether the
         // original operation was ManageBuyOffer or ManageSellOffer.
         let body = OperationBody::ManageSellOffer(ManageSellOfferOp {
-            selling: selling.to_xdr()?,
-            buying: buying.to_xdr()?,
+            selling: selling.to_xdr(),
+            buying: buying.to_xdr(),
             amount: 0,
             price,
             offer_id,
         });
-        let account = self.horizon().get_account(&wallet.address)?;
-        let ledger = self.horizon().get_ledger_parameters()?;
+        let account = self.gateway().get_account(&wallet.address)?;
+        let ledger = self.gateway().get_ledger_parameters()?;
         ensure_offer_fee_capacity(
             &account,
             ledger.base_reserve_in_stroops,
@@ -768,135 +762,6 @@ impl FresnicaClient {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum OfferAsset {
-    Native,
-    Credit { code: String, issuer: String },
-}
-
-impl OfferAsset {
-    fn parse(value: &str) -> Result<Self, String> {
-        if value.eq_ignore_ascii_case("XLM") {
-            return Ok(Self::Native);
-        }
-        let (code, issuer) = value
-            .split_once(':')
-            .ok_or_else(|| "asset must be XLM or CODE:GISSUER".to_owned())?;
-        validate_asset_code(code)?;
-        AccountId::from_str(issuer)
-            .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-        Ok(Self::Credit {
-            code: code.to_owned(),
-            issuer: issuer.to_owned(),
-        })
-    }
-
-    fn from_horizon(value: &Value) -> Result<Self, String> {
-        if text(value, "asset_type") == Some("native") {
-            return Ok(Self::Native);
-        }
-        let code = text(value, "asset_code")
-            .ok_or_else(|| "Horizon returned malformed offer asset code".to_owned())?;
-        let issuer = text(value, "asset_issuer")
-            .ok_or_else(|| "Horizon returned malformed offer asset issuer".to_owned())?;
-        Self::parse(&format!("{code}:{issuer}"))
-    }
-
-    fn display(&self) -> String {
-        match self {
-            Self::Native => "XLM".to_owned(),
-            Self::Credit { code, issuer } => format!("{code}:{issuer}"),
-        }
-    }
-
-    fn query(&self, prefix: &str) -> String {
-        match self {
-            Self::Native => format!("{prefix}_asset_type=native"),
-            Self::Credit { code, issuer } => {
-                let asset_type = if code.len() <= 4 {
-                    "credit_alphanum4"
-                } else {
-                    "credit_alphanum12"
-                };
-                format!(
-                    "{prefix}_asset_type={asset_type}&{prefix}_asset_code={code}&{prefix}_asset_issuer={issuer}"
-                )
-            }
-        }
-    }
-
-    fn is_native(&self) -> bool {
-        matches!(self, Self::Native)
-    }
-
-    fn issuer(&self) -> Option<&str> {
-        match self {
-            Self::Native => None,
-            Self::Credit { issuer, .. } => Some(issuer),
-        }
-    }
-
-    fn matches_balance(&self, balance: &Value) -> bool {
-        match self {
-            Self::Native => text(balance, "asset_type") == Some("native"),
-            Self::Credit { code, issuer } => {
-                text(balance, "asset_code") == Some(code.as_str())
-                    && text(balance, "asset_issuer") == Some(issuer.as_str())
-            }
-        }
-    }
-
-    fn to_xdr(&self) -> Result<Asset, String> {
-        match self {
-            Self::Native => Ok(Asset::Native),
-            Self::Credit { code, issuer } => {
-                let issuer = AccountId::from_str(issuer)
-                    .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-                if code.len() <= 4 {
-                    let mut raw = [0u8; 4];
-                    raw[..code.len()].copy_from_slice(code.as_bytes());
-                    Ok(Asset::CreditAlphanum4(AlphaNum4 {
-                        asset_code: AssetCode4(raw),
-                        issuer,
-                    }))
-                } else {
-                    let mut raw = [0u8; 12];
-                    raw[..code.len()].copy_from_slice(code.as_bytes());
-                    Ok(Asset::CreditAlphanum12(AlphaNum12 {
-                        asset_code: AssetCode12(raw),
-                        issuer,
-                    }))
-                }
-            }
-        }
-    }
-
-    fn to_change_trust_xdr(&self) -> Result<ChangeTrustAsset, String> {
-        match self {
-            Self::Native => Err("XLM does not use a trustline".to_owned()),
-            Self::Credit { code, issuer } => {
-                let issuer = AccountId::from_str(issuer)
-                    .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-                if code.len() <= 4 {
-                    let mut raw = [0u8; 4];
-                    raw[..code.len()].copy_from_slice(code.as_bytes());
-                    Ok(ChangeTrustAsset::CreditAlphanum4(AlphaNum4 {
-                        asset_code: AssetCode4(raw),
-                        issuer,
-                    }))
-                } else {
-                    let mut raw = [0u8; 12];
-                    raw[..code.len()].copy_from_slice(code.as_bytes());
-                    Ok(ChangeTrustAsset::CreditAlphanum12(AlphaNum12 {
-                        asset_code: AssetCode12(raw),
-                        issuer,
-                    }))
-                }
-            }
-        }
-    }
-}
-
 fn operation_for_side(side: OfferSide) -> OfferOperation {
     match side {
         OfferSide::Buy => OfferOperation::ManageBuyOffer,
@@ -906,23 +771,23 @@ fn operation_for_side(side: OfferSide) -> OfferOperation {
 
 fn offer_operation(
     side: OfferSide,
-    base: &OfferAsset,
-    counter: &OfferAsset,
+    base: &AssetId,
+    counter: &AssetId,
     amount: i64,
     price: Price,
     offer_id: i64,
 ) -> Result<OperationBody, String> {
     match side {
         OfferSide::Buy => Ok(OperationBody::ManageBuyOffer(ManageBuyOfferOp {
-            selling: counter.to_xdr()?,
-            buying: base.to_xdr()?,
+            selling: counter.to_xdr(),
+            buying: base.to_xdr(),
             buy_amount: amount,
             price,
             offer_id,
         })),
         OfferSide::Sell => Ok(OperationBody::ManageSellOffer(ManageSellOfferOp {
-            selling: base.to_xdr()?,
-            buying: counter.to_xdr()?,
+            selling: base.to_xdr(),
+            buying: counter.to_xdr(),
             amount,
             price,
             offer_id,
@@ -930,7 +795,7 @@ fn offer_operation(
     }
 }
 
-fn ensure_pair(base: &OfferAsset, counter: &OfferAsset) -> Result<(), String> {
+fn ensure_pair(base: &AssetId, counter: &AssetId) -> Result<(), String> {
     if base == counter {
         Err("Offer assets must be different".to_owned())
     } else {
@@ -939,10 +804,10 @@ fn ensure_pair(base: &OfferAsset, counter: &OfferAsset) -> Result<(), String> {
 }
 
 fn infer_side(
-    selling: &OfferAsset,
-    buying: &OfferAsset,
-    base: &OfferAsset,
-    counter: &OfferAsset,
+    selling: &AssetId,
+    buying: &AssetId,
+    base: &AssetId,
+    counter: &AssetId,
 ) -> Result<OfferSide, String> {
     if selling == base && buying == counter {
         Ok(OfferSide::Sell)
@@ -957,8 +822,8 @@ fn preflight_create(
     account: &Value,
     account_id: &str,
     side: OfferSide,
-    selling: &OfferAsset,
-    buying: &OfferAsset,
+    selling: &AssetId,
+    buying: &AssetId,
     amount: i64,
     price: &Price,
     base_reserve: i64,
@@ -969,7 +834,7 @@ fn preflight_create(
     let liabilities = offer_liabilities(side, amount, price)?;
     let required_selling = liabilities.selling;
     let available_selling = available_balance(account, selling)?;
-    let issuer_can_sell = selling.issuer() == Some(account_id);
+    let issuer_can_sell = selling.issuer_is(account_id);
     let extra_reserve = base_reserve
         .checked_mul(extra_subentries)
         .ok_or_else(|| "offer reserve overflow".to_owned())?;
@@ -998,7 +863,7 @@ fn preflight_create(
                 format_stroops(available_selling)
             ));
         }
-        let native = OfferAsset::Native;
+        let native = AssetId::native();
         let available_native = available_balance(account, &native)?;
         let required_native = future_minimum
             .checked_add(fee)
@@ -1036,8 +901,8 @@ fn preflight_update(
     account: &Value,
     account_id: &str,
     side: OfferSide,
-    selling: &OfferAsset,
-    buying: &OfferAsset,
+    selling: &AssetId,
+    buying: &AssetId,
     amount: i64,
     price: &Price,
     old_amount: i64,
@@ -1048,7 +913,7 @@ fn preflight_update(
     ensure_offer_fee_capacity(account, base_reserve, fee)?;
     let new_liabilities = offer_liabilities(side, amount, price)?;
     let old_liabilities = offer_liabilities(OfferSide::Sell, old_amount, old_price)?;
-    let issuer_can_sell = selling.issuer() == Some(account_id);
+    let issuer_can_sell = selling.issuer_is(account_id);
 
     if !issuer_can_sell {
         let available_after_release = available_balance(account, selling)?
@@ -1077,7 +942,7 @@ fn preflight_update(
         }
     }
 
-    let receiving_after_release = if buying.issuer() == Some(account_id) {
+    let receiving_after_release = if buying.issuer_is(account_id) {
         i64::MAX
     } else {
         receiving_capacity(account, buying, account_id, None)?
@@ -1096,7 +961,7 @@ fn preflight_update(
 }
 
 fn ensure_offer_fee_capacity(account: &Value, base_reserve: i64, fee: i64) -> Result<(), String> {
-    let native = OfferAsset::Native;
+    let native = AssetId::native();
     let free = available_balance(account, &native)?
         .saturating_sub(minimum_balance_stroops(account, base_reserve)?)
         .max(0);
@@ -1110,7 +975,7 @@ fn ensure_offer_fee_capacity(account: &Value, base_reserve: i64, fee: i64) -> Re
     Ok(())
 }
 
-fn available_balance(account: &Value, asset: &OfferAsset) -> Result<i64, String> {
+fn available_balance(account: &Value, asset: &AssetId) -> Result<i64, String> {
     let balances = account
         .get("balances")
         .and_then(Value::as_array)
@@ -1128,11 +993,11 @@ fn available_balance(account: &Value, asset: &OfferAsset) -> Result<i64, String>
 
 fn receiving_capacity(
     account: &Value,
-    asset: &OfferAsset,
+    asset: &AssetId,
     account_id: &str,
     new_trustline_limit: Option<i64>,
 ) -> Result<i64, String> {
-    if asset.issuer() == Some(account_id) {
+    if asset.issuer_is(account_id) {
         return Ok(i64::MAX);
     }
     let balances = account
@@ -1235,10 +1100,10 @@ fn ceil_div(numerator: i128, denominator: i128) -> Result<i128, String> {
 
 fn ensure_full_offer_authorization(
     account: &Value,
-    asset: &OfferAsset,
+    asset: &AssetId,
     account_id: &str,
 ) -> Result<(), String> {
-    if asset.is_native() || asset.issuer() == Some(account_id) {
+    if asset.is_native() || asset.issuer_is(account_id) {
         return Ok(());
     }
     let balances = account
@@ -1271,8 +1136,8 @@ fn issuer_requires_authorization(account: &Value) -> Result<bool, String> {
         .ok_or_else(|| "Horizon returned malformed issuer authorization flags".to_owned())
 }
 
-fn account_can_hold(account: &Value, asset: &OfferAsset, account_id: &str) -> bool {
-    if asset.is_native() || asset.issuer() == Some(account_id) {
+fn account_can_hold(account: &Value, asset: &AssetId, account_id: &str) -> bool {
+    if asset.is_native() || asset.issuer_is(account_id) {
         return true;
     }
     account
@@ -1690,7 +1555,7 @@ fn trade_asset(raw: &Value, prefix: &str) -> Result<String, String> {
         .ok_or_else(|| "Invalid Horizon trade asset code".to_owned())?;
     let issuer = text(raw, &format!("{prefix}_asset_issuer"))
         .ok_or_else(|| "Invalid Horizon trade asset issuer".to_owned())?;
-    OfferAsset::parse(&format!("{code}:{issuer}")).map(|asset| asset.display())
+    AssetId::parse(&format!("{code}:{issuer}")).map(|asset| asset.display())
 }
 
 fn parse_trade_amount(raw: &Value, key: &str) -> Result<i64, String> {
@@ -1865,7 +1730,7 @@ mod tests {
 
     #[test]
     fn offer_preflight_uses_horizon_authorization_and_receiving_capacity() {
-        let asset = OfferAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let asset = AssetId::parse(&format!("USD:{ISSUER}")).unwrap();
         let account = serde_json::json!({
             "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
             "balances": [
@@ -1909,8 +1774,8 @@ mod tests {
 
     #[test]
     fn buy_operation_keeps_pair_price_direction() {
-        let base = OfferAsset::parse(&format!("XRP:{ISSUER}")).unwrap();
-        let counter = OfferAsset::Native;
+        let base = AssetId::parse(&format!("XRP:{ISSUER}")).unwrap();
+        let counter = AssetId::native();
         let price = Price { n: 13, d: 40 };
         let operation = offer_operation(
             OfferSide::Buy,
@@ -1924,16 +1789,16 @@ mod tests {
         let OperationBody::ManageBuyOffer(operation) = operation else {
             panic!("expected manage buy offer");
         };
-        assert_eq!(operation.selling, counter.to_xdr().unwrap());
-        assert_eq!(operation.buying, base.to_xdr().unwrap());
+        assert_eq!(operation.selling, counter.to_xdr());
+        assert_eq!(operation.buying, base.to_xdr());
         assert_eq!(operation.buy_amount, 1_000_000_000);
         assert_eq!(operation.price, price);
     }
 
     #[test]
     fn update_side_is_inferred_from_current_offer_projection() {
-        let base = OfferAsset::parse(&format!("XRP:{ISSUER}")).unwrap();
-        let counter = OfferAsset::Native;
+        let base = AssetId::parse(&format!("XRP:{ISSUER}")).unwrap();
+        let counter = AssetId::native();
         assert_eq!(
             infer_side(&counter, &base, &base, &counter).unwrap(),
             OfferSide::Buy
@@ -2038,7 +1903,7 @@ mod tests {
 
     #[test]
     fn order_book_query_preserves_full_asset_identity() {
-        let asset = OfferAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let asset = AssetId::parse(&format!("USD:{ISSUER}")).unwrap();
         assert_eq!(
             asset.query("buying"),
             format!(

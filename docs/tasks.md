@@ -218,7 +218,7 @@
 
 ## Mobile Binding
 
-- [x] FFI-neutral mobile facade crate (`bindings/mobile`)
+- [x] Historical FFI-neutral mobile facade (`bindings/mobile`), retired after Native SDK/adapters became authoritative
 - [x] Fixed-width / String / byte-array DTO boundary
 - [x] Stable mobile error mapping from `ClientApiErrorCode`
 - [x] 32-byte unlock-key boundary validation

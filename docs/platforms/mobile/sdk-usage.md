@@ -19,7 +19,7 @@ Status: **Mobile integration baseline — Native SDK v0.2.1**.
 - Apple: iOS `13.4+`, macOS `12.0+`
 - React Native real-consumer validation baseline: RN `0.87` with CocoaPods on macOS/Xcode
 
-New Mobile work MUST NOT use the legacy `mobile-sdk-v0.1.0` artifact or the superseded generalized `native-sdk-v0.1.0` baseline. Those are frozen compatibility history. `bindings/mobile` remains donor/reference material only until the independent Mobile project has absorbed the #81-#84 lifecycle behavior.
+New Mobile work MUST NOT use the legacy `mobile-sdk-v0.1.0` artifact or the superseded generalized `native-sdk-v0.1.0` baseline. Those are frozen compatibility history. The old `bindings/mobile` source has been retired from `main`; migration semantics are retained in documentation, Git history and tagged releases.
 
 Pre-1.0 consumers should pin exact SDK and React Native versions. Do not use floating SDK versions or React Native semver ranges for the adapter build.
 

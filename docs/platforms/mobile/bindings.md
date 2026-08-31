@@ -172,14 +172,14 @@ A classic account and signer may differ under Stellar signer/threshold rules. `C
 
 ## Legacy Mobile v0.1.0
 
-`bindings/mobile` and the `mobile-sdk-v0.1.0` release remain read-only compatibility/donor material for the previous integration surface and the #81-#84 application-lifecycle migration reference.
+The `bindings/mobile` source has been retired from `main`. The `mobile-sdk-v0.1.0` tag/release and archived documentation remain the historical compatibility record for the previous integration surface; #81-#84 application-lifecycle semantics remain migration acceptance criteria, not active source.
 
 Do not start new Mobile integration against:
 
 - `fresnica-mobile-core`;
 - `FresnicaCoreFFI.xcframework` from the legacy Mobile package;
 - the legacy AAR containing React Native classes;
-- `bindings/mobile/platform/**` as the authoritative system-auth implementation.
+- historical `bindings/mobile/platform/**` code from the v0.1.0 tag as a current authoritative system-auth implementation.
 
 New work uses `bindings/native` outputs and `adapters/react-native`.
 

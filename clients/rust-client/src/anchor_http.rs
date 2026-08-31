@@ -1,8 +1,10 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use ureq::Agent;
+use serde_json::Value;
+use ureq::{Agent, Body};
 use url::{Host, Url};
+use zeroize::Zeroizing;
 
 pub(crate) const MAX_ANCHOR_RESPONSE_BYTES: u64 = 1_000_000;
 
@@ -50,7 +52,9 @@ pub(crate) fn validate_anchor_https_url(url: &Url, label: &str) -> Result<(), St
     let host = match url.host() {
         Some(Host::Domain(host)) => host.trim_end_matches('.'),
         Some(Host::Ipv4(_)) | Some(Host::Ipv6(_)) => {
-            return Err(format!("{label} must use a DNS host name, not an IP address"));
+            return Err(format!(
+                "{label} must use a DNS host name, not an IP address"
+            ));
         }
         None => return Err(format!("{label} must include a host")),
     };
@@ -58,6 +62,13 @@ pub(crate) fn validate_anchor_https_url(url: &Url, label: &str) -> Result<(), St
         return Err(format!("{label} must use an external DNS host name"));
     }
     Ok(())
+}
+
+pub(crate) fn endpoint_label(url: &Url) -> String {
+    let mut sanitized = url.clone();
+    sanitized.set_query(None);
+    sanitized.set_fragment(None);
+    sanitized.to_string()
 }
 
 pub(crate) fn reject_anchor_redirect(status: u16, endpoint: &str) -> Result<(), String> {
@@ -69,6 +80,119 @@ pub(crate) fn reject_anchor_redirect(status: u16, endpoint: &str) -> Result<(), 
     Ok(())
 }
 
+pub(crate) fn get_json(
+    url: &Url,
+    protocol: &str,
+    token: Option<&str>,
+) -> Result<(u16, Value), String> {
+    validate_anchor_https_url(url, protocol)?;
+    let authorization = token.map(|token| Zeroizing::new(format!("Bearer {token}")));
+    let mut request = agent().get(url.as_str());
+    if let Some(authorization) = authorization.as_ref() {
+        request = request.header("Authorization", authorization.as_str());
+    }
+    let response = request
+        .config()
+        .http_status_as_error(false)
+        .build()
+        .call()
+        .map_err(|error| {
+            format!(
+                "Unable to call {protocol} endpoint {}: {error}",
+                endpoint_label(url)
+            )
+        })?;
+    read_json_response(protocol, url, response)
+}
+
+pub(crate) fn put_json(
+    url: &Url,
+    protocol: &str,
+    token: &str,
+    body: Value,
+) -> Result<(u16, Value), String> {
+    validate_anchor_https_url(url, protocol)?;
+    let authorization = Zeroizing::new(format!("Bearer {token}"));
+    let response = agent()
+        .put(url.as_str())
+        .header("Authorization", authorization.as_str())
+        .config()
+        .http_status_as_error(false)
+        .build()
+        .send_json(body)
+        .map_err(|error| {
+            format!(
+                "Unable to call {protocol} endpoint {}: {error}",
+                endpoint_label(url)
+            )
+        })?;
+    read_json_response(protocol, url, response)
+}
+
+pub(crate) fn post_json(url: &Url, protocol: &str, body: Value) -> Result<(u16, Value), String> {
+    validate_anchor_https_url(url, protocol)?;
+    let response = agent()
+        .post(url.as_str())
+        .config()
+        .http_status_as_error(false)
+        .build()
+        .send_json(body)
+        .map_err(|error| {
+            format!(
+                "Unable to call {protocol} endpoint {}: {error}",
+                endpoint_label(url)
+            )
+        })?;
+    read_json_response(protocol, url, response)
+}
+
+pub(crate) fn read_json_response(
+    protocol: &str,
+    url: &Url,
+    mut response: ureq::http::Response<Body>,
+) -> Result<(u16, Value), String> {
+    let endpoint = endpoint_label(url);
+    let status = response.status().as_u16();
+    reject_anchor_redirect(status, &endpoint)?;
+    let value = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_ANCHOR_RESPONSE_BYTES)
+        .read_json::<Value>()
+        .map_err(|error| format!("Invalid JSON from {protocol} endpoint {endpoint}: {error}"))?;
+    Ok((status, value))
+}
+
+pub(crate) fn get_text(url: &Url, label: &str) -> Result<String, String> {
+    validate_anchor_https_url(url, label)?;
+    let mut response = agent()
+        .get(url.as_str())
+        .config()
+        .http_status_as_error(false)
+        .build()
+        .call()
+        .map_err(|error| {
+            format!(
+                "Unable to load {label} from {}: {error}",
+                endpoint_label(url)
+            )
+        })?;
+    let endpoint = endpoint_label(url);
+    let status = response.status().as_u16();
+    reject_anchor_redirect(status, &endpoint)?;
+    if !(200..300).contains(&status) {
+        return Err(format!(
+            "{label} endpoint {endpoint} returned HTTP {status}"
+        ));
+    }
+    response
+        .body_mut()
+        .with_config()
+        .limit(MAX_ANCHOR_RESPONSE_BYTES)
+        .read_to_string()
+        .map_err(|error| format!("Unable to read {label} from {endpoint}: {error}"))
+}
+
 fn is_external_dns_name(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
     let labels = host.split('.').collect::<Vec<_>>();
@@ -77,9 +201,17 @@ fn is_external_dns_name(host: &str) -> bool {
         && labels.iter().all(|label| {
             !label.is_empty()
                 && label.len() <= 63
-                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                && label.as_bytes().first().is_some_and(|byte| byte.is_ascii_alphanumeric())
-                && label.as_bytes().last().is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
         })
         && host != "localhost"
         && !host.ends_with(".localhost")
@@ -139,5 +271,11 @@ mod tests {
             "endpoint"
         )
         .is_ok());
+    }
+
+    #[test]
+    fn endpoint_labels_drop_sensitive_query_values() {
+        let url = Url::parse("https://anchor.example/customer?id=private#fragment").unwrap();
+        assert_eq!(endpoint_label(&url), "https://anchor.example/customer");
     }
 }

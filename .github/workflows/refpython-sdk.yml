@@ -1,4 +1,4 @@
-name: RefPython SDK validation
+name: RefPython process binding validation
 
 on:
   workflow_dispatch:
@@ -6,10 +6,10 @@ on:
     paths:
       - "core/rust/**"
       - "sdk/rust/**"
-      - "reference/python/fresnica/rust_core_client.py"
-      - "reference/python/fresnica/rust_sdk_client.py"
+      - "bindings/process/**"
+      - "reference/python/fresnica/process_client.py"
       - "reference/python/fresnica/runtime.py"
-      - "reference/python/tests/test_rust_sdk_compat.py"
+      - "reference/python/tests/test_process_*.py"
       - ".github/workflows/refpython-sdk.yml"
 
 jobs:
@@ -19,7 +19,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path sdk/rust/Cargo.toml
-      - run: cargo build --release --manifest-path sdk/rust/Cargo.toml --bin fresnica-sdk-bridge
+      - run: cargo test --manifest-path bindings/process/Cargo.toml
+      - run: cargo build --release --manifest-path bindings/process/Cargo.toml --bin fresnica-process
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -29,7 +30,7 @@ jobs:
         working-directory: reference/python
       - run: uv sync --locked
         working-directory: reference/python
-      - run: uv run pytest -q tests/test_rust_sdk_compat.py
+      - run: uv run pytest -q tests/test_process_binding_compat.py tests/test_process_client.py tests/test_process_client_paths.py
         working-directory: reference/python
         env:
-          FRESNICA_SDK_BIN: ${{ github.workspace }}/sdk/rust/target/release/fresnica-sdk-bridge
+          FRESNICA_PROCESS_BIN: ${{ github.workspace }}/bindings/process/target/release/fresnica-process

@@ -14,7 +14,7 @@ fresnica-native-sdk          UniFFI/native DTO glue
     +-- future Windows/Linux native packages
 ```
 
-This is the authoritative native binding surface for new Mobile/native consumers. `bindings/mobile` is frozen compatibility/donor material for the transitional Mobile v0.1.0 line.
+This is the authoritative native binding surface for new Mobile/native consumers. The transitional `bindings/mobile` facade has been retired from `main`; history remains in Git/tagged releases.
 
 ## Rules
 

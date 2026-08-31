@@ -357,7 +357,7 @@ Current reference implementations map to the common vocabulary approximately as:
 ```text
 clients/rust-client::wallet       -> Account / Signer / current terminal Wallet implementations
 clients/rust-client::storage      -> terminal Backup / Restore v1 reference implementation
-bindings/mobile/react-native::portable-backup -> portable Backup / Restore v2 staging reference
+historical mobile-sdk-v0.1.0 portable-backup donor -> portable Backup / Restore v2 staging evidence
 clients/rust-client::service      -> Account / Balance / History reference accessors
 clients/rust-client::payment      -> Payment implementation
 clients/rust-client::transaction  -> Transaction + part of Signing Coordination

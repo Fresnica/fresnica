@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use crate::ledger_authorization::load_classic_ledger_authorization_plan;
 use crate::signing_coordination::sign_with_local_ed25519;
 use crate::{
-    HorizonClient, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
+    HorizonGateway, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
     TESTNET_HORIZON_URL,
 };
 
@@ -55,8 +55,8 @@ pub fn has_valid_transaction_signature(
     .map_err(|error| format!("unable to verify transaction signature: {error}"))
 }
 
-pub fn network_client(network: &str) -> Result<HorizonClient, String> {
-    Ok(HorizonClient::new(match network {
+pub fn network_gateway(network: &str) -> Result<HorizonGateway, String> {
+    Ok(HorizonGateway::new(match network {
         "mainnet" => MAINNET_HORIZON_URL,
         "testnet" => TESTNET_HORIZON_URL,
         other => return Err(format!("unknown network: {other}")),
@@ -65,7 +65,7 @@ pub fn network_client(network: &str) -> Result<HorizonClient, String> {
 
 pub fn resolve_write_wallet(
     storage: &WalletStorage,
-    horizon: &HorizonClient,
+    horizon: &HorizonGateway,
     network: &str,
     name: Option<&str>,
 ) -> Result<WalletRecord, String> {
@@ -237,7 +237,7 @@ pub fn sign_and_submit(
     record: &WalletRecord,
     network: &str,
     envelope: &mut TransactionEnvelope,
-    horizon: &HorizonClient,
+    horizon: &HorizonGateway,
     passcode: String,
 ) -> Result<TransactionSubmission, String> {
     ensure_transaction_not_expired(envelope)?;
@@ -360,7 +360,7 @@ impl PendingTransactionStore {
         &self,
         network: &str,
         account: &str,
-        horizon: &HorizonClient,
+        horizon: &HorizonGateway,
     ) -> Result<(), String> {
         self.reconcile_with(network, account, |tx_hash| horizon.get_transaction(tx_hash))
     }

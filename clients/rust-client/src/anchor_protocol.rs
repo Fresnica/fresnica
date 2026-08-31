@@ -16,8 +16,8 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::anchor_http::{
-    agent as anchor_http_agent, canonical_home_domain, reject_anchor_redirect,
-    validate_anchor_https_url, MAX_ANCHOR_RESPONSE_BYTES,
+    agent as anchor_http_agent, canonical_home_domain, endpoint_label, get_json, get_text,
+    post_json, read_json_response, validate_anchor_https_url,
 };
 use crate::ledger_authorization::{
     satisfied_ed25519_conditions, AccountAuthorizationRequirement, LedgerAccountAuthorization,
@@ -29,7 +29,6 @@ use crate::transaction::{
     has_valid_transaction_signature, network_passphrase, parse_transaction_xdr,
     transaction_xdr_bytes,
 };
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -469,22 +468,16 @@ pub fn start_anchor_sep24_transfer(
         form = form.text(name.as_str(), value.as_str());
     }
 
-    let request = anchor_http_agent().post(&endpoint)
+    let request = anchor_http_agent()
+        .post(&endpoint)
         .header("Authorization", authorization.as_str())
         .config()
         .http_status_as_error(false)
         .build();
-    let mut response = request
+    let response = request
         .send(form)
         .map_err(|error| format!("Unable to call SEP-24 endpoint {endpoint}: {error}"))?;
-    let status = response.status().as_u16();
-    reject_anchor_redirect(status, &endpoint)?;
-    let value = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_json::<JsonValue>()
-        .map_err(|error| format!("Invalid JSON from SEP-24 endpoint {endpoint}: {error}"))?;
+    let (status, value) = read_json_response("SEP-24", &endpoint_url, response)?;
     if !(200..300).contains(&status) {
         return Err(anchor_http_error("SEP-24", &endpoint, status, &value));
     }
@@ -552,28 +545,8 @@ pub fn start_anchor_sep6_transfer(
     }
     let fields = sep6_request_fields(capabilities, kind, fields)?;
     let url = sep6_request_url(base, kind, asset, account, &fields)?;
-    let authorization = token.map(|token| Zeroizing::new(format!("Bearer {token}")));
-
-    let mut request = anchor_http_agent().get(url.as_str());
-    if let Some(authorization) = authorization.as_ref() {
-        request = request.header("Authorization", authorization.as_str());
-    }
     let endpoint = endpoint_label(&url);
-    let request = request
-        .config()
-        .http_status_as_error(false)
-        .build();
-    let mut response = request
-        .call()
-        .map_err(|error| format!("Unable to call SEP-6 endpoint {endpoint}: {error}"))?;
-    let status = response.status().as_u16();
-    reject_anchor_redirect(status, &endpoint)?;
-    let value = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_json::<JsonValue>()
-        .map_err(|error| format!("Invalid JSON from SEP-6 endpoint {endpoint}: {error}"))?;
+    let (status, value) = get_json(&url, "SEP-6", token)?;
     if !(200..300).contains(&status) && status != 403 {
         return Err(anchor_http_error("SEP-6", &endpoint, status, &value));
     }
@@ -729,35 +702,8 @@ pub fn fetch_anchor_transaction(
         .map_err(|_| format!("{} transaction endpoint is invalid", protocol.label()))?;
     validate_anchor_https_url(&url, "Anchor transaction endpoint")?;
     url.query_pairs_mut().append_pair("id", transaction_id);
-    let authorization = token.map(|token| Zeroizing::new(format!("Bearer {token}")));
-    let mut request = anchor_http_agent().get(url.as_str());
-    if let Some(authorization) = authorization.as_ref() {
-        request = request.header("Authorization", authorization.as_str());
-    }
     let endpoint = endpoint_label(&url);
-    let request = request
-        .config()
-        .http_status_as_error(false)
-        .build();
-    let mut response = request.call().map_err(|error| {
-        format!(
-            "Unable to call {} endpoint {endpoint}: {error}",
-            protocol.label()
-        )
-    })?;
-    let status = response.status().as_u16();
-    reject_anchor_redirect(status, &endpoint)?;
-    let value = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_json::<JsonValue>()
-        .map_err(|error| {
-            format!(
-                "Invalid JSON from {} endpoint {endpoint}: {error}",
-                protocol.label()
-            )
-        })?;
+    let (status, value) = get_json(&url, protocol.label(), token)?;
     if status == 404 {
         return Err(format!(
             "{} transaction {transaction_id} was not found",
@@ -778,7 +724,7 @@ pub fn fetch_anchor_transaction(
 impl FresnicaClient {
     pub fn discover_anchor(&self, asset_text: &str) -> Result<AnchorDiscovery, String> {
         let asset = AnchorAsset::parse(asset_text)?;
-        let issuer = self.horizon().get_account(&asset.issuer)?;
+        let issuer = self.gateway().get_account(&asset.issuer)?;
         let home_domain = issuer
             .get("home_domain")
             .and_then(JsonValue::as_str)
@@ -1112,22 +1058,22 @@ fn exchange_sep10_challenge(
     let url = Url::parse(web_auth_endpoint)
         .map_err(|_| "WEB_AUTH_ENDPOINT must be a valid URL".to_owned())?;
     validate_anchor_https_url(&url, "WEB_AUTH_ENDPOINT")?;
-    let mut response = anchor_http_agent().post(web_auth_endpoint)
-        .config()
-        .build()
-        .send_json(serde_json::json!({"transaction": signed_transaction}))
-        .map_err(|error| {
-            format!("Unable to exchange SEP-10 challenge at {web_auth_endpoint}: {error}")
-        })?;
-    reject_anchor_redirect(response.status().as_u16(), web_auth_endpoint)?;
-    let value = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_json::<Sep10TokenResponse>()
-        .map_err(|error| {
-            format!("Invalid SEP-10 token response from {web_auth_endpoint}: {error}")
-        })?;
+    let (status, value) = post_json(
+        &url,
+        "SEP-10",
+        serde_json::json!({"transaction": signed_transaction}),
+    )?;
+    if !(200..300).contains(&status) {
+        return Err(anchor_http_error(
+            "SEP-10",
+            web_auth_endpoint,
+            status,
+            &value,
+        ));
+    }
+    let value: Sep10TokenResponse = serde_json::from_value(value).map_err(|error| {
+        format!("Invalid SEP-10 token response from {web_auth_endpoint}: {error}")
+    })?;
     if value.token.trim().is_empty() {
         return Err("SEP-10 token response did not include a token".to_owned());
     }
@@ -1350,48 +1296,32 @@ fn asset_enabled(section: Option<&JsonValue>, code: &str) -> bool {
 }
 
 fn fetch_text(url: &str, label: &str) -> Result<String, String> {
-    let parsed = Url::parse(url).map_err(|_| format!("Unable to load {label} from invalid URL {url}"))?;
-    validate_anchor_https_url(&parsed, label)?;
-    let mut response = anchor_http_agent().get(url)
-        .call()
-        .map_err(|error| format!("Unable to load {label} from {url}: {error}"))?;
-    reject_anchor_redirect(response.status().as_u16(), url)?;
-    response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_to_string()
-        .map_err(|error| format!("Unable to read {label} from {url}: {error}"))
+    let parsed =
+        Url::parse(url).map_err(|_| format!("Unable to load {label} from invalid URL {url}"))?;
+    get_text(&parsed, label)
 }
 
 fn fetch_json(url: &str) -> Result<JsonValue, String> {
     let parsed = Url::parse(url).map_err(|_| format!("Unable to load invalid URL {url}"))?;
-    validate_anchor_https_url(&parsed, "Anchor endpoint")?;
-    let mut response = anchor_http_agent().get(url)
-        .call()
-        .map_err(|error| format!("Unable to load {url}: {error}"))?;
-    reject_anchor_redirect(response.status().as_u16(), url)?;
-    response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_json::<JsonValue>()
-        .map_err(|error| format!("Invalid JSON from {url}: {error}"))
+    let (status, value) = get_json(&parsed, "Anchor", None)?;
+    if !(200..300).contains(&status) {
+        return Err(anchor_http_error(
+            "Anchor",
+            &endpoint_label(&parsed),
+            status,
+            &value,
+        ));
+    }
+    Ok(value)
 }
 
 fn info_url(base: &str) -> String {
     format!("{}/info", base.trim_end_matches('/'))
 }
 
-fn endpoint_label(url: &Url) -> String {
-    let mut sanitized = url.clone();
-    sanitized.set_query(None);
-    sanitized.set_fragment(None);
-    sanitized.to_string()
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::anchor_http::reject_anchor_redirect;
     use std::sync::OnceLock;
 
     use super::*;
@@ -2146,11 +2076,8 @@ code = "USD"
 issuer = "{ISSUER}"
 "#
         );
-        let capabilities = capabilities_from_document(
-            &asset(),
-            "anchor.example",
-            &document,
-            |url| match url {
+        let capabilities =
+            capabilities_from_document(&asset(), "anchor.example", &document, |url| match url {
                 "https://anchor.example/sep6/info" => Ok(serde_json::json!({
                     "deposit": {
                         "USD": {
@@ -2178,15 +2105,13 @@ issuer = "{ISSUER}"
                     }
                 })),
                 _ => Err(format!("unexpected URL: {url}")),
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
 
         assert!(capabilities.sep6_deposit);
         assert!(capabilities.sep6_withdraw);
         assert_eq!(
-            capabilities.sep6_withdraw_info["types"]["crypto"]["fields"]["dest"]
-                ["description"],
+            capabilities.sep6_withdraw_info["types"]["crypto"]["fields"]["dest"]["description"],
             "destination address"
         );
 
@@ -2201,14 +2126,23 @@ issuer = "{ISSUER}"
         let deposit_fields =
             sep6_request_fields(&capabilities, AnchorTransferKind::Deposit, &BTreeMap::new())
                 .unwrap();
-        assert_eq!(deposit_fields.get("type").map(String::as_str), Some("crypto"));
+        assert_eq!(
+            deposit_fields.get("type").map(String::as_str),
+            Some("crypto")
+        );
 
         let mut withdraw_fields = BTreeMap::new();
         withdraw_fields.insert("dest".to_owned(), "rExample".to_owned());
-        let withdraw_fields =
-            sep6_request_fields(&capabilities, AnchorTransferKind::Withdraw, &withdraw_fields)
-                .unwrap();
-        assert_eq!(withdraw_fields.get("type").map(String::as_str), Some("crypto"));
+        let withdraw_fields = sep6_request_fields(
+            &capabilities,
+            AnchorTransferKind::Withdraw,
+            &withdraw_fields,
+        )
+        .unwrap();
+        assert_eq!(
+            withdraw_fields.get("type").map(String::as_str),
+            Some("crypto")
+        );
         assert_eq!(
             withdraw_fields.get("dest").map(String::as_str),
             Some("rExample")
@@ -2509,7 +2443,10 @@ issuer = "{ISSUER}"
         ] {
             let document: TomlValue =
                 toml::from_str(&format!(r#"TRANSFER_SERVER = "{value}""#)).unwrap();
-            assert!(endpoint(&document, "TRANSFER_SERVER").is_err(), "accepted {value}");
+            assert!(
+                endpoint(&document, "TRANSFER_SERVER").is_err(),
+                "accepted {value}"
+            );
         }
     }
 
@@ -2525,7 +2462,10 @@ issuer = "{ISSUER}"
 
     #[test]
     fn home_domain_rejects_urls_and_paths() {
-        assert_eq!(canonical_home_domain("Anchor.Example.").unwrap(), "anchor.example");
+        assert_eq!(
+            canonical_home_domain("Anchor.Example.").unwrap(),
+            "anchor.example"
+        );
         assert!(canonical_home_domain("https://anchor.example").is_err());
         assert!(canonical_home_domain("anchor.example/path").is_err());
     }

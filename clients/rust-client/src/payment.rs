@@ -3,10 +3,11 @@ use std::str::FromStr;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 use stellar_xdr::{
-    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, CreateAccountOp, Hash, Memo,
-    MuxedAccount, OperationBody, PaymentOp, PublicKey, StringM, TransactionEnvelope,
+    AccountId, CreateAccountOp, Hash, Memo, MuxedAccount, OperationBody, PaymentOp, PublicKey,
+    StringM, TransactionEnvelope,
 };
 
+use crate::asset::AssetId;
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope_with_memo, format_stroops,
     minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_write_wallet,
@@ -140,7 +141,7 @@ impl FresnicaClient {
     pub fn prepare_payment(&self, request: &PaymentRequest) -> Result<PreparedPayment, String> {
         let wallet = resolve_write_wallet(
             self.storage(),
-            self.horizon(),
+            self.gateway(),
             self.network(),
             request.wallet.as_deref(),
         )?;
@@ -170,7 +171,7 @@ impl FresnicaClient {
     ) -> Result<PreparedPayment, String> {
         let current = resolve_write_wallet(
             self.storage(),
-            self.horizon(),
+            self.gateway(),
             self.network(),
             Some(&wallet.name),
         )?;
@@ -199,14 +200,14 @@ impl FresnicaClient {
         contact_name: Option<&str>,
         memo: PaymentMemo,
     ) -> Result<PreparedPayment, String> {
-        let asset = PaymentAsset::parse(asset_text)?;
+        let asset = AssetId::parse(asset_text)?;
         let amount = parse_positive_stroops(amount_text)?;
         let destination = AccountId::from_str(destination_address)
             .map_err(|_| "destination must be a Classic Stellar G address".to_owned())?;
         let memo_xdr = memo.to_xdr()?;
 
-        let account = self.horizon().get_account(&current.address)?;
-        let destination_exists = self.horizon().account_exists(destination_address)?;
+        let account = self.gateway().get_account(&current.address)?;
+        let destination_exists = self.gateway().account_exists(destination_address)?;
         if !destination_exists && !asset.is_native() {
             return Err(
                 "Destination account does not exist. Only XLM can create a new Stellar account; issued assets require an existing account and trustline."
@@ -214,11 +215,11 @@ impl FresnicaClient {
             );
         }
         let destination_account = if destination_exists {
-            Some(self.horizon().get_account(destination_address)?)
+            Some(self.gateway().get_account(destination_address)?)
         } else {
             None
         };
-        let ledger = self.horizon().get_ledger_parameters()?;
+        let ledger = self.gateway().get_ledger_parameters()?;
         validate_transfer(&account, &current.address, &asset, amount, ledger)?;
         if let Some(destination_account) = destination_account.as_ref() {
             validate_destination_receive(destination_account, destination_address, &asset, amount)?;
@@ -284,92 +285,15 @@ impl FresnicaClient {
             &prepared.wallet,
             self.network(),
             &mut envelope,
-            self.horizon(),
+            self.gateway(),
             passcode,
         )
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PaymentAsset {
-    Native,
-    Credit { code: String, issuer: String },
-}
-
-impl PaymentAsset {
-    fn parse(value: &str) -> Result<Self, String> {
-        if value.eq_ignore_ascii_case("XLM") {
-            return Ok(Self::Native);
-        }
-        let (code, issuer) = value
-            .split_once(':')
-            .ok_or_else(|| "asset must be XLM or CODE:GISSUER".to_owned())?;
-        validate_asset_code(code)?;
-        AccountId::from_str(issuer)
-            .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-        Ok(Self::Credit {
-            code: code.to_owned(),
-            issuer: issuer.to_owned(),
-        })
-    }
-
-    fn is_native(&self) -> bool {
-        matches!(self, Self::Native)
-    }
-
-    fn issuer(&self) -> Option<&str> {
-        match self {
-            Self::Native => None,
-            Self::Credit { issuer, .. } => Some(issuer),
-        }
-    }
-
-    fn display(&self) -> String {
-        match self {
-            Self::Native => "XLM".to_owned(),
-            Self::Credit { code, issuer } => format!("{code}:{issuer}"),
-        }
-    }
-
-    fn to_xdr(&self) -> Result<Asset, String> {
-        match self {
-            Self::Native => Ok(Asset::Native),
-            Self::Credit { code, issuer } => {
-                let issuer = AccountId::from_str(issuer)
-                    .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-                if code.len() <= 4 {
-                    let mut raw = [0u8; 4];
-                    raw[..code.len()].copy_from_slice(code.as_bytes());
-                    Ok(Asset::CreditAlphanum4(AlphaNum4 {
-                        asset_code: AssetCode4(raw),
-                        issuer,
-                    }))
-                } else {
-                    let mut raw = [0u8; 12];
-                    raw[..code.len()].copy_from_slice(code.as_bytes());
-                    Ok(Asset::CreditAlphanum12(AlphaNum12 {
-                        asset_code: AssetCode12(raw),
-                        issuer,
-                    }))
-                }
-            }
-        }
-    }
-
-    fn matches_balance(&self, balance: &Value) -> bool {
-        match self {
-            Self::Native => text(balance, "asset_type") == Some("native"),
-            Self::Credit { code, issuer } => {
-                text(balance, "asset_code") == Some(code.as_str())
-                    && text(balance, "asset_issuer") == Some(issuer.as_str())
-            }
-        }
-    }
-}
-
 fn payment_body(
     destination: AccountId,
-    asset: &PaymentAsset,
+    asset: &AssetId,
     amount: i64,
     create_destination: bool,
 ) -> Result<OperationBody, String> {
@@ -381,7 +305,7 @@ fn payment_body(
     }
     Ok(OperationBody::Payment(PaymentOp {
         destination: account_id_to_muxed(&destination),
-        asset: asset.to_xdr()?,
+        asset: asset.to_xdr(),
         amount,
     }))
 }
@@ -389,7 +313,7 @@ fn payment_body(
 fn validate_transfer(
     account: &Value,
     account_id: &str,
-    asset: &PaymentAsset,
+    asset: &AssetId,
     requested: i64,
     ledger: LedgerParameters,
 ) -> Result<(), String> {
@@ -398,7 +322,7 @@ fn validate_transfer(
         .and_then(Value::as_array)
         .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
 
-    if !asset.is_native() && asset.issuer() == Some(account_id) {
+    if !asset.is_native() && asset.issuer_is(account_id) {
         ensure_payment_fee_capacity(account, ledger)?;
         return Ok(());
     }
@@ -440,10 +364,10 @@ fn validate_transfer(
 fn validate_destination_receive(
     account: &Value,
     account_id: &str,
-    asset: &PaymentAsset,
+    asset: &AssetId,
     requested: i64,
 ) -> Result<(), String> {
-    if !asset.is_native() && asset.issuer() == Some(account_id) {
+    if !asset.is_native() && asset.issuer_is(account_id) {
         return Ok(());
     }
     let balances = account
@@ -506,7 +430,7 @@ fn ensure_payment_fee_capacity(account: &Value, ledger: LedgerParameters) -> Res
     Ok(())
 }
 
-fn ensure_payment_trustline_authorized(raw: &Value, asset: &PaymentAsset) -> Result<(), String> {
+fn ensure_payment_trustline_authorized(raw: &Value, asset: &AssetId) -> Result<(), String> {
     match raw.get("is_authorized").and_then(Value::as_bool) {
         Some(true) => Ok(()),
         Some(false) => Err(format!(
@@ -535,17 +459,6 @@ fn account_requires_memo(account: &Value) -> Result<bool, String> {
     Ok(decoded.as_slice() == b"1")
 }
 
-fn validate_asset_code(code: &str) -> Result<(), String> {
-    if code.is_empty()
-        || code.len() > 12
-        || !code.is_ascii()
-        || !code.bytes().all(|byte| byte.is_ascii_alphanumeric())
-    {
-        return Err("issued asset code must be 1-12 ASCII letters or digits".to_owned());
-    }
-    Ok(())
-}
-
 fn account_id_to_muxed(account: &AccountId) -> MuxedAccount {
     match &account.0 {
         PublicKey::PublicKeyTypeEd25519(key) => MuxedAccount::Ed25519(key.clone()),
@@ -559,6 +472,7 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stellar_xdr::Asset;
 
     const DESTINATION: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
@@ -594,25 +508,14 @@ mod tests {
             let code = case["code"].as_str().unwrap();
             let issuer = case["issuer"].as_str().unwrap();
             let identity = case["identity"].as_str().unwrap();
-            let asset = PaymentAsset::parse(identity).unwrap();
+            let asset = AssetId::parse(identity).unwrap();
 
             assert!(!asset.is_native(), "{name}");
             assert_eq!(asset.display(), identity, "{name}");
-            match &asset {
-                PaymentAsset::Credit {
-                    code: actual,
-                    issuer: actual_issuer,
-                } => {
-                    assert_eq!(actual, code, "{name}");
-                    assert_eq!(actual_issuer, issuer, "{name}");
-                }
-                PaymentAsset::Native => panic!("{name}: issued vector became native"),
-            }
+            assert_eq!(asset.code().as_deref(), Some(code), "{name}");
+            assert_eq!(asset.issuer().as_deref(), Some(issuer), "{name}");
             assert!(matches!(
-                (
-                    case["asset_type"].as_str().unwrap(),
-                    asset.to_xdr().unwrap()
-                ),
+                (case["asset_type"].as_str().unwrap(), asset.to_xdr()),
                 ("credit_alphanum4", Asset::CreditAlphanum4(_))
                     | ("credit_alphanum12", Asset::CreditAlphanum12(_))
             ));
@@ -640,7 +543,7 @@ mod tests {
         assert!(validate_transfer(
             &account,
             "GSOURCE",
-            &PaymentAsset::Native,
+            &AssetId::native(),
             parse_positive_stroops("7.99999").unwrap(),
             ledger,
         )
@@ -648,7 +551,7 @@ mod tests {
         assert!(validate_transfer(
             &account,
             "GSOURCE",
-            &PaymentAsset::Native,
+            &AssetId::native(),
             parse_positive_stroops("8").unwrap(),
             ledger,
         )
@@ -673,13 +576,13 @@ mod tests {
             base_fee_in_stroops: 100,
             base_reserve_in_stroops: 5_000_000,
         };
-        let asset = PaymentAsset::parse(&format!("USD:{source}")).unwrap();
+        let asset = AssetId::parse(&format!("USD:{source}")).unwrap();
         assert!(validate_transfer(&account, source, &asset, 1_000_000_000, ledger).is_ok());
     }
 
     #[test]
     fn destination_credit_requires_full_authorization_and_receiving_headroom() {
-        let asset = PaymentAsset::parse(&format!("USD:{DESTINATION}")).unwrap();
+        let asset = AssetId::parse(&format!("USD:{DESTINATION}")).unwrap();
         let destination = serde_json::json!({
             "balances": [{
                 "asset_type": "credit_alphanum4",
@@ -733,11 +636,10 @@ mod tests {
             }]
         });
         assert!(
-            validate_destination_receive(&destination, DESTINATION, &PaymentAsset::Native, 7,)
-                .is_ok()
+            validate_destination_receive(&destination, DESTINATION, &AssetId::native(), 7,).is_ok()
         );
         assert!(
-            validate_destination_receive(&destination, DESTINATION, &PaymentAsset::Native, 8,)
+            validate_destination_receive(&destination, DESTINATION, &AssetId::native(), 8,)
                 .is_err()
         );
     }
@@ -756,17 +658,11 @@ mod tests {
     fn payment_body_switches_to_create_account_for_missing_destination() {
         let destination = AccountId::from_str(DESTINATION).unwrap();
         assert!(matches!(
-            payment_body(
-                destination.clone(),
-                &PaymentAsset::Native,
-                10_000_000,
-                false
-            )
-            .unwrap(),
+            payment_body(destination.clone(), &AssetId::native(), 10_000_000, false).unwrap(),
             OperationBody::Payment(_)
         ));
         assert!(matches!(
-            payment_body(destination, &PaymentAsset::Native, 10_000_000, true).unwrap(),
+            payment_body(destination, &AssetId::native(), 10_000_000, true).unwrap(),
             OperationBody::CreateAccount(_)
         ));
     }

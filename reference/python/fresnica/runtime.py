@@ -18,8 +18,7 @@ from .market_preferences import MarketPreferencesStore
 from .network import get_network
 from .offer_service import OfferService
 from .pending_transactions import PendingTransactionService, PendingTransactionStore
-from .rust_core_client import RustCoreClient
-from .rust_sdk_client import RustSdkClient
+from .process_client import FresnicaProcessClient
 from .settings import SettingsStore
 from .stellar_adapter import StellarAdapter
 from .storage import FileWalletStorage
@@ -75,7 +74,7 @@ class Runtime:
         self.anchor_capabilities_store = AnchorCapabilitiesStore(self.home / "anchors.json")
         self.anchor_transfer_service = AnchorTransferService()
         self.core_client = core_client if core_client is not None else (
-            RustSdkClient.discover() or RustCoreClient.discover()
+            FresnicaProcessClient.discover()
         )
         self.wallet_manager = WalletManager(
             self.wallet_storage,

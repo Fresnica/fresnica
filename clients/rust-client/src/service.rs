@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::horizon::{HorizonClient, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
+use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::storage::{WalletRecord, WalletStorage};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,16 +26,16 @@ pub struct HistorySnapshot {
 pub struct FresnicaClient {
     network: String,
     storage: WalletStorage,
-    horizon: HorizonClient,
+    gateway: HorizonGateway,
 }
 
 impl FresnicaClient {
     pub fn new(home: &Path, network: &str) -> Result<Self, String> {
-        let horizon = HorizonClient::new(horizon_url(network)?);
+        let gateway = HorizonGateway::new(horizon_url(network)?);
         Ok(Self {
             network: network.to_owned(),
             storage: WalletStorage::new(home)?,
-            horizon,
+            gateway,
         })
     }
 
@@ -47,8 +47,8 @@ impl FresnicaClient {
         &self.storage
     }
 
-    pub(crate) fn horizon(&self) -> &HorizonClient {
-        &self.horizon
+    pub(crate) fn gateway(&self) -> &HorizonGateway {
+        &self.gateway
     }
 
     pub fn wallets(&self) -> Result<Vec<WalletRecord>, String> {
@@ -72,12 +72,12 @@ impl FresnicaClient {
     }
 
     pub fn ledger_account(&self, address: &str) -> Result<Option<Value>, String> {
-        self.horizon.get_account_optional(address)
+        self.gateway.get_account_optional(address)
     }
 
     pub fn account(&self, name: Option<&str>) -> Result<AccountSnapshot, String> {
         let wallet = self.resolve_wallet(name)?;
-        let account = self.horizon.get_account(&wallet.address)?;
+        let account = self.gateway.get_account(&wallet.address)?;
         Ok(AccountSnapshot { wallet, account })
     }
 
@@ -96,7 +96,7 @@ impl FresnicaClient {
             return Err("history limit must be from 1 to 200".to_owned());
         }
         let wallet = self.resolve_wallet(name)?;
-        let operations = self.horizon.get_operations(&wallet.address, limit)?;
+        let operations = self.gateway.get_operations(&wallet.address, limit)?;
         Ok(HistorySnapshot { wallet, operations })
     }
 }
