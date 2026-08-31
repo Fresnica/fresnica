@@ -40,8 +40,8 @@ const [
   sdkSource,
   nativeCargo,
   nativeSource,
-  mobileCargo,
-  mobileSource,
+  processCargo,
+  processSource,
   wasmCargo,
   wasmSource,
   reactNativePackage,
@@ -54,8 +54,8 @@ const [
   text('sdk/rust/src/lib.rs'),
   text('bindings/native/Cargo.toml'),
   text('bindings/native/src/lib.rs'),
-  text('bindings/mobile/Cargo.toml'),
-  text('bindings/mobile/src/lib.rs'),
+  text('bindings/process/Cargo.toml'),
+  text('bindings/process/src/main.rs'),
   text('bindings/wasm/Cargo.toml'),
   text('bindings/wasm/src/lib.rs'),
   json('adapters/react-native/package.json'),
@@ -83,9 +83,9 @@ const actual = {
     packageVersion: cargoPackageVersion(nativeCargo, 'native'),
     bindingApiVersion: rustApiVersion(nativeSource, 'NATIVE_BINDING_API_VERSION', 'native'),
   },
-  mobileCompatibility: {
-    packageVersion: cargoPackageVersion(mobileCargo, 'mobile compatibility'),
-    bindingApiVersion: rustApiVersion(mobileSource, 'MOBILE_BINDING_API_VERSION', 'mobile compatibility'),
+  process: {
+    packageVersion: cargoPackageVersion(processCargo, 'process binding'),
+    bindingApiVersion: rustApiVersion(processSource, 'PROCESS_BINDING_API_VERSION', 'process binding'),
   },
   wasm: {
     packageVersion: cargoPackageVersion(wasmCargo, 'wasm'),
@@ -109,7 +109,7 @@ const actual = {
   },
 };
 
-for (const layer of ['core', 'sdk', 'native', 'mobileCompatibility', 'wasm']) {
+for (const layer of ['core', 'sdk', 'process', 'native', 'wasm']) {
   for (const [field, value] of Object.entries(actual[layer])) {
     assert.equal(
       manifest[layer][field],
@@ -138,14 +138,14 @@ assert.equal(
   'SDK/Core API compatibility drifted',
 );
 assert.equal(
+  manifest.process.requiresSdkApiVersion,
+  manifest.sdk.apiVersion,
+  'Process binding/SDK API compatibility drifted',
+);
+assert.equal(
   manifest.native.requiresSdkApiVersion,
   manifest.sdk.apiVersion,
   'Native SDK/SDK API compatibility drifted',
-);
-assert.equal(
-  manifest.mobileCompatibility.requiresSdkApiVersion,
-  manifest.sdk.apiVersion,
-  'Mobile compatibility/SDK API compatibility drifted',
 );
 assert.equal(
   manifest.wasm.requiresSdkApiVersion,
@@ -171,8 +171,8 @@ assert.equal(
 console.log('Fresnica SDK compatibility manifest: OK');
 console.log(`  Core client API: ${manifest.core.clientApiVersion}`);
 console.log(`  SDK API: ${manifest.sdk.apiVersion}`);
+console.log(`  Process binding API: ${manifest.process.bindingApiVersion}`);
 console.log(`  Native binding API: ${manifest.native.bindingApiVersion}`);
-console.log(`  Mobile compatibility API: ${manifest.mobileCompatibility.bindingApiVersion}`);
 console.log(`  WASM binding API: ${manifest.wasm.bindingApiVersion}`);
 console.log(`  React Native adapter source: ${manifest.adapters.reactNative.sourceVersion}`);
 console.log(

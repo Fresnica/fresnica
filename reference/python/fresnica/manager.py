@@ -16,7 +16,7 @@ from .hdwallet import detect_mnemonic_language, generate_mnemonic_phrase
 from .network import get_network
 from .protection import ProtectionCredential, ProtectionRegistry
 from .secret_store import WalletUnlockKey
-from .signer import RustCoreProtectedSigner
+from .signer import FresnicaProcessProtectedSigner
 from .storage import WalletRecord, WalletStorage
 from .wallet import Account, Wallet
 from .wallet_backup import read_wallet_backup, write_wallet_backup
@@ -597,7 +597,7 @@ class WalletManager:
                 unlock_key,
                 record.signer_public_key,
             )
-            signer = RustCoreProtectedSigner(
+            signer = FresnicaProcessProtectedSigner(
                 record.signer_public_key,
                 self.core_client,
                 record.secret,

@@ -287,7 +287,7 @@ Core MUST NOT implement a `SystemProtectionProvider`, Keychain abstraction, biom
 
 The Python implementation remains the behavioral reference for product semantics, but it can also act as a real Rust Core client.
 
-When `FRESNICA_CORE_BIN` points to the `fresnica-core` binary, or that binary is available on `PATH`, the Python TUI delegates software-signer cryptographic operations to Rust Core.
+When `FRESNICA_PROCESS_BIN` points to the current Process Binding, RefPython delegates software-signer cryptographic operations through `Fresnica Process Binding -> Fresnica SDK -> Rust Core`.
 
 The process protocol is the first verification transport, not a requirement for every future client. The native Rust CLI consumes `fresnica-sdk` directly for account identity, wallet protection, Reveal/Export and routine passcode signing while retaining only low-level Rust Core transaction/XDR helpers where no SDK abstraction is needed. Mobile and desktop clients use the same SDK semantics through their appropriate native binding/package layer.
 

@@ -1,15 +1,11 @@
-use std::str::FromStr;
-
 use serde_json::Value;
-use stellar_xdr::{
-    AccountId, AlphaNum12, AlphaNum4, AssetCode12, AssetCode4, ChangeTrustAsset, ChangeTrustOp,
-    OperationBody, TransactionEnvelope,
-};
+use stellar_xdr::{ChangeTrustOp, OperationBody, TransactionEnvelope};
 
+use crate::asset::AssetId;
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
     minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
-    HorizonClient, TransactionSubmission, WalletRecord,
+    HorizonGateway, TransactionSubmission, WalletRecord,
 };
 
 pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -89,17 +85,18 @@ impl FresnicaClient {
     ) -> Result<PreparedTrustline, String> {
         let wallet = resolve_write_wallet(
             self.storage(),
-            self.horizon(),
+            self.gateway(),
             self.network(),
             request.wallet.as_deref(),
         )?;
-        let asset = IssuedAsset::parse(&request.asset)?;
-        if asset.issuer == wallet.address {
+        let asset = AssetId::parse_issued(&request.asset)?;
+        let issuer = asset.issuer().expect("issued asset issuer");
+        if issuer == wallet.address {
             return Err("An asset issuer cannot create a trustline to its own asset".to_owned());
         }
 
-        let account = self.horizon().get_account(&wallet.address)?;
-        let ledger = self.horizon().get_ledger_parameters()?;
+        let account = self.gateway().get_account(&wallet.address)?;
+        let ledger = self.gateway().get_ledger_parameters()?;
         let existing = find_trustline(&account, &asset);
 
         let (operation, limit, authorization, clawback_enabled) = match &request.action {
@@ -110,13 +107,10 @@ impl FresnicaClient {
                         asset.display()
                     ));
                 }
-                if !self.horizon().account_exists(&asset.issuer)? {
-                    return Err(format!(
-                        "Asset issuer account does not exist: {}",
-                        asset.issuer
-                    ));
+                if !self.gateway().account_exists(&issuer)? {
+                    return Err(format!("Asset issuer account does not exist: {}", issuer));
                 }
-                let issuer = self.horizon().get_account(&asset.issuer)?;
+                let issuer = self.gateway().get_account(&issuer)?;
                 let (authorization, clawback_enabled) = initial_trustline_state(&issuer)?;
                 ensure_native_capacity(
                     &account,
@@ -148,11 +142,8 @@ impl FresnicaClient {
                         format_stroops(committed)
                     ));
                 }
-                if !self.horizon().account_exists(&asset.issuer)? {
-                    return Err(format!(
-                        "Asset issuer account does not exist: {}",
-                        asset.issuer
-                    ));
+                if !self.gateway().account_exists(&issuer)? {
+                    return Err(format!("Asset issuer account does not exist: {}", issuer));
                 }
                 let (authorization, clawback_enabled) = existing_trustline_state(raw)?;
                 ensure_native_capacity(
@@ -180,7 +171,7 @@ impl FresnicaClient {
                             .to_owned(),
                     );
                 }
-                ensure_not_used_by_liquidity_pool(self.horizon(), &account, &asset)?;
+                ensure_not_used_by_liquidity_pool(self.gateway(), &account, &asset)?;
                 ensure_native_capacity(
                     &account,
                     ledger.base_reserve_in_stroops,
@@ -192,7 +183,7 @@ impl FresnicaClient {
         };
 
         let body = OperationBody::ChangeTrust(ChangeTrustOp {
-            line: asset.to_xdr()?,
+            line: asset.to_change_trust_xdr()?,
             limit,
         });
         let envelope = build_single_operation_envelope(
@@ -231,69 +222,15 @@ impl FresnicaClient {
             &prepared.wallet,
             self.network(),
             &mut envelope,
-            self.horizon(),
+            self.gateway(),
             passcode,
         )
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct IssuedAsset {
-    code: String,
-    issuer: String,
-}
-
-impl IssuedAsset {
-    fn parse(value: &str) -> Result<Self, String> {
-        let (code, issuer) = value
-            .split_once(':')
-            .ok_or_else(|| "trustline asset must be CODE:GISSUER".to_owned())?;
-        if code.is_empty()
-            || code.len() > 12
-            || !code.is_ascii()
-            || !code.bytes().all(|byte| byte.is_ascii_alphanumeric())
-        {
-            return Err("issued asset code must be 1-12 ASCII letters or digits".to_owned());
-        }
-        AccountId::from_str(issuer)
-            .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-        Ok(Self {
-            code: code.to_owned(),
-            issuer: issuer.to_owned(),
-        })
-    }
-
-    fn display(&self) -> String {
-        format!("{}:{}", self.code, self.issuer)
-    }
-
-    fn to_xdr(&self) -> Result<ChangeTrustAsset, String> {
-        let issuer = AccountId::from_str(&self.issuer)
-            .map_err(|_| "asset issuer must be a Classic G address".to_owned())?;
-        if self.code.len() <= 4 {
-            let mut raw = [0u8; 4];
-            raw[..self.code.len()].copy_from_slice(self.code.as_bytes());
-            Ok(ChangeTrustAsset::CreditAlphanum4(AlphaNum4 {
-                asset_code: AssetCode4(raw),
-                issuer,
-            }))
-        } else {
-            let mut raw = [0u8; 12];
-            raw[..self.code.len()].copy_from_slice(self.code.as_bytes());
-            Ok(ChangeTrustAsset::CreditAlphanum12(AlphaNum12 {
-                asset_code: AssetCode12(raw),
-                issuer,
-            }))
-        }
-    }
-}
-
-fn find_trustline<'a>(account: &'a Value, asset: &IssuedAsset) -> Option<&'a Value> {
+fn find_trustline<'a>(account: &'a Value, asset: &AssetId) -> Option<&'a Value> {
     account.get("balances")?.as_array()?.iter().find(|raw| {
-        text(raw, "asset_type") != Some("native")
-            && text(raw, "asset_type") != Some("liquidity_pool_shares")
-            && text(raw, "asset_code") == Some(asset.code.as_str())
-            && text(raw, "asset_issuer") == Some(asset.issuer.as_str())
+        text(raw, "asset_type") != Some("liquidity_pool_shares") && asset.matches_balance(raw)
     })
 }
 
@@ -379,9 +316,9 @@ fn existing_trustline_state(raw: &Value) -> Result<(TrustlineAuthorization, bool
 }
 
 fn ensure_not_used_by_liquidity_pool(
-    horizon: &HorizonClient,
+    horizon: &HorizonGateway,
     account: &Value,
-    asset: &IssuedAsset,
+    asset: &AssetId,
 ) -> Result<(), String> {
     let balances = account
         .get("balances")
@@ -404,7 +341,7 @@ fn ensure_not_used_by_liquidity_pool(
     Ok(())
 }
 
-fn liquidity_pool_uses_asset(pool: &Value, asset: &IssuedAsset) -> Result<bool, String> {
+fn liquidity_pool_uses_asset(pool: &Value, asset: &AssetId) -> Result<bool, String> {
     let reserves = pool
         .get("reserves")
         .and_then(Value::as_array)
@@ -442,20 +379,18 @@ mod tests {
     #[test]
     fn parses_four_and_twelve_character_assets() {
         assert_eq!(
-            IssuedAsset::parse(&format!("USD:{ISSUER}"))
-                .unwrap()
-                .display(),
+            AssetId::parse(&format!("USD:{ISSUER}")).unwrap().display(),
             format!("USD:{ISSUER}")
         );
-        assert!(IssuedAsset::parse(&format!("LONGASSET12:{ISSUER}"))
+        assert!(AssetId::parse(&format!("LONGASSET12:{ISSUER}"))
             .unwrap()
-            .to_xdr()
+            .to_change_trust_xdr()
             .is_ok());
     }
 
     #[test]
     fn remove_precondition_observes_balance_and_liabilities() {
-        let asset = IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let asset = AssetId::parse(&format!("USD:{ISSUER}")).unwrap();
         let account = serde_json::json!({
             "balances": [
                 {"asset_type":"native","balance":"5.0000000","selling_liabilities":"0"},
@@ -495,7 +430,7 @@ mod tests {
 
     #[test]
     fn pool_reserves_block_removal_of_referenced_asset() {
-        let asset = IssuedAsset::parse(&format!("USD:{ISSUER}")).unwrap();
+        let asset = AssetId::parse(&format!("USD:{ISSUER}")).unwrap();
         let pool = serde_json::json!({
             "reserves": [
                 {"asset": "native", "amount": "10.0000000"},

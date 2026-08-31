@@ -1,6 +1,6 @@
 # Fresnica Python Reference
 
-This directory contains the original Python wallet/TUI implementation retained as a behavioral and UX reference. It is **not** the current cross-platform architecture contract. For current architecture terminology start at [`../../docs/README.md`](../../docs/README.md).
+This directory is Fresnica's executable laboratory for product semantics, Application Flows and candidate Capability behavior. It is **not** the cross-platform security authority or automatically a shared specification. See [`../../docs/development/refpython-laboratory.md`](../../docs/development/refpython-laboratory.md). For current architecture terminology start at [`../../docs/README.md`](../../docs/README.md).
 
 When behavior here has proved useful, the corresponding [`Application Capability`](../../docs/application-capabilities.md) should extract it as **Reference Semantics** and link back to the implementation/tests. Python implementation details remain local until cross-platform evidence promotes them into the shared contract. This makes the reference implementation an evidence source for specification evolution rather than a hidden second specification.
 

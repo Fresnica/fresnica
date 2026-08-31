@@ -48,8 +48,8 @@ class StellarKeypairSigner(Signer):
         return transaction
 
 
-class RustCoreProtectedSigner(Signer):
-    """Software signer whose protected secret is opened only inside Rust Core."""
+class FresnicaProcessProtectedSigner(Signer):
+    """Software signer whose protected secret is opened only inside Fresnica SDK/Core."""
 
     def __init__(self, public_key: str, core_client, envelope: dict, unlock_key):
         self._public_key = Keypair.from_public_key(public_key).public_key

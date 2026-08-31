@@ -20,6 +20,18 @@ The same Stellar address string may exist on more than one network. Implementati
 
 The exact network passphrase is security-significant because it participates in Stellar transaction hashing/signing. A product-visible network name is an alias/configuration label; it must resolve to the correct cryptographic network context.
 
+## Provider transition rationale
+
+The Rust reference currently uses Horizon for curated Classic account/balance/offer/trade/history resources, but this is transitional rather than a shared contract. Stellar's current API guidance marks Horizon as nearing end-of-life and recommends RPC for real-time access; the official Rust SDK set provides XDR/StrKey/RPC components but no SDF-maintained Horizon client. Fresnica therefore will not build a general Rust Horizon SDK.
+
+```text
+Application Capabilities -> Fresnica Network / Gateway -> Horizon (current) / RPC / Portfolio / history provider
+```
+
+`HorizonGateway` names the current provider adapter. Provider JSON should terminate at the gateway/normalization boundary; write-policy code should consume typed semantic views as they are justified. Reuse official Stellar protocol types such as `stellar_xdr::Asset`. Migrate endpoint families to RPC/Portfolio only when equivalent semantics and uncertain-submission behavior are preserved. Do not build a lowest-common-denominator blockchain ORM.
+
+Planned stages: isolate Horizon calls; normalize write-critical views; add RPC for covered real-time state/submission; add Portfolio/account data when suitable; retire Horizon endpoint families independently with conformance evidence.
+
 ## Stable responsibilities
 
 Other Capabilities should be able to request semantic network operations such as:

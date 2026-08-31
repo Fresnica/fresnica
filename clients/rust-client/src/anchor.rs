@@ -6,11 +6,10 @@ use ureq::unversioned::multipart::{Form, Part};
 use url::Url;
 
 use crate::anchor_http::{
-    agent as anchor_http_agent, reject_anchor_redirect, validate_anchor_https_url,
-    MAX_ANCHOR_RESPONSE_BYTES,
+    agent as anchor_http_agent, endpoint_label, get_json, put_json, read_json_response,
+    validate_anchor_https_url,
 };
 use zeroize::Zeroizing;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -243,7 +242,8 @@ pub fn put_anchor_customer(
             }
             form = form.part(file.name.as_str(), part);
         }
-        let request = anchor_http_agent().put(url.as_str())
+        let request = anchor_http_agent()
+            .put(url.as_str())
             .header("Authorization", authorization.as_str())
             .config()
             .http_status_as_error(false)
@@ -254,7 +254,17 @@ pub fn put_anchor_customer(
                 endpoint_label(&url)
             )
         })?;
-        read_json_response("SEP-12", &url, response)?
+        let (status, value) = read_json_response("SEP-12", &url, response)?;
+        if !(200..300).contains(&status) {
+            let detail = value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("request failed");
+            return Err(format!("SEP-12 returned HTTP {status}: {detail}"));
+        }
+        value
     };
     let id = value
         .get("id")
@@ -271,49 +281,16 @@ fn send_authenticated_json(
     token: &str,
     body: Option<Value>,
 ) -> Result<Value, String> {
-    let authorization = Zeroizing::new(format!("Bearer {token}"));
-    let response = match method {
-        "GET" => anchor_http_agent().get(url.as_str())
-            .header("Authorization", authorization.as_str())
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .call(),
-        "PUT" => anchor_http_agent().put(url.as_str())
-            .header("Authorization", authorization.as_str())
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .send_json(body.unwrap_or(Value::Object(Map::new()))),
+    let (status, value) = match method {
+        "GET" => get_json(url, "SEP-12", Some(token))?,
+        "PUT" => put_json(
+            url,
+            "SEP-12",
+            token,
+            body.unwrap_or(Value::Object(Map::new())),
+        )?,
         _ => return Err(format!("unsupported SEP-12 HTTP method: {method}")),
-    }
-    .map_err(|error| {
-        format!(
-            "Unable to call SEP-12 endpoint {}: {error}",
-            endpoint_label(url)
-        )
-    })?;
-    read_json_response("SEP-12", url, response)
-}
-
-fn read_json_response(
-    protocol: &str,
-    url: &Url,
-    mut response: ureq::http::Response<ureq::Body>,
-) -> Result<Value, String> {
-    let status = response.status().as_u16();
-    reject_anchor_redirect(status, &endpoint_label(url))?;
-    let value = response
-        .body_mut()
-        .with_config()
-        .limit(MAX_ANCHOR_RESPONSE_BYTES)
-        .read_json::<Value>()
-        .map_err(|error| {
-            format!(
-                "Invalid JSON from {protocol} endpoint {}: {error}",
-                endpoint_label(url)
-            )
-        })?;
+    };
     if !(200..300).contains(&status) {
         let detail = value
             .get("error")
@@ -321,16 +298,9 @@ fn read_json_response(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("request failed");
-        return Err(format!("{protocol} returned HTTP {status}: {detail}"));
+        return Err(format!("SEP-12 returned HTTP {status}: {detail}"));
     }
     Ok(value)
-}
-
-fn endpoint_label(url: &Url) -> String {
-    let mut sanitized = url.clone();
-    sanitized.set_query(None);
-    sanitized.set_fragment(None);
-    sanitized.to_string()
 }
 
 fn customer_url(server: &str) -> Result<Url, String> {

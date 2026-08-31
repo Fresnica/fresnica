@@ -9,13 +9,13 @@
     "apiVersion": 3,
     "requiresCoreClientApiVersion": 3
   },
-  "native": {
-    "packageVersion": "0.2.1",
-    "bindingApiVersion": 2,
+  "process": {
+    "packageVersion": "0.1.0",
+    "bindingApiVersion": 1,
     "requiresSdkApiVersion": 3
   },
-  "mobileCompatibility": {
-    "packageVersion": "0.1.0",
+  "native": {
+    "packageVersion": "0.2.1",
     "bindingApiVersion": 2,
     "requiresSdkApiVersion": 3
   },

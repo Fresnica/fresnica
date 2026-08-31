@@ -1,12 +1,12 @@
 use std::io::{self, Write};
 
 use fresnica_client::{
-    sign_and_submit as client_sign_and_submit, HorizonClient, WalletRecord, WalletStorage,
+    sign_and_submit as client_sign_and_submit, HorizonGateway, WalletRecord, WalletStorage,
 };
 use stellar_xdr::TransactionEnvelope;
 
 pub(crate) use fresnica_client::{
-    format_stroops, has_valid_transaction_signature, network_client, network_passphrase,
+    format_stroops, has_valid_transaction_signature, network_gateway, network_passphrase,
     parse_stroops, parse_transaction_xdr,
 };
 
@@ -30,7 +30,7 @@ pub fn sign_and_submit(
     record: &WalletRecord,
     network: &str,
     envelope: &mut TransactionEnvelope,
-    horizon: &HorizonClient,
+    horizon: &HorizonGateway,
 ) -> Result<(), String> {
     let passcode = crate::prompt_hidden("Fresnica passcode: ")?;
     let submission = client_sign_and_submit(

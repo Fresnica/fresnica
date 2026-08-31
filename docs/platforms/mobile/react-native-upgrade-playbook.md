@@ -216,12 +216,12 @@ Run only the gates implied by the changed layer.
 
 | Changed area | Required CI |
 | --- | --- |
-| `bindings/mobile/react-native/**` lifecycle/persistence/product coordinator | TypeScript + RN lifecycle tests only |
+| Mobile application lifecycle/persistence/product coordinator | Mobile-owned TypeScript + RN lifecycle tests |
 | RN host glue under Android only | Android native-module/AAR compile + lint |
 | RN host glue under Apple only | Apple native-module type-check/build |
 | Keychain/Keystore authorization code | corresponding platform auth/native signing gate |
-| `bindings/mobile/src`, Cargo/UniFFI metadata | full legacy Mobile binding generation |
-| Rust Core / `CoreClientApi` | Rust Core + mobile facade + binding conformance |
+| `bindings/native` / adapter API metadata | corresponding Native SDK + adapter conformance |
+| Rust Core / `CoreClientApi` | Rust Core + SDK + active binding conformance |
 | Android/Apple Rust packaging scripts or ABI configuration | platform packaging gates |
 | docs only | no mobile build |
 
