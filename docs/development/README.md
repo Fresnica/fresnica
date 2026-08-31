@@ -6,6 +6,7 @@ These documents are operational guides, not architecture contracts.
 - [RefPython laboratory governance](refpython-laboratory.md)
 - [Repository governance and Required CI](repository-governance.md)
 - [Focused security review — 2026-08-31](security-review-2026-08-31.md)
+- [Stellar Agent Wallet reuse and Fresnica signer integration](stellar-agent-wallet-reuse.md)
 - [Testnet CLI](testnet-cli.md)
 - [Testnet SDEX](testnet-sdex.md)
 - [Testnet validation checklist](testnet-validation-checklist.md)
