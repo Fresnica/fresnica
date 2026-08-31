@@ -85,14 +85,16 @@ The Process Binding is a **privileged owner/host surface**. API v1 transports pa
 
 ### Agent Access
 
-The current Core `AgentCapability` is dormant and has no production SDK/binding/transport consumer. Its operation-type/fee/count/expiry checks are useful prototype evidence but are insufficient authorization for autonomous signing because they do not constrain destination, asset, amount/value or operation-specific execution semantics. Do not expose it. Replace it with transaction-specific policy after a threat model and negative regression suite.
+The current Core `AgentCapability` is dormant and has no production SDK/binding/transport consumer. Its operation-type/fee/count/expiry checks are useful prototype evidence but are insufficient authorization for autonomous signing because they do not constrain destination, asset, amount/value or operation-specific execution semantics. Do not expose it.
+
+The preferred Agent direction is now reuse rather than parallel implementation: Soneso Stellar Agent Wallet supplies MCP, policy, approval, nonce/replay, audit, RPC construction and submission; Fresnica remains the protected signer authority. The current external signer seam accepts only a transaction digest, so integration must first add an application-level backend that receives the exact approved envelope, network passphrase and expected Signer identity. Do not adapt Fresnica as an arbitrary hash signer or export its S-strkey into the external keyring. See [`development/stellar-agent-wallet-reuse.md`](development/stellar-agent-wallet-reuse.md).
 
 ### Known open security work
 
 1. Pin and harden the Fresnica-owned release supply chain; add dependency audit, SBOM and provenance/attestation without forcing consumer product toolchains.
 2. Keep terminal Backup v1 legacy-only because outer wallet metadata is not authenticated; portable products should use the v2 relationship/revalidation model.
 3. Review the privileged Process Binding before using it outside RefPython/conformance hosts.
-4. Design transaction-specific Agent Access before any AI/agent signing exposure.
+4. Add the exact-envelope upstream signer seam, then prove one bounded Testnet Payment through the reused Agent stack and Fresnica protected signing.
 
 ## 4. Capability and reference status
 
@@ -110,19 +112,19 @@ Anchor currently covers SEP-1, Classic SEP-10, SEP-24-preferred / SEP-6-fallback
 
 ## 6. Validation baseline
 
-PR #122 passed the repository's full pull-request matrix, including Core, SDK, Process Binding, Rust client/CLI/TUI, RefPython, Native/Apple/Android packaging, React Native adapter, WASM and compatibility gates. The resulting `main` successfully produced Main bundle run #46.
+PR #122 passed the repository's full pull-request matrix, including Core, SDK, Process Binding, Rust client/CLI/TUI, RefPython, Native/Apple/Android packaging, React Native adapter, WASM and compatibility gates. PR #123 refreshed the shared security and integration baseline; its full pull-request matrix and resulting Main bundle #47 succeeded.
 
 The Main bundle is the preferred GitHub-to-isolated-development baseline. Do not upgrade static analysis or formatting into a claim that compilation/platform validation passed; cite the actual workflow that ran.
 
 ## 7. Immediate next work
 
-The shared repository should now prioritize security and protocol correctness rather than product-specific implementation:
+The shared repository should prioritize security and protocol correctness rather than product-specific implementation:
 
-1. keep this handoff/tasks baseline current after architectural changes;
-2. perform a focused security verification pass using source review, CodebaseMemory call tracing and executable regression/PoC tests;
-3. harden the active release supply chain;
-4. lock Backup v1 to legacy/reference use and test metadata-tampering behavior;
-5. threat-model and design transaction-specific Agent Access, then implement only a narrow first operation family;
+1. propose the exact-envelope Classic signing backend to Soneso while preserving its default keyring behavior;
+2. implement only a narrow Fresnica protected-signer adapter after that seam exists;
+3. prove one bounded Testnet Payment through upstream MCP/policy/approval/audit and Fresnica exact-XDR signing;
+4. harden the active release supply chain;
+5. lock Backup v1 to legacy/reference use and test metadata-tampering behavior;
 6. keep hardware/provider transports, uncommon SEP extensions and extra platform packages demand-driven.
 
 ## 8. Start here next session
@@ -130,6 +132,6 @@ The shared repository should now prioritize security and protocol correctness ra
 1. Verify GitHub `main`, CI and release state.
 2. Restore the newest successful Main bundle when isolated code execution is needed.
 3. Read the five common contracts and the relevant Capability file.
-4. For security work, read [`core-security-boundary.md`](core-security-boundary.md), [`sdk/process-binding.md`](sdk/process-binding.md), and the affected Core/SDK source.
+4. For Agent work, read [`development/stellar-agent-wallet-reuse.md`](development/stellar-agent-wallet-reuse.md), [`core-security-boundary.md`](core-security-boundary.md) and the exact signing source in Core/SDK.
 5. Use CodebaseMemory for orientation and call/blast-radius analysis, then verify every important conclusion against source.
 6. Preserve exact-review/exact-sign semantics and fail closed on unsupported transaction forms.
