@@ -3,7 +3,7 @@ use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    derive_classic_public_key, detect_mnemonic_language, generate_mnemonic_phrase, ClassicSigner,
+    derive_classic_public_key, detect_mnemonic_language, generate_mnemonic_phrase,
     ProtectionCredential, ProtectionError, ProtectionRegistry, SignerError, SoftwareSigner,
     WalletDerivationError,
 };

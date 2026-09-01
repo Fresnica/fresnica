@@ -4,12 +4,15 @@ use zeroize::Zeroizing;
 
 use crate::{
     derive_verified_unlock_key, export_signing_material, generate_protected_mnemonic,
-    parse_transaction_envelope_xdr, protect_mnemonic_signing_material,
-    protect_secret_signing_material, sign_protected_transaction_envelope,
-    sign_transaction_envelope, transaction_envelope_xdr, transaction_hash,
-    unlock_software_signer, AccountIdentity, AccountKind, ExportedSigningMaterial,
-    ExternalEd25519Signer, ProtectedSignerError, ProtectedSigningError, ProtectionError,
-    ProtectionRegistry, SecretStoreError, SignerError, TransactionSigningError,
+    parse_soroban_authorization_entry_xdr, parse_transaction_envelope_xdr,
+    prepare_soroban_authorization_signing, protect_mnemonic_signing_material,
+    protect_secret_signing_material, sign_protected_soroban_authorization_entry,
+    sign_protected_transaction_envelope, sign_soroban_authorization_entry,
+    sign_transaction_envelope, soroban_authorization_entry_xdr, transaction_envelope_xdr,
+    transaction_hash, unlock_software_signer, AccountIdentity, AccountKind,
+    ExportedSigningMaterial, ExternalEd25519Signer, ExternalSorobanEd25519Signer,
+    ProtectedSignerError, ProtectedSigningError, ProtectionError, ProtectionRegistry,
+    SecretStoreError, SignerError, SorobanAuthorizationSigningError, TransactionSigningError,
     WalletMaterialError, WalletUnlockKey,
 };
 
@@ -59,10 +62,7 @@ impl CoreClientApi {
     ) -> Result<ClientProtectedSoftwareSigner, ClientApiError> {
         let protected = protect_secret_signing_material(&self.registry, secret, passcode)
             .map_err(classify_wallet_material_error)?;
-        ensure_expected_signer_public_key(
-            &protected.public_key,
-            expected_signer_public_key,
-        )?;
+        ensure_expected_signer_public_key(&protected.public_key, expected_signer_public_key)?;
         Ok(ClientProtectedSoftwareSigner {
             signer_public_key: protected.public_key,
             envelope: protected.envelope,
@@ -87,10 +87,7 @@ impl CoreClientApi {
             passcode,
         )
         .map_err(classify_wallet_material_error)?;
-        ensure_expected_signer_public_key(
-            &protected.public_key,
-            expected_signer_public_key,
-        )?;
+        ensure_expected_signer_public_key(&protected.public_key, expected_signer_public_key)?;
         Ok(ClientProtectedSoftwareSigner {
             signer_public_key: protected.public_key,
             envelope: protected.envelope,
@@ -132,11 +129,7 @@ impl CoreClientApi {
         expected_source_signer_public_key: &str,
         index: usize,
     ) -> Result<ClientProtectedSoftwareSigner, ClientApiError> {
-        let material = self.reveal(
-            source_envelope,
-            passcode,
-            expected_source_signer_public_key,
-        )?;
+        let material = self.reveal(source_envelope, passcode, expected_source_signer_public_key)?;
         match material {
             ExportedSigningMaterial::Mnemonic {
                 mnemonic,
@@ -164,11 +157,7 @@ impl CoreClientApi {
         new_passcode: &str,
         expected_signer_public_key: &str,
     ) -> Result<ClientProtectedSoftwareSigner, ClientApiError> {
-        let material = self.reveal(
-            envelope,
-            current_passcode,
-            expected_signer_public_key,
-        )?;
+        let material = self.reveal(envelope, current_passcode, expected_signer_public_key)?;
         match material {
             ExportedSigningMaterial::Secret { secret } => self.protect_secret(
                 secret.as_str(),
@@ -242,8 +231,29 @@ impl CoreClientApi {
             network_passphrase,
         )
         .map_err(classify_protected_signing_error)?;
-        transaction_envelope_xdr(&transaction)
-            .map_err(|_| ClientApiError::invalid_transaction())
+        transaction_envelope_xdr(&transaction).map_err(|_| ClientApiError::invalid_transaction())
+    }
+
+    pub fn sign_soroban_authorization_xdr(
+        &self,
+        protected_envelope: &Value,
+        unlock_key: &WalletUnlockKey,
+        expected_signer_public_key: &str,
+        authorization_entry_xdr: &[u8],
+        network_passphrase: &str,
+    ) -> Result<Vec<u8>, ClientApiError> {
+        let mut entry = parse_soroban_authorization_entry_xdr(authorization_entry_xdr)
+            .map_err(classify_soroban_authorization_error)?;
+        sign_protected_soroban_authorization_entry(
+            &self.registry,
+            protected_envelope,
+            unlock_key,
+            expected_signer_public_key,
+            &mut entry,
+            network_passphrase,
+        )
+        .map_err(classify_protected_signing_error)?;
+        soroban_authorization_entry_xdr(&entry).map_err(classify_soroban_authorization_error)
     }
 
     pub fn reveal(
@@ -279,6 +289,23 @@ impl CoreClientApi {
         })
     }
 
+    pub fn prepare_soroban_authorization_signing(
+        &self,
+        authorization_entry_xdr: &[u8],
+        network_passphrase: &str,
+    ) -> Result<ClientSorobanAuthorizationSigningRequest, ClientApiError> {
+        let entry = parse_soroban_authorization_entry_xdr(authorization_entry_xdr)
+            .map_err(classify_soroban_authorization_error)?;
+        let request = prepare_soroban_authorization_signing(&entry, network_passphrase)
+            .map_err(classify_soroban_authorization_error)?;
+        Ok(ClientSorobanAuthorizationSigningRequest {
+            authorization_hash: request.authorization_hash,
+            authorization_entry_xdr: request.authorization_entry_xdr,
+            authorization_preimage_xdr: request.authorization_preimage_xdr,
+            network_passphrase: request.network_passphrase,
+        })
+    }
+
     pub fn apply_ed25519_signature(
         &self,
         transaction_xdr: &[u8],
@@ -295,8 +322,26 @@ impl CoreClientApi {
             .map_err(|_| ClientApiError::invalid_transaction())?;
         sign_transaction_envelope(&mut transaction, network_passphrase, &signer)
             .map_err(classify_external_transaction_error)?;
-        transaction_envelope_xdr(&transaction)
-            .map_err(|_| ClientApiError::invalid_transaction())
+        transaction_envelope_xdr(&transaction).map_err(|_| ClientApiError::invalid_transaction())
+    }
+
+    pub fn apply_soroban_ed25519_signature(
+        &self,
+        authorization_entry_xdr: &[u8],
+        network_passphrase: &str,
+        signer_public_key: &str,
+        signature: &[u8],
+    ) -> Result<Vec<u8>, ClientApiError> {
+        let signature: [u8; 64] = signature
+            .try_into()
+            .map_err(|_| ClientApiError::invalid_input("signature must be 64 bytes"))?;
+        let signer = ExternalSorobanEd25519Signer::new(signer_public_key, move |_| Ok(signature))
+            .map_err(classify_external_signer_error)?;
+        let mut entry = parse_soroban_authorization_entry_xdr(authorization_entry_xdr)
+            .map_err(classify_soroban_authorization_error)?;
+        sign_soroban_authorization_entry(&mut entry, network_passphrase, &signer)
+            .map_err(classify_soroban_authorization_error)?;
+        soroban_authorization_entry_xdr(&entry).map_err(classify_soroban_authorization_error)
     }
 }
 
@@ -341,6 +386,14 @@ pub struct ClientEd25519SigningRequest {
     pub network_passphrase: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientSorobanAuthorizationSigningRequest {
+    pub authorization_hash: [u8; 32],
+    pub authorization_entry_xdr: Vec<u8>,
+    pub authorization_preimage_xdr: Vec<u8>,
+    pub network_passphrase: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ClientApiErrorCode {
@@ -350,6 +403,7 @@ pub enum ClientApiErrorCode {
     InvalidProtectedData,
     IdentityMismatch,
     InvalidTransaction,
+    InvalidAuthorization,
     CoreError,
 }
 
@@ -362,6 +416,7 @@ impl ClientApiErrorCode {
             Self::InvalidProtectedData => "invalid-protected-data",
             Self::IdentityMismatch => "identity-mismatch",
             Self::InvalidTransaction => "invalid-transaction",
+            Self::InvalidAuthorization => "invalid-authorization",
             Self::CoreError => "core-error",
         }
     }
@@ -425,6 +480,13 @@ impl ClientApiError {
         }
     }
 
+    fn invalid_authorization() -> Self {
+        Self {
+            code: ClientApiErrorCode::InvalidAuthorization,
+            message: "invalid Soroban authorization entry or signature".to_owned(),
+        }
+    }
+
     fn core(message: impl Into<String>) -> Self {
         Self {
             code: ClientApiErrorCode::CoreError,
@@ -482,12 +544,17 @@ fn classify_protected_signing_error(error: ProtectedSigningError) -> ClientApiEr
     match error {
         ProtectedSigningError::Unlock(error) => classify_protected_signer_error(error),
         ProtectedSigningError::Transaction(_) => ClientApiError::invalid_transaction(),
+        ProtectedSigningError::SorobanAuthorization(error) => {
+            classify_soroban_authorization_error(error)
+        }
     }
 }
 
 fn classify_external_signer_error(error: SignerError) -> ClientApiError {
     match error {
-        SignerError::InvalidPublicKey => ClientApiError::invalid_input("signer_public_key is invalid"),
+        SignerError::InvalidPublicKey => {
+            ClientApiError::invalid_input("signer_public_key is invalid")
+        }
         SignerError::InvalidSecret => ClientApiError::invalid_input(error.to_string()),
         SignerError::ExternalProvider(_) => ClientApiError::core(error.to_string()),
     }
@@ -499,6 +566,22 @@ fn classify_external_transaction_error(error: TransactionSigningError) -> Client
         TransactionSigningError::Xdr(_)
         | TransactionSigningError::InvalidSignature
         | TransactionSigningError::DuplicateSignature => ClientApiError::invalid_transaction(),
+    }
+}
+
+fn classify_soroban_authorization_error(error: SorobanAuthorizationSigningError) -> ClientApiError {
+    match error {
+        SorobanAuthorizationSigningError::Signer(error) => classify_external_signer_error(error),
+        SorobanAuthorizationSigningError::Xdr(_)
+        | SorobanAuthorizationSigningError::SourceAccountCredential
+        | SorobanAuthorizationSigningError::NonAccountCredential
+        | SorobanAuthorizationSigningError::DelegatedCredentialRequiresProvider
+        | SorobanAuthorizationSigningError::InvalidSignature
+        | SorobanAuthorizationSigningError::DuplicateSignature
+        | SorobanAuthorizationSigningError::InvalidSignaturePayload
+        | SorobanAuthorizationSigningError::UnsupportedSignaturePayload => {
+            ClientApiError::invalid_authorization()
+        }
     }
 }
 
@@ -532,7 +615,8 @@ fn classify_secret_store_error(error: SecretStoreError) -> ClientApiError {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde_json::{json, Value};
 
     use super::*;
 
@@ -565,6 +649,13 @@ mod tests {
             .step_by(2)
             .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
             .collect()
+    }
+
+    fn authorization_vector() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/soroban-authorization-signing-v1.json"
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -601,6 +692,102 @@ mod tests {
             )
             .unwrap();
         assert_eq!(signed, decode_hex(SIGNED_XDR_HEX));
+    }
+
+    #[test]
+    fn typed_api_roundtrips_protected_soroban_authorization_vector() {
+        let vector = authorization_vector();
+        let case = &vector["cases"][0];
+        let unsigned = STANDARD
+            .decode(case["unsigned_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_preimage = STANDARD
+            .decode(case["authorization_preimage_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_hash = decode_hex(case["authorization_hash_hex"].as_str().unwrap());
+        let expected_signed = STANDARD
+            .decode(case["signed_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+
+        let api = CoreClientApi::new();
+        let protected = api
+            .protect_secret(SECRET, "passcode", Some(PUBLIC))
+            .unwrap();
+        let unlock_key = api
+            .derive_unlock_key(&protected.envelope, "passcode", PUBLIC)
+            .unwrap();
+        let prepared = api
+            .prepare_soroban_authorization_signing(&unsigned, TESTNET)
+            .unwrap();
+        assert_eq!(prepared.authorization_entry_xdr, unsigned);
+        assert_eq!(prepared.authorization_preimage_xdr, expected_preimage);
+        assert_eq!(prepared.authorization_hash.as_slice(), expected_hash);
+        assert_eq!(prepared.network_passphrase, TESTNET);
+
+        let signed = api
+            .sign_soroban_authorization_xdr(
+                &protected.envelope,
+                &unlock_key,
+                PUBLIC,
+                &prepared.authorization_entry_xdr,
+                TESTNET,
+            )
+            .unwrap();
+        assert_eq!(signed, expected_signed);
+    }
+
+    #[test]
+    fn typed_api_applies_external_soroban_signature_vector() {
+        let vector = authorization_vector();
+        let case = &vector["cases"][0];
+        let unsigned = STANDARD
+            .decode(case["unsigned_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let signature = decode_hex(case["signature_hex"].as_str().unwrap());
+        let expected_signed = STANDARD
+            .decode(case["signed_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+
+        let api = CoreClientApi::new();
+        let signed = api
+            .apply_soroban_ed25519_signature(&unsigned, TESTNET, PUBLIC, &signature)
+            .unwrap();
+        assert_eq!(signed, expected_signed);
+    }
+
+    #[test]
+    fn typed_api_distinguishes_invalid_soroban_authorization() {
+        let api = CoreClientApi::new();
+        let error = api
+            .prepare_soroban_authorization_signing(b"not-xdr", TESTNET)
+            .unwrap_err();
+        assert_eq!(error.code(), ClientApiErrorCode::InvalidAuthorization);
+        assert_eq!(error.code().as_str(), "invalid-authorization");
+
+        let vector = authorization_vector();
+        let unsigned = STANDARD
+            .decode(
+                vector["cases"][0]["unsigned_entry_xdr_base64"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+        let protected = api
+            .protect_secret(SECRET, "passcode", Some(PUBLIC))
+            .unwrap();
+        let key = api
+            .derive_unlock_key(&protected.envelope, "passcode", PUBLIC)
+            .unwrap();
+        let mismatch = api
+            .sign_soroban_authorization_xdr(
+                &protected.envelope,
+                &key,
+                OTHER_PUBLIC,
+                &unsigned,
+                TESTNET,
+            )
+            .unwrap_err();
+        assert_eq!(mismatch.code(), ClientApiErrorCode::IdentityMismatch);
     }
 
     #[test]
@@ -646,12 +833,7 @@ mod tests {
             .generate_mnemonic("english", 128, "", 0, "passcode")
             .unwrap();
         let error = api
-            .derive_mnemonic_signer(
-                &generated.signer.envelope,
-                "passcode",
-                OTHER_PUBLIC,
-                1,
-            )
+            .derive_mnemonic_signer(&generated.signer.envelope, "passcode", OTHER_PUBLIC, 1)
             .err()
             .expect("identity mismatch must fail");
         assert_eq!(error.code(), ClientApiErrorCode::IdentityMismatch);
@@ -695,7 +877,10 @@ mod tests {
         let prepared = api
             .prepare_ed25519_signing(&decode_hex(UNSIGNED_XDR_HEX), TESTNET)
             .unwrap();
-        assert_eq!(prepared.transaction_hash.to_vec(), decode_hex(TRANSACTION_HASH_HEX));
+        assert_eq!(
+            prepared.transaction_hash.to_vec(),
+            decode_hex(TRANSACTION_HASH_HEX)
+        );
         assert_eq!(prepared.transaction_xdr, decode_hex(UNSIGNED_XDR_HEX));
 
         let signed = api

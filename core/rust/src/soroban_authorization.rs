@@ -224,6 +224,8 @@ pub enum SorobanAuthorizationSigningError {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde_json::Value;
     use stellar_strkey::ed25519::PublicKey as StrkeyPublicKey;
     use stellar_xdr::{
         AccountId, PublicKey, SorobanAddressCredentials, SorobanCredentials, Uint256,
@@ -271,6 +273,50 @@ mod tests {
             ScVal::Vec(Some(values)) => values.as_ref(),
             _ => panic!("test expected signature vector"),
         }
+    }
+
+    fn authorization_vector() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/soroban-authorization-signing-v1.json"
+        ))
+        .unwrap()
+    }
+
+    fn decode_hex(text: &str) -> Vec<u8> {
+        assert_eq!(text.len() % 2, 0);
+        (0..text.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&text[index..index + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn shared_authorization_vector_matches_official_xdr_and_signature() {
+        let vector = authorization_vector();
+        let case = &vector["cases"][0];
+        let unsigned = STANDARD
+            .decode(case["unsigned_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_preimage = STANDARD
+            .decode(case["authorization_preimage_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_hash = decode_hex(case["authorization_hash_hex"].as_str().unwrap());
+        let expected_signed = STANDARD
+            .decode(case["signed_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let parsed = parse_soroban_authorization_entry_xdr(&unsigned).unwrap();
+        let prepared = prepare_soroban_authorization_signing(&parsed, TESTNET).unwrap();
+        assert_eq!(prepared.authorization_entry_xdr, unsigned);
+        assert_eq!(prepared.authorization_preimage_xdr, expected_preimage);
+        assert_eq!(prepared.authorization_hash.as_slice(), expected_hash);
+
+        let signer = SoftwareSigner::from_secret(SECRET).unwrap();
+        let mut signed = parsed;
+        sign_soroban_authorization_entry(&mut signed, TESTNET, &signer).unwrap();
+        assert_eq!(
+            soroban_authorization_entry_xdr(&signed).unwrap(),
+            expected_signed
+        );
     }
 
     #[test]

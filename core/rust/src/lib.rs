@@ -23,10 +23,11 @@ pub use agent_access::{
 pub use client_api::{
     ClientAccountIdentity, ClientAccountKind, ClientApiError, ClientApiErrorCode,
     ClientEd25519SigningRequest, ClientGeneratedMnemonic, ClientProtectedSoftwareSigner,
-    CoreClientApi, CLIENT_API_VERSION,
+    ClientSorobanAuthorizationSigningRequest, CoreClientApi, CLIENT_API_VERSION,
 };
 pub use protected_signer::{
-    derive_verified_unlock_key, export_signing_material, sign_protected_transaction_envelope,
+    derive_verified_unlock_key, export_signing_material,
+    sign_protected_soroban_authorization_entry, sign_protected_transaction_envelope,
     unlock_software_signer, ExportedSigningMaterial, ProtectedSignerError, ProtectedSigningError,
 };
 pub use protection::{

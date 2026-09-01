@@ -1,5 +1,5 @@
 use fresnica_core::{
-    derive_classic_public_key, derive_classic_signer, detect_mnemonic_language, ClassicSigner,
+    derive_classic_public_key, derive_classic_signer, detect_mnemonic_language,
 };
 use serde::Deserialize;
 
