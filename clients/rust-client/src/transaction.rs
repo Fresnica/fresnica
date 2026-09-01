@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -78,7 +79,7 @@ pub fn resolve_write_wallet(
     Ok(record)
 }
 
-fn resolve_network_wallet(
+pub(crate) fn resolve_network_wallet(
     storage: &WalletStorage,
     network: &str,
     name: Option<&str>,
@@ -200,7 +201,7 @@ pub struct TransactionSubmission {
     pub ledger: Option<u64>,
 }
 
-fn ensure_transaction_not_expired(envelope: &TransactionEnvelope) -> Result<(), String> {
+pub(crate) fn ensure_transaction_not_expired(envelope: &TransactionEnvelope) -> Result<(), String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "system clock is before Unix epoch".to_owned())?
@@ -324,20 +325,20 @@ struct PendingTransaction {
     submitted_at: String,
 }
 
-struct PendingTransactionStore {
+pub(crate) struct PendingTransactionStore {
     path: PathBuf,
     ttl_seconds: i64,
 }
 
 impl PendingTransactionStore {
-    fn for_home(home: &Path) -> Self {
+    pub(crate) fn for_home(home: &Path) -> Self {
         Self {
             path: home.join("pending-transactions.json"),
             ttl_seconds: PENDING_TTL_SECONDS,
         }
     }
 
-    fn remember(
+    pub(crate) fn remember(
         &self,
         network: &str,
         account: &str,
@@ -397,6 +398,58 @@ impl PendingTransactionStore {
                     }
                     retained.push(item);
                 }
+            }
+        }
+
+        if changed {
+            self.save(&retained)?;
+        }
+        if let Some(tx_hash) = pending_hash {
+            return Err(format!(
+                "A previous transaction is still pending confirmation: {tx_hash}"
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn reconcile_with_async<F, Fut>(
+        &self,
+        network: &str,
+        account: &str,
+        mut lookup: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = Result<bool, String>>,
+    {
+        let items = self.load()?;
+        if !items
+            .iter()
+            .any(|item| item.network == network && item.account == account)
+        {
+            return Ok(());
+        }
+
+        let now = OffsetDateTime::now_utc();
+        let mut retained = Vec::with_capacity(items.len());
+        let mut pending_hash = None;
+        let mut changed = false;
+
+        for item in items {
+            if item.network != network || item.account != account {
+                retained.push(item);
+                continue;
+            }
+
+            if lookup(item.tx_hash.clone()).await? {
+                changed = true;
+            } else if pending_age_seconds(&item, now) >= self.ttl_seconds {
+                changed = true;
+            } else {
+                if pending_hash.is_none() {
+                    pending_hash = Some(item.tx_hash.clone());
+                }
+                retained.push(item);
             }
         }
 
