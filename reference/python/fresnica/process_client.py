@@ -26,7 +26,7 @@ from .errors import (
 from .secret_store import WalletUnlockKey
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 @dataclass(frozen=True)

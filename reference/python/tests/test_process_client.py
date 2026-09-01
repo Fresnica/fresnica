@@ -52,10 +52,10 @@ def test_tui_core_subtitle_reports_python_reference_without_bridge():
 
 def test_process_binding_version(core_client):
     version = core_client.version()
-    assert version["protocol_version"] == 1
+    assert version["protocol_version"] == 2
     assert version["client_api_version"] == 4
-    assert version["process_binding_version"] == "0.1.0"
-    assert version["process_binding_api_version"] == 1
+    assert version["process_binding_version"] == "0.2.0"
+    assert version["process_binding_api_version"] == 2
     assert version["sdk_api_version"] == 4
 
 

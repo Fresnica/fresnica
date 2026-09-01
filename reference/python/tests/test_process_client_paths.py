@@ -23,7 +23,7 @@ def test_relative_core_binary_is_resolved_before_execution(tmp_path, monkeypatch
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
         return SimpleNamespace(
-            stdout=b'{"ok":true,"protocol_version":1,"result":{"core_version":"test","protocol_version":1,"client_api_version":2}}'
+            stdout=b'{"ok":true,"protocol_version":2,"result":{"core_version":"test","protocol_version":2,"client_api_version":4}}'
         )
 
     monkeypatch.setattr("fresnica.process_client.subprocess.run", fake_run)

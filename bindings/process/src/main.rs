@@ -6,7 +6,7 @@ use fresnica_sdk::{FresnicaSdk, SdkError, SdkSigningMaterialKind, SDK_API_VERSIO
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
-pub const PROCESS_BINDING_API_VERSION: u64 = 1;
+pub const PROCESS_BINDING_API_VERSION: u64 = 2;
 
 fn main() {
     match run() {
