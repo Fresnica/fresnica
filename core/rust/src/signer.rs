@@ -34,7 +34,7 @@ pub trait ClassicSigner {
 }
 
 pub trait SorobanAuthorizationSigner {
-    fn signer_public_key(&self) -> &str;
+    fn public_key(&self) -> &str;
     fn sign_soroban_authorization(
         &self,
         request: &SorobanAuthorizationSigningRequest,
@@ -60,6 +60,10 @@ impl SoftwareSigner {
             public_key,
         }
     }
+
+    pub fn public_key(&self) -> &str {
+        &self.public_key
+    }
 }
 
 impl ClassicSigner for SoftwareSigner {
@@ -76,7 +80,7 @@ impl ClassicSigner for SoftwareSigner {
 }
 
 impl SorobanAuthorizationSigner for SoftwareSigner {
-    fn signer_public_key(&self) -> &str {
+    fn public_key(&self) -> &str {
         &self.public_key
     }
 
@@ -148,7 +152,7 @@ impl ExternalSorobanEd25519Signer {
 }
 
 impl SorobanAuthorizationSigner for ExternalSorobanEd25519Signer {
-    fn signer_public_key(&self) -> &str {
+    fn public_key(&self) -> &str {
         &self.public_key
     }
 
