@@ -2,14 +2,15 @@ use std::fmt;
 
 use serde_json::{Map, Value};
 use stellar_strkey::ed25519::PublicKey;
-use stellar_xdr::TransactionEnvelope;
+use stellar_xdr::{SorobanAuthorizationEntry, TransactionEnvelope};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::{
-    derive_classic_signer, detect_mnemonic_language, sign_transaction_envelope, ClassicSigner,
-    ProtectionCredential, ProtectionError, ProtectionRegistry, SecretStoreError, SignerError,
-    SoftwareSigner, TransactionSigningError, WalletDerivationError, WalletUnlockKey,
+    derive_classic_signer, detect_mnemonic_language, sign_soroban_authorization_entry,
+    sign_transaction_envelope, ProtectionCredential, ProtectionError, ProtectionRegistry,
+    SecretStoreError, SignerError, SoftwareSigner, SorobanAuthorizationSigningError,
+    TransactionSigningError, WalletDerivationError, WalletUnlockKey,
 };
 
 pub enum ExportedSigningMaterial {
@@ -116,6 +117,24 @@ pub fn sign_protected_transaction_envelope(
     Ok(())
 }
 
+pub fn sign_protected_soroban_authorization_entry(
+    registry: &ProtectionRegistry,
+    protected_envelope: &Value,
+    unlock_key: &WalletUnlockKey,
+    expected_public_key: &str,
+    authorization_entry: &mut SorobanAuthorizationEntry,
+    network_passphrase: &str,
+) -> Result<(), ProtectedSigningError> {
+    let signer = unlock_software_signer(
+        registry,
+        protected_envelope,
+        unlock_key,
+        expected_public_key,
+    )?;
+    sign_soroban_authorization_entry(authorization_entry, network_passphrase, &signer)?;
+    Ok(())
+}
+
 pub fn export_signing_material(
     registry: &ProtectionRegistry,
     envelope: &Value,
@@ -157,8 +176,7 @@ fn signing_material_from_payload(
         }),
         "mnemonic" => {
             let mnemonic = mnemonic.ok_or(ProtectedSignerError::InvalidSigningMaterial)?;
-            let mnemonic_passphrase =
-                passphrase.unwrap_or_else(|| Zeroizing::new(String::new()));
+            let mnemonic_passphrase = passphrase.unwrap_or_else(|| Zeroizing::new(String::new()));
             let index = take_optional_index(&mut object, "index")?;
             let language = take_optional_language(&mut object, "language", &mnemonic)?;
             Ok(ExportedSigningMaterial::Mnemonic {
@@ -185,10 +203,7 @@ fn ensure_expected_identity(
     Ok(())
 }
 
-fn take_string(
-    object: &mut Map<String, Value>,
-    key: &str,
-) -> Result<String, ProtectedSignerError> {
+fn take_string(object: &mut Map<String, Value>, key: &str) -> Result<String, ProtectedSignerError> {
     match object.remove(key) {
         Some(Value::String(value)) => Ok(value),
         _ => Err(ProtectedSignerError::InvalidSigningMaterial),
@@ -256,6 +271,8 @@ pub enum ProtectedSigningError {
     Unlock(#[from] ProtectedSignerError),
     #[error(transparent)]
     Transaction(#[from] TransactionSigningError),
+    #[error(transparent)]
+    SorobanAuthorization(#[from] SorobanAuthorizationSigningError),
 }
 
 #[cfg(test)]
@@ -314,8 +331,7 @@ mod tests {
         let registry = ProtectionRegistry::new();
         let envelope = protected_secret(&registry, "correct");
 
-        let error =
-            derive_verified_unlock_key(&registry, &envelope, "wrong", PUBLIC).unwrap_err();
+        let error = derive_verified_unlock_key(&registry, &envelope, "wrong", PUBLIC).unwrap_err();
 
         assert_eq!(
             error,
