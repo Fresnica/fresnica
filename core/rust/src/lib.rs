@@ -10,6 +10,7 @@ pub mod protected_signer;
 pub mod protection;
 pub mod secret_store;
 pub mod signer;
+pub mod soroban_authorization;
 pub mod transaction;
 pub mod wallet;
 pub mod wallet_material;
@@ -38,7 +39,14 @@ pub use secret_store::{
     SCRYPT_R,
 };
 pub use signer::{
-    ClassicSigner, ExternalEd25519Signer, SignerError, SoftwareSigner, TransactionSigningRequest,
+    ClassicSigner, ExternalEd25519Signer, ExternalSorobanEd25519Signer, SignerError,
+    SoftwareSigner, SorobanAuthorizationSigner, SorobanAuthorizationSigningRequest,
+    TransactionSigningRequest,
+};
+pub use soroban_authorization::{
+    parse_soroban_authorization_entry_xdr, prepare_soroban_authorization_signing,
+    sign_soroban_authorization_entry, soroban_authorization_entry_xdr,
+    soroban_authorization_preimage, SorobanAuthorizationSigningError,
 };
 pub use transaction::{
     network_id, parse_transaction_envelope_xdr, sign_transaction_envelope,
