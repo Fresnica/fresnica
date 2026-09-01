@@ -23,9 +23,9 @@ jobs:
           if grep -Fxq 'version = "0.2.0"' bindings/process/Cargo.toml; then
             echo "Process v2 source is already applied; verification-only pass."
           else
-            test "$(sha256sum .ci/process-v2.patch.gz.b64 | awk '{print $1}')" = "13f0a0f356a5130f64b447933c1ced39e9c2b76d95b52f4a4de95ac13ef42120"
+            test "$(sha256sum .ci/process-v2.patch.gz.b64 | awk '{print $1}')" = "99fab22001c4e9728fab6291ae491f34f4ef348a7ed47cffb07725c9d09401ad"
             base64 -d .ci/process-v2.patch.gz.b64 | gzip -d > /tmp/process-v2.patch
-            test "$(sha256sum /tmp/process-v2.patch | awk '{print $1}')" = "dc445f188cedc82f6142465055de20ec2fa9dd8291d5b3a24ad54b2e54d92925"
+            test "$(sha256sum /tmp/process-v2.patch | awk '{print $1}')" = "997e2260bf7ca2e6d25649b719337a4e231718ca229224730166adfb236da6cf"
             git apply --check --recount /tmp/process-v2.patch
             git apply --recount /tmp/process-v2.patch
           fi
@@ -36,7 +36,7 @@ jobs:
           if git diff --quiet; then
             exit 0
           fi
-          cat > /tmp/expected <<'EOF'
+          cat > /tmp/expected <<'PATHS'
           bindings/process/Cargo.toml
           bindings/process/README.md
           bindings/process/src/main.rs
@@ -45,8 +45,9 @@ jobs:
           docs/tasks.md
           reference/python/fresnica/process_client.py
           reference/python/tests/test_process_client.py
+          reference/python/tests/test_process_client_paths.py
           sdk/compatibility/manifest.json
-          EOF
+          PATHS
           git diff --name-only | sort > /tmp/actual
           sort -o /tmp/expected /tmp/expected
           diff -u /tmp/expected /tmp/actual
@@ -88,6 +89,7 @@ jobs:
             docs/tasks.md \
             reference/python/fresnica/process_client.py \
             reference/python/tests/test_process_client.py \
+            reference/python/tests/test_process_client_paths.py \
             sdk/compatibility/manifest.json
           git diff --cached --check
           git commit -m "feat(process): transport Soroban authorization"
