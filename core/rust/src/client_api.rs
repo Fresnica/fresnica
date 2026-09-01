@@ -16,7 +16,7 @@ use crate::{
     WalletMaterialError, WalletUnlockKey,
 };
 
-pub const CLIENT_API_VERSION: u64 = 3;
+pub const CLIENT_API_VERSION: u64 = 4;
 
 /// Transport-neutral Core boundary for process, mobile, desktop, and SDK hosts.
 ///

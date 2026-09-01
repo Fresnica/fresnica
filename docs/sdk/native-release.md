@@ -54,7 +54,7 @@ Required marker shape:
 }
 ```
 
-Do not add a marker merely to test the workflow. Pull requests can validate the workflow/package contract without a marker, and `workflow_dispatch` requires an existing marker before it will publish.
+Do not add a marker merely to test the workflow. Historical release markers are immutable records and are not revalidated against newer Core/SDK source on ordinary pull requests. A marker is validated when that marker changes and again when a publish is requested; `workflow_dispatch` requires an existing marker before it will publish.
 
 ## Binary artifacts
 
