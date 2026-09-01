@@ -23,8 +23,15 @@ jobs:
           if grep -Fxq 'version = "0.2.0"' bindings/process/Cargo.toml; then
             echo "Process v2 source is already applied; verification-only pass."
           else
-            test "$(sha256sum .ci/process-v2.patch.gz.b64 | awk '{print $1}')" = "99fab22001c4e9728fab6291ae491f34f4ef348a7ed47cffb07725c9d09401ad"
-            base64 -d .ci/process-v2.patch.gz.b64 | gzip -d > /tmp/process-v2.patch
+            cat \
+              .ci/process-v2.part00 \
+              .ci/process-v2.part01 \
+              .ci/process-v2.part02 \
+              .ci/process-v2.part03 \
+              .ci/process-v2.part04 \
+              > /tmp/process-v2.patch.gz.b64
+            test "$(sha256sum /tmp/process-v2.patch.gz.b64 | awk '{print $1}')" = "99fab22001c4e9728fab6291ae491f34f4ef348a7ed47cffb07725c9d09401ad"
+            base64 -d /tmp/process-v2.patch.gz.b64 | gzip -d > /tmp/process-v2.patch
             test "$(sha256sum /tmp/process-v2.patch | awk '{print $1}')" = "997e2260bf7ca2e6d25649b719337a4e231718ca229224730166adfb236da6cf"
             git apply --check --recount /tmp/process-v2.patch
             git apply --recount /tmp/process-v2.patch
