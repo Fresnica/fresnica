@@ -1,0 +1,31 @@
+name: Probe RefPython Soroban expiry Testnet
+
+on:
+  push:
+    branches:
+      - probe/refpython-soroban-expiry-live-20260901
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: reference/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Fresnica Process Binding
+        run: cargo build --release --manifest-path ../../bindings/process/Cargo.toml --bin fresnica-process
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Run Soroban live Testnet proof
+        env:
+          FRESNICA_LIVE_TESTNET: "1"
+          FRESNICA_PROCESS_BIN: ${{ github.workspace }}/bindings/process/target/release/fresnica-process
+        run: uv run pytest -q -s tests/test_soroban_testnet_live.py
