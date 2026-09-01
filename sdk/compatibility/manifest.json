@@ -10,8 +10,8 @@
     "requiresCoreClientApiVersion": 4
   },
   "process": {
-    "packageVersion": "0.1.0",
-    "bindingApiVersion": 1,
+    "packageVersion": "0.2.0",
+    "bindingApiVersion": 2,
     "requiresSdkApiVersion": 4
   },
   "native": {
