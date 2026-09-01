@@ -76,6 +76,17 @@ class FresnicaProcessProtectedSigner(Signer):
         transaction.signatures = signed.signatures
         return transaction
 
+    def sign_soroban_authorization_entry(
+        self, authorization_entry_xdr: str, network_passphrase: str
+    ) -> str:
+        return self.core_client.sign_soroban_authorization(
+            self.envelope,
+            self.unlock_key,
+            self.public_key,
+            authorization_entry_xdr,
+            network_passphrase,
+        )
+
 
 class ExternalEd25519Signer(Signer):
     """Verified adapter for a hardware/device/process Ed25519 signer.

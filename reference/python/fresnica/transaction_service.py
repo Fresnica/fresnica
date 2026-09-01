@@ -22,12 +22,17 @@ class TransactionService:
         return prepared
 
     def submit(self, prepared) -> TransactionResult:
+        assert_submit_binding = getattr(prepared, "assert_submit_binding", None)
+        if assert_submit_binding is not None:
+            assert_submit_binding()
         try:
             response = self.submit_service.submit(prepared.envelope)
         except TransactionSubmissionUncertain as exc:
             if self.pending_service is not None:
                 review = getattr(prepared, "review", None)
-                account = getattr(review, "source", None)
+                account = getattr(review, "source", None) or getattr(
+                    review, "fee_payer", None
+                )
                 if account:
                     self.pending_service.remember(
                         account,

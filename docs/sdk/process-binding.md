@@ -6,7 +6,7 @@ The Process Binding is an optional stdin/stdout adapter over `fresnica-sdk`. It 
 
 It owns one-request/one-response JSON/base64 transport and stable process error/version mapping only. It does not own cryptography, persistence, networking, OS authentication or product Flows. Sensitive passphrases, mnemonics, secrets and WalletUnlockKey values travel over stdin, never argv/environment variables.
 
-Binary: `fresnica-process`; environment discovery: `FRESNICA_PROCESS_BIN`. API v1 operations are version, parse-account, protect-secret/mnemonic, generate/derive mnemonic signer, reprotect, derive/validate unlock key, sign with unlock key or fresh passphrase, reveal, and external Ed25519 prepare/apply.
+Binary: `fresnica-process`; environment discovery: `FRESNICA_PROCESS_BIN`. API v1 operations are version, parse-account, protect-secret/mnemonic, generate/derive mnemonic signer, reprotect, derive/validate unlock key, transaction sign with unlock key or fresh passphrase, Reveal, external transaction Ed25519 prepare/apply, and dedicated Soroban authorization-entry sign/prepare/apply operations. The Soroban operations accept the full authorization-entry XDR plus network passphrase and delegate hashing/signature construction to SDK/Core; they do not expose a generic hash-signing oracle.
 
 Desktop selection: Rust/Tauri backend -> direct SDK; Swift/native -> Native SDK; Electron/non-Rust -> Process Binding when a managed sidecar is appropriate. The host owns process integrity/update, secure storage and OS authorization.
 
