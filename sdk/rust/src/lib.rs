@@ -16,7 +16,7 @@ use serde_json::Value;
 use zeroize::{Zeroize, Zeroizing};
 
 /// Version of the platform-neutral Fresnica SDK semantic contract.
-pub const SDK_API_VERSION: u64 = 3;
+pub const SDK_API_VERSION: u64 = 4;
 
 /// Stateless platform-neutral entry point.
 ///
@@ -259,6 +259,53 @@ impl FresnicaSdk {
         .map_err(SdkError::from)
     }
 
+    pub fn sign_soroban_authorization_xdr(
+        &self,
+        envelope_json: String,
+        unlock_key: Vec<u8>,
+        expected_signer_public_key: String,
+        authorization_entry_xdr: Vec<u8>,
+        network_passphrase: String,
+    ) -> Result<Vec<u8>, SdkError> {
+        let envelope = parse_envelope(&envelope_json)?;
+        let unlock_key = sdk_unlock_key(unlock_key)?;
+        self.core()
+            .sign_soroban_authorization_xdr(
+                &envelope,
+                &unlock_key,
+                &expected_signer_public_key,
+                &authorization_entry_xdr,
+                &network_passphrase,
+            )
+            .map_err(SdkError::from)
+    }
+
+    /// Sign a Soroban authorization entry with a fresh application passcode
+    /// without exposing `WalletUnlockKey` material outside Rust.
+    pub fn sign_soroban_authorization_xdr_with_passcode(
+        &self,
+        envelope_json: String,
+        passcode: String,
+        expected_signer_public_key: String,
+        authorization_entry_xdr: Vec<u8>,
+        network_passphrase: String,
+    ) -> Result<Vec<u8>, SdkError> {
+        let envelope = parse_envelope(&envelope_json)?;
+        let passcode = Zeroizing::new(passcode);
+        let core = self.core();
+        let unlock_key = core
+            .derive_unlock_key(&envelope, passcode.as_str(), &expected_signer_public_key)
+            .map_err(SdkError::from)?;
+        core.sign_soroban_authorization_xdr(
+            &envelope,
+            &unlock_key,
+            &expected_signer_public_key,
+            &authorization_entry_xdr,
+            &network_passphrase,
+        )
+        .map_err(SdkError::from)
+    }
+
     /// Explicitly declassify recovery material using a fresh application passcode.
     pub fn reveal(
         &self,
@@ -317,6 +364,23 @@ impl FresnicaSdk {
         })
     }
 
+    pub fn prepare_soroban_authorization_signing(
+        &self,
+        authorization_entry_xdr: Vec<u8>,
+        network_passphrase: String,
+    ) -> Result<SdkSorobanAuthorizationSigningRequest, SdkError> {
+        let request = self
+            .core()
+            .prepare_soroban_authorization_signing(&authorization_entry_xdr, &network_passphrase)
+            .map_err(SdkError::from)?;
+        Ok(SdkSorobanAuthorizationSigningRequest {
+            authorization_hash: request.authorization_hash.to_vec(),
+            authorization_entry_xdr: request.authorization_entry_xdr,
+            authorization_preimage_xdr: request.authorization_preimage_xdr,
+            network_passphrase: request.network_passphrase,
+        })
+    }
+
     pub fn apply_ed25519_signature(
         &self,
         transaction_xdr: Vec<u8>,
@@ -327,6 +391,23 @@ impl FresnicaSdk {
         self.core()
             .apply_ed25519_signature(
                 &transaction_xdr,
+                &network_passphrase,
+                &signer_public_key,
+                &signature,
+            )
+            .map_err(SdkError::from)
+    }
+
+    pub fn apply_soroban_ed25519_signature(
+        &self,
+        authorization_entry_xdr: Vec<u8>,
+        network_passphrase: String,
+        signer_public_key: String,
+        signature: Vec<u8>,
+    ) -> Result<Vec<u8>, SdkError> {
+        self.core()
+            .apply_soroban_ed25519_signature(
+                &authorization_entry_xdr,
                 &network_passphrase,
                 &signer_public_key,
                 &signature,
@@ -376,6 +457,14 @@ pub struct SdkEd25519SigningRequest {
     pub network_passphrase: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SdkSorobanAuthorizationSigningRequest {
+    pub authorization_hash: Vec<u8>,
+    pub authorization_entry_xdr: Vec<u8>,
+    pub authorization_preimage_xdr: Vec<u8>,
+    pub network_passphrase: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SdkSigningMaterialKind {
@@ -403,6 +492,7 @@ pub enum SdkErrorCode {
     InvalidProtectedData,
     IdentityMismatch,
     InvalidTransaction,
+    InvalidAuthorization,
     CoreError,
 }
 
@@ -415,6 +505,7 @@ impl SdkErrorCode {
             Self::InvalidProtectedData => "invalid-protected-data",
             Self::IdentityMismatch => "identity-mismatch",
             Self::InvalidTransaction => "invalid-transaction",
+            Self::InvalidAuthorization => "invalid-authorization",
             Self::CoreError => "core-error",
         }
     }
@@ -452,6 +543,7 @@ impl From<ClientApiError> for SdkError {
             ClientApiErrorCode::InvalidProtectedData => SdkErrorCode::InvalidProtectedData,
             ClientApiErrorCode::IdentityMismatch => SdkErrorCode::IdentityMismatch,
             ClientApiErrorCode::InvalidTransaction => SdkErrorCode::InvalidTransaction,
+            ClientApiErrorCode::InvalidAuthorization => SdkErrorCode::InvalidAuthorization,
             ClientApiErrorCode::CoreError => SdkErrorCode::CoreError,
             _ => SdkErrorCode::CoreError,
         };
@@ -533,6 +625,13 @@ mod tests {
     fn signing_vector() -> Value {
         serde_json::from_str(include_str!(
             "../../../spec/test-vectors/transaction-signing-v1.json"
+        ))
+        .unwrap()
+    }
+
+    fn soroban_authorization_vector() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/soroban-authorization-signing-v1.json"
         ))
         .unwrap()
     }
@@ -827,5 +926,139 @@ mod tests {
             )
             .unwrap();
         assert_eq!(signed, expected_signed);
+    }
+
+    #[test]
+    fn protected_software_signer_roundtrips_shared_soroban_authorization_vector() {
+        let vector = soroban_authorization_vector();
+        let case = &vector["cases"][0];
+        let secret = case["secret"].as_str().unwrap();
+        let public_key = case["public_key"].as_str().unwrap();
+        let network = case["network_passphrase"].as_str().unwrap();
+        let unsigned = STANDARD
+            .decode(case["unsigned_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_signed = STANDARD
+            .decode(case["signed_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+
+        let sdk = FresnicaSdk::new();
+        let protected = sdk
+            .protect_secret(
+                secret.to_owned(),
+                "passcode".to_owned(),
+                Some(public_key.to_owned()),
+            )
+            .unwrap();
+        let unlock_key = sdk
+            .derive_unlock_key(
+                protected.envelope_json.clone(),
+                "passcode".to_owned(),
+                public_key.to_owned(),
+            )
+            .unwrap();
+
+        let signed = sdk
+            .sign_soroban_authorization_xdr(
+                protected.envelope_json.clone(),
+                unlock_key,
+                public_key.to_owned(),
+                unsigned.clone(),
+                network.to_owned(),
+            )
+            .unwrap();
+        assert_eq!(signed, expected_signed);
+
+        let passcode_signed = sdk
+            .sign_soroban_authorization_xdr_with_passcode(
+                protected.envelope_json.clone(),
+                "passcode".to_owned(),
+                public_key.to_owned(),
+                unsigned,
+                network.to_owned(),
+            )
+            .unwrap();
+        assert_eq!(passcode_signed, expected_signed);
+
+        let error = sdk
+            .sign_soroban_authorization_xdr_with_passcode(
+                protected.envelope_json,
+                "wrong-passcode".to_owned(),
+                public_key.to_owned(),
+                Vec::new(),
+                network.to_owned(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, SdkErrorCode::InvalidPasscode);
+    }
+
+    #[test]
+    fn external_ed25519_soroban_authorization_roundtrips_shared_vector() {
+        let vector = soroban_authorization_vector();
+        let case = &vector["cases"][0];
+        let public_key = case["public_key"].as_str().unwrap();
+        let network = case["network_passphrase"].as_str().unwrap();
+        let unsigned = STANDARD
+            .decode(case["unsigned_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_preimage = STANDARD
+            .decode(case["authorization_preimage_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let expected_hash = decode_hex(case["authorization_hash_hex"].as_str().unwrap());
+        let signature = decode_hex(case["signature_hex"].as_str().unwrap());
+        let expected_signed = STANDARD
+            .decode(case["signed_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+
+        let sdk = FresnicaSdk::new();
+        let request = sdk
+            .prepare_soroban_authorization_signing(unsigned.clone(), network.to_owned())
+            .unwrap();
+        assert_eq!(request.authorization_hash, expected_hash);
+        assert_eq!(request.authorization_entry_xdr, unsigned);
+        assert_eq!(request.authorization_preimage_xdr, expected_preimage);
+        assert_eq!(request.network_passphrase, network);
+
+        let signed = sdk
+            .apply_soroban_ed25519_signature(
+                request.authorization_entry_xdr,
+                network.to_owned(),
+                public_key.to_owned(),
+                signature,
+            )
+            .unwrap();
+        assert_eq!(signed, expected_signed);
+    }
+
+    #[test]
+    fn soroban_authorization_errors_keep_a_distinct_stable_code() {
+        let sdk = FresnicaSdk::new();
+        let malformed = sdk
+            .prepare_soroban_authorization_signing(
+                b"not-xdr".to_vec(),
+                "Test SDF Network ; September 2015".to_owned(),
+            )
+            .unwrap_err();
+        assert_eq!(malformed.code, SdkErrorCode::InvalidAuthorization);
+        assert_eq!(
+            serde_json::to_value(&malformed).unwrap()["code"],
+            "invalid-authorization"
+        );
+
+        let vector = soroban_authorization_vector();
+        let case = &vector["cases"][0];
+        let unsigned = STANDARD
+            .decode(case["unsigned_entry_xdr_base64"].as_str().unwrap())
+            .unwrap();
+        let invalid_signature = vec![0u8; 64];
+        let error = sdk
+            .apply_soroban_ed25519_signature(
+                unsigned,
+                case["network_passphrase"].as_str().unwrap().to_owned(),
+                case["public_key"].as_str().unwrap().to_owned(),
+                invalid_signature,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, SdkErrorCode::InvalidAuthorization);
     }
 }

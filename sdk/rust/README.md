@@ -27,9 +27,11 @@ fresnica-sdk                  <- stable semantic contract
 3. mnemonic generation;
 4. passcode re-protection;
 5. verified `WalletUnlockKey` derivation and validation;
-6. protected software-signer transaction signing with either a verified native `WalletUnlockKey` or the composite fresh-passcode path;
-7. explicit Reveal / Export;
-8. external Ed25519 prepare/apply signing.
+6. protected software-signer Classic transaction signing with either a verified native `WalletUnlockKey` or the composite fresh-passcode path;
+7. protected software-signer Soroban authorization-entry signing with the same native/passcode split;
+8. explicit Reveal / Export;
+9. external Ed25519 transaction prepare/apply signing;
+10. external Ed25519 Soroban authorization prepare/apply signing with exact entry XDR, preimage XDR, authorization hash, and network context.
 
 The SDK deliberately preserves these invariants:
 
@@ -39,7 +41,8 @@ The SDK deliberately preserves these invariants:
 - Protected signer envelopes are opaque serialized values to consumers.
 - `WalletUnlockKey` is routine native authorization material and does not authorize Reveal / Export.
 - Reveal / Export requires a fresh application passcode.
-- External/hardware signing uses the transport-neutral prepare/apply boundary.
+- External/hardware signing uses transport-neutral prepare/apply boundaries for both transaction envelopes and Soroban authorization entries.
+- `invalid-authorization` remains distinct from `invalid-transaction`.
 - Cryptographic behavior and identity verification remain authoritative in `fresnica-core`.
 
 ## Stable boundary types
@@ -69,7 +72,7 @@ Native packaging layers may orchestrate platform authorization around SDK operat
 
 Framework adapters must not expose `WalletUnlockKey` or raw routine signing primitives to JavaScript/Dart merely for convenience.
 
-For browser/WASM software signing, SDK API v2 adds `sign_transaction_xdr_with_passcode(...)`: Core derives and verifies the unlock key and signs within one Rust call, so the raw `WalletUnlockKey` never crosses into JavaScript. Native clients may continue using the explicit unlock-key path behind reviewed platform secure storage/system authentication.
+For browser/WASM software signing, the composite passcode methods (`sign_transaction_xdr_with_passcode(...)` and `sign_soroban_authorization_xdr_with_passcode(...)`) derive and verify the unlock key and sign within one Rust call, so the raw `WalletUnlockKey` need not cross into JavaScript. Native clients may continue using the explicit unlock-key paths behind reviewed platform secure storage/system authentication.
 
 Browser key protection and authorization remain a separate security model rather than a copy of the native `WalletUnlockKey` model.
 
@@ -83,4 +86,4 @@ cargo test --manifest-path core/rust/Cargo.toml
 cargo test --manifest-path sdk/rust/Cargo.toml
 ```
 
-The SDK tests reuse the repository transaction-signing vectors so native/mobile/future binding layers can prove conformance against the same Core behavior.
+The SDK tests reuse the repository transaction-signing and Soroban-authorization vectors so native/mobile/future binding layers can prove conformance against the same Core behavior.

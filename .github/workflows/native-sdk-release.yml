@@ -43,6 +43,8 @@ jobs:
       core_api: ${{ steps.contract.outputs.core_api }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Validate release contract
         id: contract
         shell: bash
@@ -80,6 +82,27 @@ jobs:
           marker_exists=false
           if [ -s "$marker" ]; then
             marker_exists=true
+          fi
+
+          validate_marker=false
+          case "${{ github.event_name }}" in
+            pull_request)
+              if git diff --name-only \
+                "${{ github.event.pull_request.base.sha }}" \
+                "${{ github.event.pull_request.head.sha }}" -- "$marker" | grep -Fxq "$marker"; then
+                validate_marker=true
+              fi
+              ;;
+            workflow_dispatch|push)
+              validate_marker=true
+              ;;
+          esac
+
+          if [ "$validate_marker" = true ]; then
+            if [ "$marker_exists" != true ]; then
+              echo "release marker is required: $marker" >&2
+              exit 1
+            fi
             test "$(jq -r '.kind' "$marker")" = "fresnica-native-sdk-release"
             test "$(jq -r '.version' "$marker")" = "$version"
             test "$(jq -r '.channel' "$marker")" = "preview"

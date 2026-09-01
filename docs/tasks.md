@@ -17,7 +17,7 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Fail closed for C-account/custom/delegated authorization until a concrete provider exists
 - [x] Add a language-neutral Soroban authorization signing conformance vector
 - [x] Expose protected/external Soroban authorization through `CoreClientApi` with stable `invalid-authorization` errors
-- [ ] Expose the proven Soroban authorization contract through the platform-neutral SDK
+- [x] Expose the proven Soroban authorization contract through the platform-neutral SDK
 - [ ] Extend Native/Process/WASM bindings only after the SDK contract is stable and required by consumers
 - [ ] Add standard message signing/verification as a separate domain with SEP-53 alignment
 - [ ] Use RefPython to prove Soroban simulation/assembly/review semantics

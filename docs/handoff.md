@@ -35,9 +35,10 @@ Current foundation includes:
 - direct G-account Ed25519 auth-entry signing and verification;
 - fail-closed C-account/custom/delegated authorization;
 - a language-neutral Soroban authorization conformance vector;
-- `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification.
+- `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification;
+- SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector.
 
-The next protocol slice is **SDK adaptation**, not RPC/simulation/product implementation.
+The next protocol work is **binding adoption and RefPython simulation/assembly semantics**, not new Core authorization primitives.
 
 ## 3. Security boundary
 
@@ -87,10 +88,10 @@ Post-merge: Main bundle
 
 ## 7. Immediate next work
 
-1. expose the proven Soroban authorization contract through the platform-neutral SDK;
-2. keep Native/Process/WASM expansion behind the stable SDK contract;
-3. use RefPython to validate Soroban simulation/assembly/review semantics;
-4. then add the RustClient RPC/Soroban capability reference;
+1. adapt Native/Process/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
+2. use RefPython to validate Soroban simulation/assembly/review semantics;
+3. then add the RustClient RPC/Soroban capability reference;
+4. add SEP-53-aligned message signing as the next independent Core signing domain;
 5. continue supply-chain and Backup v1 hardening in parallel;
 6. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
