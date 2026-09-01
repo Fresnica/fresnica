@@ -21,6 +21,7 @@ This list tracks shared-repository work only. Independent product implementation
 - [ ] Extend Native/Process/WASM bindings only after the SDK contract is stable and required by consumers
 - [ ] Add standard message signing/verification as a separate domain with SEP-53 alignment
 - [x] Use RefPython to prove Soroban simulation/assembly/review semantics
+- [x] Prove source-account and detached Classic G-account Soroban authorization/signing plus Testnet submit/status reconciliation in RefPython
 - [ ] Add RustClient RPC/gateway + Soroban transaction capability after RefPython evidence
 - [ ] Add a concrete smart-account/C-account provider before extracting a generic provider interface
 

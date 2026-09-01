@@ -1,11 +1,22 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from stellar_sdk import Account, Address, Keypair, TransactionBuilder, xdr
+from stellar_sdk.soroban_rpc import GetTransactionStatus, SendTransactionStatus
 
 from fresnica.errors import TransactionError
 from fresnica.network import TESTNET
 from fresnica.soroban_rpc_adapter import SorobanRpcAdapter, _authorization_identity
+
+
+SOROBAN_VECTOR_PATH = (
+    Path(__file__).parents[3]
+    / "spec"
+    / "test-vectors"
+    / "soroban-authorization-signing-v1.json"
+)
 
 
 class FakeSorobanServer:
@@ -29,6 +40,26 @@ class FakeSorobanServer:
     def prepare_transaction(self, envelope, simulate_transaction_response=None):
         self.prepared = (envelope, simulate_transaction_response)
         return self.prepared_envelope
+
+    def send_transaction(self, envelope):
+        return SimpleNamespace(
+            hash=envelope.hash_hex(),
+            status=SendTransactionStatus.PENDING,
+            latest_ledger=123456,
+            error_result_xdr=None,
+            diagnostic_events_xdr=None,
+        )
+
+    def get_transaction(self, tx_hash):
+        return SimpleNamespace(
+            status=GetTransactionStatus.SUCCESS,
+            transaction_hash=tx_hash,
+            ledger=123457,
+            result_xdr="result-xdr",
+            result_meta_xdr="meta-xdr",
+            envelope_xdr="envelope-xdr",
+            diagnostic_events_xdr=None,
+        )
 
 
 def build_candidate():
@@ -168,3 +199,61 @@ def test_address_with_delegates_keeps_top_level_authorizer_distinct_from_delegat
         authorizer,
         "address-with-delegates",
     )
+
+
+def test_adapter_inspects_shared_address_v2_authorization_vector():
+    vector = json.loads(SOROBAN_VECTOR_PATH.read_text(encoding="utf-8"))["cases"][0]
+    adapter = SorobanRpcAdapter(TESTNET, "https://rpc.example")
+
+    facts = adapter.inspect_authorization_entry_xdr(
+        vector["unsigned_entry_xdr_base64"],
+        "GOPSOURCE",
+        index=0,
+    )
+
+    assert facts.authorizer == vector["public_key"]
+    assert facts.credential_type == "address-v2"
+    assert facts.nonce == vector["nonce"]
+    assert facts.signature_expiration_ledger == vector["signature_expiration_ledger"]
+    assert facts.entry_xdr == vector["unsigned_entry_xdr_base64"]
+
+
+def test_adapter_sets_detached_authorization_expiration_before_review():
+    vector = json.loads(SOROBAN_VECTOR_PATH.read_text(encoding="utf-8"))["cases"][0]
+    _, _, envelope = build_candidate()
+    entry = xdr.SorobanAuthorizationEntry.from_xdr(vector["unsigned_entry_xdr_base64"])
+    assert entry.credentials.address_v2 is not None
+    entry.credentials.address_v2.signature_expiration_ledger = xdr.Uint32(0)
+    entry.credentials.address_v2.signature = xdr.SCVal(type=xdr.SCValType.SCV_VOID)
+    rpc_recorded_xdr = entry.to_xdr()
+    envelope.transaction.operations[0].auth = [entry]
+    adapter = SorobanRpcAdapter(TESTNET, "https://rpc.example")
+
+    updated = adapter.set_authorization_expiration_ledger(envelope, 123556)
+    facts = adapter.authorization_entries(envelope)[0]
+
+    assert updated == 1
+    assert facts.signature_expiration_ledger == 123556
+    assert facts.entry_xdr != rpc_recorded_xdr
+
+
+def test_adapter_normalizes_rpc_submission_and_terminal_lookup():
+    _, _, envelope = build_candidate()
+    adapter = SorobanRpcAdapter(TESTNET, "https://rpc.example")
+    adapter.server = FakeSorobanServer()
+
+    sent = adapter.send_transaction(envelope)
+    terminal = adapter.lookup_transaction(envelope.hash_hex())
+
+    assert sent["hash"] == envelope.hash_hex()
+    assert sent["status"] == "PENDING"
+    assert terminal == {
+        "hash": envelope.hash_hex(),
+        "ledger": 123457,
+        "successful": True,
+        "status": "SUCCESS",
+        "result_xdr": "result-xdr",
+        "result_meta_xdr": "meta-xdr",
+        "envelope_xdr": "envelope-xdr",
+        "diagnostic_events_xdr": None,
+    }
