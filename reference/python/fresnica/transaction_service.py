@@ -15,6 +15,9 @@ class TransactionService:
 
     def sign(self, wallet, prepared):
         _ensure_prepared_transaction_not_expired(prepared)
+        assert_review_binding = getattr(prepared, "assert_review_binding", None)
+        if assert_review_binding is not None:
+            assert_review_binding()
         wallet.sign(prepared.envelope)
         return prepared
 
