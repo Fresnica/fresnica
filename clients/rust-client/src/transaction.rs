@@ -43,6 +43,14 @@ pub fn transaction_xdr_bytes(envelope: &TransactionEnvelope) -> Result<Vec<u8>, 
     transaction_envelope_xdr(envelope).map_err(|error| error.to_string())
 }
 
+pub(crate) fn transaction_hash_bytes(
+    envelope: &TransactionEnvelope,
+    network: &str,
+) -> Result<[u8; 32], String> {
+    transaction_hash(envelope, network_passphrase(network)?)
+        .map_err(|error| format!("Unable to hash Stellar transaction: {error}"))
+}
+
 pub fn has_valid_transaction_signature(
     envelope: &TransactionEnvelope,
     network: &str,

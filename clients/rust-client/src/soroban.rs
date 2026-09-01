@@ -3,9 +3,6 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use fresnica_core::{
-    parse_soroban_authorization_entry_xdr, soroban_authorization_entry_xdr, transaction_hash,
-};
 use fresnica_sdk::{FresnicaSdk, SdkErrorCode};
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_strkey::{ed25519::PublicKey as StrkeyPublicKey, Contract as StrkeyContract};
@@ -13,7 +10,7 @@ use stellar_xdr::{
     ContractId, Hash, HostFunction, InvokeContractArgs, InvokeHostFunctionOp, Limits,
     OperationBody, PublicKey, ReadXdr, ScAddress, ScSymbol, ScVal, SorobanAddressCredentials,
     SorobanAuthorizationEntry, SorobanCredentials, TransactionEnvelope, TransactionExt, Uint256,
-    VecM,
+    VecM, WriteXdr,
 };
 
 use crate::ledger_authorization::load_classic_ledger_authorization_plan;
@@ -21,7 +18,7 @@ use crate::rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus};
 use crate::signing_coordination::sign_with_local_ed25519;
 use crate::transaction::{
     build_single_operation_envelope, ensure_transaction_not_expired, network_passphrase,
-    resolve_network_wallet, transaction_xdr_bytes, PendingTransactionStore,
+    resolve_network_wallet, transaction_hash_bytes, transaction_xdr_bytes, PendingTransactionStore,
 };
 use crate::{HorizonGateway, TransactionSubmission, WalletRecord, WalletStorage};
 
@@ -101,9 +98,7 @@ impl PreparedSorobanTransaction {
 
     pub fn assert_review_binding(&self) -> Result<(), String> {
         let current_xdr = transaction_xdr_bytes(&self.envelope)?;
-        let current_hash =
-            transaction_hash(&self.envelope, network_passphrase(&self.review.network)?)
-                .map_err(|error| format!("Unable to hash Soroban transaction: {error}"))?;
+        let current_hash = transaction_hash_bytes(&self.envelope, &self.review.network)?;
         let expected_xdr = self
             .authorized_envelope_xdr
             .as_ref()
@@ -117,9 +112,7 @@ impl PreparedSorobanTransaction {
     }
 
     pub fn assert_submit_binding(&self) -> Result<(), String> {
-        let current_hash =
-            transaction_hash(&self.envelope, network_passphrase(&self.review.network)?)
-                .map_err(|error| format!("Unable to hash Soroban transaction: {error}"))?;
+        let current_hash = transaction_hash_bytes(&self.envelope, &self.review.network)?;
         if current_hash != self.signing_transaction_hash() {
             return Err(
                 "Soroban transaction changed after signing; prepare and review it again".to_owned(),
@@ -130,11 +123,10 @@ impl PreparedSorobanTransaction {
 
     fn bind_authorized_envelope(&mut self) -> Result<(), String> {
         self.authorized_envelope_xdr = Some(transaction_xdr_bytes(&self.envelope)?);
-        self.authorized_transaction_hash = Some(
-            transaction_hash(&self.envelope, network_passphrase(&self.review.network)?).map_err(
-                |error| format!("Unable to hash authorized Soroban transaction: {error}"),
-            )?,
-        );
+        self.authorized_transaction_hash = Some(transaction_hash_bytes(
+            &self.envelope,
+            &self.review.network,
+        )?);
         Ok(())
     }
 }
@@ -187,8 +179,7 @@ pub fn authorize_prepared_soroban(
                 let signer = signers.get(&authorizer).ok_or_else(|| {
                     format!("No local signer capability for Soroban authorizer {authorizer}")
                 })?;
-                let unsigned = soroban_authorization_entry_xdr(entry)
-                    .map_err(|error| format!("Unable to encode Soroban authorization: {error}"))?;
+                let unsigned = authorization_entry_xdr(entry)?;
                 let signed = sign_authorization_entry(
                     signer,
                     &network,
@@ -199,8 +190,7 @@ pub fn authorize_prepared_soroban(
                 if signed == unsigned {
                     return Err("Soroban authorization signer returned no signature".to_owned());
                 }
-                let signed_entry = parse_soroban_authorization_entry_xdr(&signed)
-                    .map_err(|error| format!("Signed Soroban authorization is invalid: {error}"))?;
+                let signed_entry = parse_authorization_entry_xdr(&signed)?;
                 validate_signed_authorization(entry, &signed_entry)?;
                 *entry = signed_entry;
             }
@@ -481,8 +471,7 @@ fn assemble_reviewed_transaction(
     let envelope = TransactionEnvelope::Tx(envelope);
     let (authorizers, credential_types) = authorization_summary(&envelope, &operation_source)?;
     let reviewed_envelope_xdr = transaction_xdr_bytes(&envelope)?;
-    let reviewed_transaction_hash = transaction_hash(&envelope, network_passphrase(network)?)
-        .map_err(|error| format!("Unable to hash reviewed Soroban transaction: {error}"))?;
+    let reviewed_transaction_hash = transaction_hash_bytes(&envelope, network)?;
     let review = SorobanReview {
         wallet_name,
         fee_payer: transaction_source_string(&envelope)?,
@@ -513,6 +502,17 @@ fn assemble_reviewed_transaction(
         authorized_transaction_hash: None,
         envelope_signing_complete: false,
     })
+}
+
+fn authorization_entry_xdr(entry: &SorobanAuthorizationEntry) -> Result<Vec<u8>, String> {
+    entry
+        .to_xdr(Limits::depth(XDR_DEPTH_LIMIT))
+        .map_err(|error| format!("Unable to encode Soroban authorization: {error}"))
+}
+
+fn parse_authorization_entry_xdr(encoded: &[u8]) -> Result<SorobanAuthorizationEntry, String> {
+    SorobanAuthorizationEntry::from_xdr(encoded, Limits::depth(XDR_DEPTH_LIMIT))
+        .map_err(|error| format!("Signed Soroban authorization is invalid: {error}"))
 }
 
 fn authorization_summary(
@@ -774,7 +774,7 @@ mod tests {
         SimulateTransactionResponse {
             min_resource_fee: 4_900,
             results: vec![SimulateHostFunctionResultRaw {
-                auth: vec![STANDARD.encode(soroban_authorization_entry_xdr(&auth).unwrap())],
+                auth: vec![STANDARD.encode(authorization_entry_xdr(&auth).unwrap())],
                 xdr: STANDARD.encode(ScVal::Void.to_xdr(Limits::none()).unwrap()),
             }],
             transaction_data: STANDARD.encode(transaction_data.to_xdr(Limits::none()).unwrap()),
