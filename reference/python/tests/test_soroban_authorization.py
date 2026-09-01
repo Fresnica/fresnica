@@ -204,6 +204,21 @@ def test_delegated_authorization_fails_closed():
         )
 
 
+def test_contract_authorizer_fails_closed_before_signer():
+    contract = replace(ADDRESS_ENTRY, authorizer="CCONTRACT")
+    adapter = FakeAuthorizationAdapter(entries=(contract,))
+    signer = RecordingAuthorizationSigner()
+
+    with pytest.raises(TransactionError, match="Classic G accounts"):
+        SorobanAuthorizationService(adapter).authorize(
+            _prepared(),
+            {"CCONTRACT": signer},
+        )
+
+    assert signer.calls == []
+    assert adapter.replacements == []
+
+
 class FakeSubmitAdapter:
     def __init__(self, send=None, lookups=()):
         self.send = send or {"hash": "signed-hash", "status": "PENDING"}

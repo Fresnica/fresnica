@@ -208,6 +208,10 @@ class SorobanAuthorizationService:
                 raise TransactionError(
                     f"Unsupported detached Soroban authorization: {entry.credential_type}"
                 )
+            if not entry.authorizer.startswith("G"):
+                raise TransactionError(
+                    "Unsupported detached Soroban authorizer; only Classic G accounts are supported"
+                )
             signer = signers_by_authorizer.get(entry.authorizer)
             if signer is None:
                 raise SignerError(
