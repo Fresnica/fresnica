@@ -45,6 +45,8 @@ See [`core/README.md`](core/README.md) for Core client/security/signer/protectio
 
 The short cross-platform authority remains [Core Security Boundary](core-security-boundary.md).
 
+Long-term protocol/security evolution is governed by the [Modern Stellar Core Capability Baseline](development/modern-stellar-core-capability-baseline.md).
+
 ### Platforms
 
 See [`platforms/README.md`](platforms/README.md):

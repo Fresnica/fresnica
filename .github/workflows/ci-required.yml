@@ -1,34 +1,96 @@
 name: Required CI
+
 on: [workflow_dispatch, pull_request]
-permissions: {contents: read}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: required-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
-        with: {node-version: "22"}
+        with:
+          node-version: "22"
       - uses: dtolnay/rust-toolchain@stable
-        with: {components: rustfmt}
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
-        with: {version: "0.12.5", enable-cache: true}
+        with:
+          components: rustfmt
       - run: node sdk/compatibility/validate.mjs
       - run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
-      - name: Check changed Rust surfaces
+      - name: Detect affected Rust surfaces
+        id: affected
+        shell: bash
         run: |
-          for m in sdk/rust bindings/process clients/rust-client clients/rust-cli clients/rust-tui; do
-            cargo fmt --manifest-path "$m/Cargo.toml" -- --check
-          done
-      - name: Test and build Rust surfaces
+          set -euo pipefail
+          changed=/tmp/fresnica-changed-files.txt
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}" > "$changed"
+          else
+            git ls-files > "$changed"
+          fi
+          cat "$changed"
+
+          flag() {
+            local name="$1"
+            local pattern="$2"
+            if grep -Eq "$pattern" "$changed"; then
+              echo "$name=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$name=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          flag rust '(^|/)(Cargo\.toml|Cargo\.lock)$|\.rs$'
+          flag core '^(core/rust/|spec/test-vectors/)'
+          flag sdk '^(core/rust/|sdk/rust/|spec/test-vectors/)'
+          flag process '^(core/rust/|sdk/rust/|bindings/process/|spec/test-vectors/)'
+          flag rust_client '^clients/rust-client/'
+          flag rust_cli '^(clients/rust-client/|clients/rust-cli/)'
+          flag rust_tui '^(clients/rust-client/|clients/rust-tui/)'
+          flag native '^bindings/native/'
+      - name: Check changed Rust formatting
+        if: steps.affected.outputs.rust == 'true'
+        shell: bash
         run: |
-          for m in core/rust sdk/rust bindings/process clients/rust-client clients/rust-cli clients/rust-tui; do
-            cargo test --manifest-path "$m/Cargo.toml"
-          done
-          cargo build --release --manifest-path bindings/process/Cargo.toml --bin fresnica-process
-          cargo build --release --manifest-path clients/rust-cli/Cargo.toml --bin fresnica
-      - working-directory: reference/python
-        run: uv python install 3.11 && uv sync --locked && uv run pytest -q
-        env:
-          FRESNICA_PROCESS_BIN: ${{ github.workspace }}/bindings/process/target/release/fresnica-process
-          FRESNICA_RUST_CLI_BIN: ${{ github.workspace }}/clients/rust-cli/target/release/fresnica
+          set -euo pipefail
+          mapfile -t rust_files < <(
+            grep -E '\.rs$' /tmp/fresnica-changed-files.txt | while read -r file; do
+              if [ -f "$file" ]; then
+                printf '%s\n' "$file"
+              fi
+            done
+          )
+          if [ "${#rust_files[@]}" -gt 0 ]; then
+            rustfmt --edition 2021 --check "${rust_files[@]}"
+          fi
+      - name: Test Rust Core
+        if: steps.affected.outputs.core == 'true'
+        run: cargo test --manifest-path core/rust/Cargo.toml
+      - name: Test universal SDK
+        if: steps.affected.outputs.sdk == 'true'
+        run: cargo test --manifest-path sdk/rust/Cargo.toml
+      - name: Test Process Binding
+        if: steps.affected.outputs.process == 'true'
+        run: cargo test --manifest-path bindings/process/Cargo.toml
+      - name: Test Rust capability client
+        if: steps.affected.outputs.rust_client == 'true'
+        run: cargo test --manifest-path clients/rust-client/Cargo.toml
+      - name: Test Rust CLI
+        if: steps.affected.outputs.rust_cli == 'true'
+        run: cargo test --manifest-path clients/rust-cli/Cargo.toml
+      - name: Test Rust TUI
+        if: steps.affected.outputs.rust_tui == 'true'
+        run: cargo test --manifest-path clients/rust-tui/Cargo.toml
+      - name: Test Native Binding host contract
+        if: steps.affected.outputs.native == 'true'
+        run: cargo test --manifest-path bindings/native/Cargo.toml

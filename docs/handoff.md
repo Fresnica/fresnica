@@ -1,137 +1,104 @@
 # Fresnica Project Handoff
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
-This is the continuation/state document for the shared Fresnica repository. Stable architecture and security rules live in the common contracts; start at the [repository README](../README.md) and [`docs/README.md`](README.md). Verify GitHub `main`, current CI and release metadata before development rather than treating a handoff SHA as permanent truth.
+This is the continuation/state document for the shared Fresnica repository. Stable architecture and security rules live in the common contracts; start at the [repository README](../README.md), [`docs/README.md`](README.md), and the [Modern Stellar Core Capability Baseline](development/modern-stellar-core-capability-baseline.md).
 
-## 1. Canonical architecture
+Do not treat a handoff SHA as permanent truth. Verify GitHub `main`, CI and release metadata before development.
 
-```text
-Application Flows
-  -> Application Capabilities
-  -> Fresnica SDK/Core + Stellar/network/repository/platform ports
-```
+## 1. Logical project boundaries
 
-- **Flow** owns product sequence, confirmation and UI/UX.
-- **Capability** owns shared wallet/application semantics.
-- **Fresnica Core** is the Rust cryptographic/security authority.
-- **Ports/infrastructure** own platform, network and storage mechanisms.
-
-The five common contracts remain authoritative:
-
-1. [`architecture.md`](architecture.md)
-2. [`application-flows.md`](application-flows.md)
-3. [`application-capabilities.md`](application-capabilities.md)
-4. [`core-security-boundary.md`](core-security-boundary.md)
-5. [`platform-implementation.md`](platform-implementation.md)
-
-Independent products consume these contracts and may contribute evidence-backed contract changes. Product implementation work does not belong in this shared repository merely because a checklist mentions a platform.
-
-## 2. Current Core / SDK baseline
-
-The Core/SDK foundation is established and should remain stable unless a concrete security, protocol or consumer-compatibility need requires change.
+The repository is a monorepo, but development should treat these as independently evolving layers:
 
 ```text
-Native SDK release       native-sdk-v0.2.1
-Native Binding API       2
-Universal SDK API        3
-Core Client API          3
-Process Binding API      1 (pre-release)
-RN adapter source        0.2.1
+Protocol/Core       slow security and protocol primitives
+SDK                 stable cross-language semantic contract
+Conformance         shared executable vectors
+RefPython           semantic laboratory
+Rust Client         wallet capability reference implementation
+Bindings/Adapters   platform delivery
+Products            Mobile/Web/Desktop/Agent, developed independently
 ```
 
-Current supported integration paths are:
+Core should change slowly. SDK adapts Core into stable platform-neutral semantics. RefPython may explore application semantics first. RustClient and independent products may advance in parallel without forcing product logic into Core.
 
-```text
-Rust application       -> fresnica-sdk -> Core
-Native application     -> Native SDK / UniFFI -> fresnica-sdk -> Core
-Web application        -> filtered WASM binding -> fresnica-sdk -> Core
-Trusted process host   -> Process Binding -> fresnica-sdk -> Core
-```
+## 2. Modern Stellar baseline
 
-PR #122 simplified these boundaries:
+Fresnica is no longer targeting a Classic-only Core.
 
-- the optional Process Binding is the single SDK-level subprocess adapter;
-- duplicate Core/SDK bridge binaries were retired;
-- Payment, Trustline and SDEX asset identity share a thin wrapper over `stellar_xdr::Asset`;
-- the frozen legacy `bindings/mobile` facade and active compatibility CI were retired;
-- Anchor HTTP transport policy was centralized;
-- the current network adapter is explicitly `HorizonGateway`, with staged RPC/Portfolio migration documented;
-- RefPython is governed as an executable product-semantics laboratory rather than a second security authority.
+Current foundation includes:
 
-Historical `mobile-sdk-v0.1.0` and `native-sdk-v0.1.0` artifacts remain compatibility evidence, not new-project baselines.
+- Classic transaction signing with exact XDR + network context;
+- separate G-account and C-account identity semantics;
+- Protocol-28-ready `stellar-xdr` ahead of Mainnet activation;
+- CAP-71 AddressV2-aware Soroban authorization preimage/hash/signature primitives;
+- direct G-account Ed25519 auth-entry signing and verification;
+- fail-closed C-account/custom/delegated authorization;
+- a language-neutral Soroban authorization conformance vector;
+- `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification.
 
-## 3. Security model that must not regress
+The next protocol slice is **SDK adaptation**, not RPC/simulation/product implementation.
 
-The critical identity rule remains:
+## 3. Security boundary
+
+Preserve these invariants:
 
 ```text
 Account identity != Signer capability != Recovery source
+reviewed object == signed object
+network context is part of signing meaning
+unsupported authorization/signature forms fail closed
 ```
 
-Consequences include:
+Core must not expose a generic hash-signing oracle merely to make an integration easier.
 
-- watch-only reads require no secret, mnemonic or wallet passphrase;
-- attaching signing material verifies derived signer identity before persistence mutation;
-- detaching a signer preserves account identity;
-- a `C...` account identity is not an Ed25519 signer key;
-- routine signing and Reveal/Export have different authorization privilege;
-- System Auth is device-local authorization, not a wallet encryption format;
-- ordinary application/JS state must not receive private keys, mnemonics or native unlock keys.
+## 4. Soroban ownership
 
-### Process Binding
+Core owns deterministic security primitives only. It does not own RPC, `simulateTransaction`, sequence fetching, resource estimation, contract-spec interpretation, smart-account deployment or product approval flows.
 
-The Process Binding is a **privileged owner/host surface**. API v1 transports passphrases, mnemonics, secrets, Reveal results and `WalletUnlockKey` values over one-shot stdin/stdout. It must not be exposed directly as a remote service, MCP tool, browser/renderer API, untrusted plugin interface or Agent Access API. A future Agent Access surface must be narrower and must not inherit owner-only Reveal, key-derivation or passphrase operations.
+RefPython should first validate simulation/assembly/review semantics. RustClient may then implement the reference wallet/network capability. Concrete C-account/passkey/smart-account providers should precede generic provider abstractions.
 
-### Agent Access
+## 5. Agent boundary
 
-The current Core `AgentCapability` is dormant and has no production SDK/binding/transport consumer. Its operation-type/fee/count/expiry checks are useful prototype evidence but are insufficient authorization for autonomous signing because they do not constrain destination, asset, amount/value or operation-specific execution semantics. Do not expose it.
+Soneso Stellar Agent Wallet remains the preferred Agent execution layer for MCP, policy, approval, nonce/replay, audit, RPC construction and submission. Fresnica remains the protected signer authority.
 
-The preferred Agent direction is now reuse rather than parallel implementation: Soneso Stellar Agent Wallet supplies MCP, policy, approval, nonce/replay, audit, RPC construction and submission; Fresnica remains the protected signer authority. The current external signer seam accepts only a transaction digest, so integration must first add an application-level backend that receives the exact approved envelope, network passphrase and expected Signer identity. Do not adapt Fresnica as an arbitrary hash signer or export its S-strkey into the external keyring. See [`development/stellar-agent-wallet-reuse.md`](development/stellar-agent-wallet-reuse.md).
+Do not:
 
-### Known open security work
+- duplicate Soneso's Agent policy stack;
+- adapt Fresnica as a raw-hash signer;
+- decrypt Fresnica signer material into the upstream keyring;
+- expose Process Binding owner privileges to MCP/remote agents.
 
-1. Pin and harden the Fresnica-owned release supply chain; add dependency audit, SBOM and provenance/attestation without forcing consumer product toolchains.
-2. Keep terminal Backup v1 legacy-only because outer wallet metadata is not authenticated; portable products should use the v2 relationship/revalidation model.
-3. Review the privileged Process Binding before using it outside RefPython/conformance hosts.
-4. Add the exact-envelope upstream signer seam, then prove one bounded Testnet Payment through the reused Agent stack and Fresnica protected signing.
+The upstream exact-envelope signer seam remains the prerequisite for Fresnica Agent integration.
 
-## 4. Capability and reference status
+## 6. CI workflow
 
-The catalog remains **19 Capabilities: 9 Normative and 10 Defined**. See [`application-capabilities.md`](application-capabilities.md) and [`capabilities/README.md`](capabilities/README.md).
+Repository validation is layered:
 
-The Rust `clients/rust-client` crate is a reusable reference implementation for CLI/TUI; it is not mandatory runtime code for Mobile, Web or Desktop. RefPython leads uncertain product semantics through the documented Experimental -> Candidate -> Normative -> Implemented path, while cryptography, ABI, protocol security fixes and platform security boundaries remain owned by their authoritative layers.
+```text
+Local: portable rustfmt + diff review
+Draft/focused pushes: Required CI + directly relevant lightweight workflows
+Ready/non-draft PR: expensive path-relevant integration/platform matrix
+Merge: squash
+Post-merge: Main bundle
+```
 
-See [`development/refpython-laboratory.md`](development/refpython-laboratory.md).
-
-## 5. Network / Anchor direction
-
-`HorizonGateway` is the current provider adapter, not a permanent shared contract. Provider JSON should terminate at the gateway/normalization boundary. Endpoint families may move to RPC, Portfolio or another history provider only when equivalent semantics, network identity and uncertain-submission behavior are preserved.
-
-Anchor currently covers SEP-1, Classic SEP-10, SEP-24-preferred / SEP-6-fallback transfer initiation, transaction status, reviewed withdrawal handoff and common scalar/binary SEP-12 updates. SEP-45 execution, uncommon nested SEP-12 values/files and provider-backed external signer collection remain demand-driven.
-
-## 6. Validation baseline
-
-PR #122 passed the repository's full pull-request matrix, including Core, SDK, Process Binding, Rust client/CLI/TUI, RefPython, Native/Apple/Android packaging, React Native adapter, WASM and compatibility gates. PR #123 refreshed the shared security and integration baseline; its full pull-request matrix and resulting Main bundle #47 succeeded.
-
-The Main bundle is the preferred GitHub-to-isolated-development baseline. Do not upgrade static analysis or formatting into a claim that compilation/platform validation passed; cite the actual workflow that ran.
+`Required CI / validate` is the stable merge-gate name. It should test affected Rust surfaces and immediate contract dependencies, not compile every downstream client/platform on every push.
 
 ## 7. Immediate next work
 
-The shared repository should prioritize security and protocol correctness rather than product-specific implementation:
-
-1. propose the exact-envelope Classic signing backend to Soneso while preserving its default keyring behavior;
-2. implement only a narrow Fresnica protected-signer adapter after that seam exists;
-3. prove one bounded Testnet Payment through upstream MCP/policy/approval/audit and Fresnica exact-XDR signing;
-4. harden the active release supply chain;
-5. lock Backup v1 to legacy/reference use and test metadata-tampering behavior;
-6. keep hardware/provider transports, uncommon SEP extensions and extra platform packages demand-driven.
+1. expose the proven Soroban authorization contract through the platform-neutral SDK;
+2. keep Native/Process/WASM expansion behind the stable SDK contract;
+3. use RefPython to validate Soroban simulation/assembly/review semantics;
+4. then add the RustClient RPC/Soroban capability reference;
+5. continue supply-chain and Backup v1 hardening in parallel;
+6. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
 ## 8. Start here next session
 
-1. Verify GitHub `main`, CI and release state.
-2. Restore the newest successful Main bundle when isolated code execution is needed.
-3. Read the five common contracts and the relevant Capability file.
-4. For Agent work, read [`development/stellar-agent-wallet-reuse.md`](development/stellar-agent-wallet-reuse.md), [`core-security-boundary.md`](core-security-boundary.md) and the exact signing source in Core/SDK.
-5. Use CodebaseMemory for orientation and call/blast-radius analysis, then verify every important conclusion against source.
-6. Preserve exact-review/exact-sign semantics and fail closed on unsupported transaction forms.
+1. Verify GitHub `main`, `Required CI` and the newest Main bundle.
+2. Restore that Main bundle in isolated execution.
+3. Read the Modern Stellar baseline plus the relevant Core/Capability contract.
+4. Use CodebaseMemory for orientation/blast-radius analysis, then verify conclusions against source.
+5. Run the portable rustfmt tool before pushing Rust changes.
+6. Keep Core changes surgical and protocol/security-driven.

@@ -1,153 +1,111 @@
 # Fresnica Roadmap
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
-Fresnica has a stable multi-platform wallet-security foundation. The shared repository now prioritizes security, protocol correctness and cross-platform contracts; product-host implementation belongs to independent products.
+Fresnica is a shared Stellar wallet/security foundation. The repository is a monorepo for development convenience, but its components evolve at different speeds and should be treated as logically separate projects.
 
-## Architecture
-
-```text
-Application Flows
-  -> Application Capabilities
-  -> Fresnica SDK/Core + Stellar/network/repository/platform ports
-```
-
-Core-owned security delivery paths are:
+## Direction
 
 ```text
-Rust application       -> fresnica-sdk -> Core
-Native application     -> Native SDK / UniFFI -> fresnica-sdk -> Core
-Web application        -> filtered WASM binding -> fresnica-sdk -> Core
-Trusted process host   -> optional Process Binding -> fresnica-sdk -> Core
+Stellar protocol / CAP / stable standards
+                    |
+                    v
+              Fresnica Core
+        slow security/protocol authority
+                    |
+                    v
+               Fresnica SDK
+        stable cross-language semantics
+                    |
+       +------------+-------------+
+       |                          |
+       v                          v
+   RefPython                  Rust Client
+semantic laboratory       wallet capability reference
+       |                          |
+       +------------+-------------+
+                    |
+       Mobile / Web / Desktop / Agent
+             independent products
 ```
 
-The Process Binding is a privileged owner/host API, not an Agent, remote, renderer or plugin interface.
+The target baseline is [`development/modern-stellar-core-capability-baseline.md`](development/modern-stellar-core-capability-baseline.md).
 
-## Completed foundation
+## Modern Stellar foundation
 
-### Common contracts
+### M0 — Core protocol/security baseline
 
-- canonical Flow / Capability / Core / Port vocabulary;
-- five shared architecture, Flow, Capability, Core-security and platform contracts;
-- nineteen-capability catalog with maturity and Reference Semantics rules;
-- separate Account identity, Signer capability and Recovery Source concepts;
-- shared network, asset, amount, price, memo and error semantics;
-- RefPython laboratory governance and cross-repository evidence process.
+Current status: **in progress**.
 
-### Rust Core and SDK
+Completed:
 
-- Stellar Classic account parsing and SEP-0005 mnemonic/signer derivation;
-- Scrypt + AES-256-GCM protected software-signer envelope;
-- verified `WalletUnlockKey` derivation and routine signing;
-- passphrase-only Reveal / Export;
-- external Ed25519 prepare/apply with signature verification;
-- bounded XDR parsing and stable security error classes;
-- Core Client API v3 and Universal SDK API v3;
-- Native SDK / UniFFI API v2, WASM binding and Process Binding API v1;
-- SDK compatibility manifest, release contract and `native-sdk-v0.2.1` baseline.
+- Classic `G...` and contract `C...` account identity remain distinct from signer capability;
+- exact Classic transaction XDR/network signing remains the established boundary;
+- Protocol-28-ready `stellar-xdr` is used ahead of Mainnet activation;
+- Soroban authorization parsing/preimage/hash/signature primitives support legacy Address and CAP-71 AddressV2;
+- direct G-account Ed25519 Soroban authorization signing is supported;
+- C-account/custom/delegated authorization remains fail closed/provider-owned;
+- language-neutral Soroban authorization signing vectors exist;
+- `CoreClientApi` exposes protected and external Ed25519 auth-entry signing with stable `invalid-authorization` semantics.
 
-### Application capability references
+Next:
 
-- reusable Rust wallet, balance, Payment, Trustline and transaction flows;
-- SDEX write/read semantics including BUY/SELL intent and exact rational prices;
-- Ledger Authorization and Signing Coordination for supported local Ed25519 paths;
-- Rust CLI and engineering/reference TUI over the same capability layer;
-- pending/uncertain-submission and post-success refresh isolation.
+- complete the platform-neutral SDK contract for Soroban authorization;
+- add standard message-signing semantics (SEP-53 alignment) as a separate signing domain;
+- keep protocol-version/network feature gating above Core where network state is known.
 
-### Network and Anchor
+### M1 — SDK adaptation
 
-- shared `HorizonGateway` boundary with provider normalization;
-- staged Horizon-to-RPC/Portfolio transition rationale;
-- centralized Anchor HTTPS/no-redirect/DNS/timeout/body-limit policy;
-- SEP-1, Classic SEP-10, SEP-24-preferred / SEP-6-fallback initiation and status;
-- common SEP-12 scalar/binary updates and reviewed withdrawal handoff;
-- exact-case asset identity and safe legacy SEP-6 compatibility.
+Expose stable, domain-specific APIs rather than a generic hash-signing oracle:
 
-### Platform delivery
+```text
+Classic transaction signing
+Soroban authorization signing
+standard message signing
+external signing prepare/apply
+verification
+```
 
-- Android AAR and Apple XCFramework Native SDK packages;
-- Swift/Kotlin generation and direct-consumer validation;
-- React Native adapter build/consumer gates;
-- WASM package/runtime conformance;
-- real Testnet/WebAuthn smart-account reference evidence;
-- retired legacy `bindings/mobile` facade, publisher and active compatibility CI.
+Native/Process/WASM bindings follow only after the platform-neutral SDK contract is proven.
 
-## Current security track
+### M2 — reference semantics
 
-The focused review is recorded in [`development/security-review-2026-08-31.md`](development/security-review-2026-08-31.md).
+RefPython should lead Soroban wallet semantics that are not cryptographic authority:
 
-### 1. Agent Access — design before exposure
+- RPC simulation and assembly lifecycle;
+- review-before/after-simulation integrity;
+- invocation/auth-entry presentation;
+- G-account fee/source versus C-account authorization relationships;
+- stale simulation/error behavior.
 
-The current Core `AgentCapability` is dormant and has no production consumer. Its operation-type/fee/count/expiry checks do not constrain destination, asset, amount/value, transaction timebounds or stateful replay/budget use.
+RustClient should then provide the Rust reference implementation for RPC/gateway, simulation, contract invocation and wallet capability composition.
 
-Next milestone:
+### M3 — concrete providers
 
-- define the threat model and credential/grant lifecycle;
-- separate deterministic Core transaction-policy evaluation from stateful revocation, nonce, use-count and budget accounting;
-- begin with one narrow operation-specific policy;
-- preserve exact-envelope authorization and signing;
-- deny unsupported transaction/operation forms;
-- add negative destination/asset/amount/fee/time/source/replay tests before adding any adapter.
+Smart-account/passkey/contract-account support should start with one real provider and conformance evidence, then extract a generic provider boundary. Do not design a universal provider abstraction from hypothetical use cases.
 
-### 2. Release supply-chain hardening
+## Parallel security tracks
 
-The Native SDK release path publishes wallet-security binaries and therefore needs stronger reproducibility and provenance.
+These remain important but should not displace the Modern Stellar Core baseline:
 
-Next milestone:
+- Native SDK release supply-chain pinning, dependency audit, SBOM and provenance;
+- Backup v1 metadata-mutation regressions and terminal/legacy containment;
+- Process Binding privilege-profile review before non-RefPython Desktop use;
+- hardware/external signer transports only with concrete provider demand.
 
-- SHA-pin third-party Actions;
-- pin Fresnica-owned release toolchain/dependency resolution;
-- reduce `contents: write` to the final publish job;
-- add dependency policy/audit;
-- generate an SBOM;
-- attach build provenance/attestation to release artifacts.
+## Agent integration
 
-This applies to Fresnica-owned build inputs, not consumer product Gradle/Kotlin/JDK policy.
+Fresnica does not build a parallel Agent wallet stack. Soneso Stellar Agent Wallet remains the preferred MCP/policy/approval/audit/network layer. Fresnica contributes a protected exact-envelope signing backend only after the upstream seam exists.
 
-### 3. Backup v1 containment and regression coverage
+The dormant operation-type `AgentCapability` is not a product policy engine and must not be promoted.
 
-Backup v1 protects signer material but does not authenticate the outer wallet relationship metadata.
+## CI and repository governance
 
-Next milestone:
+Development uses layered validation:
 
-- keep v1 terminal/reference and legacy-only;
-- add network/address/relationship mutation tests, including empty-install restore;
-- preserve Backup/Restore v2 explicit target-network confirmation and revalidation-before-activation;
-- harden user-selected backup temporary-file creation against predictable sibling `.tmp` races.
+- portable rustfmt locally before push;
+- `Required CI / validate` for affected Core/SDK/direct Rust contracts;
+- expensive platform/integration workflows only for non-draft/final PR validation;
+- Main bundle after merge for isolated development recovery.
 
-### 4. Process Binding privilege review
-
-Process Binding API v1 includes owner-only mnemonic generation, Reveal and raw unlock-key derivation.
-
-Next milestone:
-
-- keep RefPython/conformance use trusted;
-- prohibit direct remote/MCP/renderer/plugin exposure;
-- before a non-RefPython Desktop consumer ships, decide whether it needs the full owner API or a narrower profile.
-
-## Demand-driven work
-
-Do not implement these merely to close a checklist:
-
-- hardware/external signer transports without a concrete provider;
-- Hash-X/signed-payload collection without a real flow;
-- SEP-45 execution or uncommon SEP-12 file workflows without a concrete anchor;
-- platform-native product passkey wiring;
-- Windows/Linux non-Rust packaging without a chosen consumer framework;
-- product persistence, onboarding or UI in this shared repository.
-
-## Validation and governance
-
-- PR changes run the relevant Required CI and platform gates.
-- `main` publishes a verified Main bundle for isolated development recovery.
-- API/version compatibility and conformance fixtures remain authoritative.
-- Repository branch protection/ruleset should require PRs and `Required CI / validate`, and prohibit force-push/deletion.
-
-## Next checkpoint
-
-A security milestone is complete only when:
-
-1. the threat/compatibility boundary is documented;
-2. executable negative regression tests reproduce the unsafe case;
-3. the smallest corrective implementation passes the relevant Core/SDK/platform gates;
-4. handoff, tasks and security-review status are updated together.
+Repository branch protection/ruleset should eventually require PRs and `Required CI / validate`, prohibit force-push/deletion, and require current branches/conversation resolution.
