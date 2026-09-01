@@ -261,6 +261,16 @@ mod tests {
         }
     }
 
+    fn encode_hex(bytes: &[u8]) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+        out
+    }
+
     fn signature_values(entry: &SorobanAuthorizationEntry) -> &[ScVal] {
         let signature = match &entry.credentials {
             SorobanCredentials::Address(credentials)
@@ -271,6 +281,22 @@ mod tests {
             ScVal::Vec(Some(values)) => values.as_ref(),
             _ => panic!("test expected signature vector"),
         }
+    }
+
+    #[test]
+    fn dump_shared_authorization_vector() {
+        let unsigned = entry(true);
+        let request = prepare_soroban_authorization_signing(&unsigned, TESTNET).unwrap();
+        let signer = SoftwareSigner::from_secret(SECRET).unwrap();
+        let mut signed = unsigned.clone();
+        sign_soroban_authorization_entry(&mut signed, TESTNET, &signer).unwrap();
+        panic!(
+            "AUTH_VECTOR unsigned={} preimage={} hash={} signed={}",
+            encode_hex(&request.authorization_entry_xdr),
+            encode_hex(&request.authorization_preimage_xdr),
+            encode_hex(&request.authorization_hash),
+            encode_hex(&soroban_authorization_entry_xdr(&signed).unwrap())
+        );
     }
 
     #[test]
