@@ -1,8 +1,28 @@
 # Fresnica Tasks
 
-This file tracks current shared-repository work. Product-host implementation belongs to independent product repositories; completed detail remains available in Git history, capability contracts, release notes and archived handoffs.
+Updated: 2026-09-01
+
+This list tracks shared-repository work only. Independent product implementation belongs in the corresponding product repository.
 
 ## Current shared-repository priorities
+
+### Modern Stellar Core Capability Baseline
+
+- [x] Adopt the Modern Stellar Core Capability Baseline as the staged evolution target
+- [x] Keep G-account identity, C-account identity and signer capability separate
+- [x] Compile against maintained Protocol-28-ready Stellar XDR ahead of Mainnet activation
+- [x] Add Soroban authorization XDR parsing/encoding with bounded decode behavior
+- [x] Add legacy Address and CAP-71 AddressV2 authorization preimage/hash semantics
+- [x] Add direct G-account Ed25519 Soroban authorization signing and verification
+- [x] Fail closed for C-account/custom/delegated authorization until a concrete provider exists
+- [x] Add a language-neutral Soroban authorization signing conformance vector
+- [x] Expose protected/external Soroban authorization through `CoreClientApi` with stable `invalid-authorization` errors
+- [ ] Expose the proven Soroban authorization contract through the platform-neutral SDK
+- [ ] Extend Native/Process/WASM bindings only after the SDK contract is stable and required by consumers
+- [ ] Add standard message signing/verification as a separate domain with SEP-53 alignment
+- [ ] Use RefPython to prove Soroban simulation/assembly/review semantics
+- [ ] Add RustClient RPC/gateway + Soroban transaction capability after RefPython evidence
+- [ ] Add a concrete smart-account/C-account provider before extracting a generic provider interface
 
 ### Security
 
@@ -11,25 +31,24 @@ This file tracks current shared-repository work. Product-host implementation bel
 - [ ] Add executable Backup v1 metadata-mutation regressions and keep v1 terminal/legacy-only
 - [ ] Pin Fresnica-owned release Actions/toolchains/dependencies where appropriate
 - [ ] Add dependency audit, SBOM and provenance/attestation to the Native SDK release path
-- [x] Evaluate Soneso Stellar Agent Wallet as the preferred Agent execution/policy/MCP layer and document the no-duplication boundary
-- [ ] Propose an exact-envelope Classic signing backend to the upstream Stellar Agent Wallet while preserving its default keyring behavior
-- [ ] Implement a narrow Fresnica protected-signer backend only after that exact-envelope seam exists
-- [ ] Prove one bounded Testnet Payment through upstream MCP/policy/approval/audit and Fresnica exact-XDR signing
 
-### Protocol and provider work — demand-driven
+### Agent integration — reuse, do not duplicate
+
+- [x] Evaluate Soneso Stellar Agent Wallet as the preferred Agent execution/policy/MCP layer
+- [x] Keep Fresnica as protected signer authority rather than duplicating Agent policy/approval/audit/network logic
+- [x] Reject a raw-hash signer adapter and decrypting Fresnica material into the upstream keyring
+- [ ] Propose/land an upstream application-level exact-envelope signer backend while preserving default keyring behavior
+- [ ] Validate returned signed envelopes cannot mutate the approved transaction
+- [ ] Implement the narrow Fresnica protected-signer backend after the upstream seam exists
+- [ ] Prove one bounded Testnet Payment through upstream MCP/policy/approval/audit and Fresnica exact-XDR signing
+- [ ] Keep the current operation-type `AgentCapability` dormant; replace/remove it rather than promoting a parallel policy engine
+
+### Protocol/provider work — demand-driven
 
 - [ ] Add provider-backed collection for Hash-X, signed-payload and external signer conditions before claiming general Classic multisig/delegated signing support
 - [ ] Add SEP-12 nested structured values and optional `/customer/files` file-ID workflow only when a concrete anchor requires them
 - [ ] Add hardware transport adapters only after a concrete provider and exact-XDR compatibility gate exist
 - [ ] Add Windows/Linux non-Rust packaging only after a concrete consumer language/framework is selected
-
-### External product evidence requests
-
-These are shared-contract inputs, not implementation tasks for this repository.
-
-- [ ] Independent products apply the shared new-passphrase/re-protection policy in onboarding/settings; credential-strength policy remains in Wallet/Application rather than Core
-- [ ] Independent iOS/Android products benchmark current v1 Scrypt cost and report device/OS, latency and peak-memory evidence; products must not change KDF parameters without a versioned migration
-- [ ] A platform-native Mobile passkey provider remains product-owned after the Testnet provider boundary is proven
 
 ## Established architecture and contracts
 
@@ -47,11 +66,8 @@ These are shared-contract inputs, not implementation tasks for this repository.
 - [x] Versioned Scrypt + AES-256-GCM protected signer envelope
 - [x] Verified `WalletUnlockKey` derivation and protected transaction signing
 - [x] Explicit passphrase-only Reveal / Export boundary
-- [x] External Ed25519 prepare/apply boundary with signature verification
+- [x] External Ed25519 transaction prepare/apply boundary with signature verification
 - [x] Finite XDR decoding depth/input bounds and fail-closed unsupported envelope handling
-- [x] `CoreClientApi` v3 and platform-neutral `fresnica-sdk` API v3
-- [x] Native SDK / UniFFI API v2 with Android AAR and Apple XCFramework packaging
-- [x] Filtered WASM binding and browser/shared-vector conformance
 - [x] Formal SDK Process Binding API v1; duplicate Core/SDK bridge binaries retired
 - [x] Machine-readable SDK compatibility manifest and source-drift validation
 - [x] Native SDK release contract and published `native-sdk-v0.2.1` baseline
@@ -70,7 +86,7 @@ These are shared-contract inputs, not implementation tasks for this repository.
 ## Network / Anchor baseline
 
 - [x] `HorizonGateway` identified as the current provider adapter, not a permanent shared contract
-- [x] Shared Asset identity based on a thin wrapper over official `stellar_xdr::Asset`
+- [x] Shared Classic Asset identity based on a thin wrapper over official `stellar_xdr::Asset`
 - [x] Central Anchor HTTPS/no-redirect/DNS/timeout/body-limit transport policy
 - [x] SEP-1 discovery, Classic SEP-10, SEP-24-preferred / SEP-6-fallback initiation and status
 - [x] Reviewed withdrawal handoff and common scalar/binary SEP-12 customer updates
@@ -85,20 +101,6 @@ These are shared-contract inputs, not implementation tasks for this repository.
 - [x] Target-network confirmation and signer identity/re-protection requirements
 - [ ] Do not promote Backup v1 as a portable product format because outer metadata is unauthenticated
 
-## Agent Access status
-
-- [x] Dormant Core prototype proves exact-envelope authorization-then-sign and fail-closed source/network/fee/count/type checks
-- [x] CodebaseMemory/source audit confirms no production SDK, binding or transport consumer
-- [x] Reuse assessment confirms that Stellar Agent Wallet already owns MCP, policy, approval, nonce/replay, audit, RPC construction and submission
-- [x] Decide that Fresnica remains the protected signer authority and must not duplicate the upstream Agent stack
-- [x] Reject a raw-hash `Signer` adapter because it would weaken Fresnica exact-XDR/network signing semantics
-- [x] Reject decrypting Fresnica material into an S-strkey stored in the upstream keyring
-- [ ] Add an upstream application-level exact-envelope signer backend; keep Account source and expected Signer identity separate
-- [ ] Add returned-envelope validation so a backend may add valid signature material but may not mutate the approved transaction
-- [ ] Implement the Fresnica backend without exposing passphrase, mnemonic, secret, Reveal or raw `WalletUnlockKey` to MCP
-- [ ] Execute the one-Payment Testnet acceptance and mutation suite before expanding operation scope
-- [ ] Keep the current operation-type `AgentCapability` dormant; replace or remove it rather than promoting a parallel policy engine
-
 ## Historical Mobile binding
 
 - [x] `bindings/mobile` served as the v0.1 compatibility facade and validation donor
@@ -108,8 +110,8 @@ These are shared-contract inputs, not implementation tasks for this repository.
 
 ## Quality and governance
 
-- [x] Required CI gate for compatibility, Rust surfaces and RefPython
-- [x] Core, SDK, Process Binding, Rust client/CLI/TUI and RefPython test coverage
-- [x] Native Android/Apple packaging, React Native adapter and WASM validation workflows
 - [x] Main bundle artifact workflow for isolated development recovery
+- [x] Use a portable pinned rustfmt tool locally before pushing Rust changes
+- [x] Keep stable `Required CI / validate` while formatting changed Rust files and testing only affected immediate Rust contracts
+- [x] Defer expensive Native/Apple/Android/WASM/RefPython/CLI/TUI integration to final non-draft PR validation
 - [ ] Enable repository ruleset/branch protection requiring PRs and `Required CI / validate`; prohibit force-push and branch deletion

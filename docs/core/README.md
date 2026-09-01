@@ -5,6 +5,7 @@ These documents describe detailed Rust Core / SDK security and protocol contract
 Start with the short cross-platform authority document first:
 
 - [`../core-security-boundary.md`](../core-security-boundary.md)
+- [`../development/modern-stellar-core-capability-baseline.md`](../development/modern-stellar-core-capability-baseline.md) - staged Classic + Soroban protocol/security target.
 
 Then use these references when changing the relevant implementation boundary:
 

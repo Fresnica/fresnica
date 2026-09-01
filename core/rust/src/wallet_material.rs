@@ -53,12 +53,7 @@ pub fn protect_mnemonic_signing_material(
         Some(language) if !language.is_empty() => language.to_owned(),
         _ => detect_mnemonic_language(&mnemonic)?.to_owned(),
     };
-    let public_key = derive_classic_public_key(
-        &mnemonic,
-        &mnemonic_passphrase,
-        index,
-        &language,
-    )?;
+    let public_key = derive_classic_public_key(&mnemonic, &mnemonic_passphrase, index, &language)?;
 
     let mut payload = json!({
         "kind": "mnemonic",
@@ -141,27 +136,16 @@ mod tests {
 
         assert_eq!(protected.public_key, PUBLIC);
         assert!(!protected.envelope.to_string().contains(SECRET));
-        assert!(derive_verified_unlock_key(
-            &registry,
-            &protected.envelope,
-            "passcode",
-            PUBLIC,
-        )
-        .is_ok());
+        assert!(
+            derive_verified_unlock_key(&registry, &protected.envelope, "passcode", PUBLIC,).is_ok()
+        );
     }
 
     #[test]
     fn generates_and_exports_same_mnemonic() {
         let registry = ProtectionRegistry::new();
-        let generated = generate_protected_mnemonic(
-            &registry,
-            "english",
-            128,
-            "",
-            0,
-            "passcode",
-        )
-        .unwrap();
+        let generated =
+            generate_protected_mnemonic(&registry, "english", 128, "", 0, "passcode").unwrap();
         let expected = generated.mnemonic.to_string();
         let exported = export_signing_material(
             &registry,

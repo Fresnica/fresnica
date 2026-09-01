@@ -26,9 +26,9 @@ Start with [`docs/README.md`](docs/README.md) for the canonical documentation ma
 ## Repository map
 
 ```text
-crates/                 Rust Core and core-facing libraries
-sdk/                    universal/native SDK contracts and tooling
-bindings/               native/compatibility bindings
+core/rust/              Rust cryptographic/protocol Core
+sdk/                    platform-neutral SDK contracts and compatibility tooling
+bindings/               Native, Process and WASM bindings
 adapters/               framework adapter source/tooling
 clients/rust-client/    Rust Application Capability reference implementation
 clients/rust-cli/       Rust CLI engineering client

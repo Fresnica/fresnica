@@ -3,6 +3,7 @@ name: React Native adapter
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "adapters/react-native/**"
       - "bindings/native/Cargo.toml"
@@ -23,6 +24,7 @@ jobs:
         run: npm test --prefix adapters/react-native
 
   android-consumer-toolchain:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
