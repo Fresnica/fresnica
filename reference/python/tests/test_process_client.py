@@ -21,6 +21,12 @@ VECTOR_PATH = (
     / "test-vectors"
     / "transaction-signing-v1.json"
 )
+SOROBAN_VECTOR_PATH = (
+    Path(__file__).parents[3]
+    / "spec"
+    / "test-vectors"
+    / "soroban-authorization-signing-v1.json"
+)
 
 
 @pytest.fixture(scope="module")
@@ -33,6 +39,10 @@ def core_client():
 
 def _vector():
     return json.loads(VECTOR_PATH.read_text(encoding="utf-8"))["cases"][0]
+
+
+def _soroban_vector():
+    return json.loads(SOROBAN_VECTOR_PATH.read_text(encoding="utf-8"))["cases"][0]
 
 
 def test_tui_core_subtitle_reports_python_reference_without_bridge():
@@ -164,6 +174,61 @@ def test_external_signing_prepare_and_apply_matches_shared_vector(core_client):
         signature,
     )
     assert signed == vector["signed_xdr_base64"]
+
+
+def test_protected_soroban_authorization_matches_shared_vector(core_client):
+    vector = _soroban_vector()
+    protected = core_client.protect_secret(vector["secret"], "passcode")
+    unlock_key = core_client.derive_verified_unlock_key(
+        protected.envelope,
+        "passcode",
+        protected.signer_public_key,
+    )
+
+    signed = core_client.sign_soroban_authorization(
+        protected.envelope,
+        unlock_key,
+        protected.signer_public_key,
+        vector["unsigned_entry_xdr_base64"],
+        vector["network_passphrase"],
+    )
+
+    assert signed == vector["signed_entry_xdr_base64"]
+
+
+def test_passcode_soroban_authorization_matches_shared_vector(core_client):
+    vector = _soroban_vector()
+    protected = core_client.protect_secret(vector["secret"], "passcode")
+
+    signed = core_client.sign_soroban_authorization_with_passcode(
+        protected.envelope,
+        "passcode",
+        protected.signer_public_key,
+        vector["unsigned_entry_xdr_base64"],
+        vector["network_passphrase"],
+    )
+
+    assert signed == vector["signed_entry_xdr_base64"]
+
+
+def test_external_soroban_prepare_apply_matches_shared_vector(core_client):
+    vector = _soroban_vector()
+    prepared = core_client.prepare_soroban_authorization_signing(
+        vector["unsigned_entry_xdr_base64"],
+        vector["network_passphrase"],
+    )
+    signature = Keypair.from_secret(vector["secret"]).sign(
+        prepared.authorization_hash
+    )
+    signed = core_client.apply_soroban_ed25519_signature(
+        prepared.authorization_entry_xdr,
+        prepared.network_passphrase,
+        vector["public_key"],
+        signature,
+    )
+
+    assert prepared.authorization_hash.hex() == vector["authorization_hash_hex"]
+    assert signed == vector["signed_entry_xdr_base64"]
 
 
 def test_same_passcode_unlock_keys_are_bound_to_each_envelope(core_client):

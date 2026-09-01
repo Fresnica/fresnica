@@ -85,6 +85,17 @@ class FakeAdapter:
         self.calls.append(("prepare", envelope, simulation_response))
         return self.assembled
 
+    def set_authorization_expiration_ledger(self, envelope, valid_until_ledger_sequence):
+        self.calls.append(("set-auth-expiration", envelope, valid_until_ledger_sequence))
+        detached = sum(
+            credential != "source-account"
+            for credential in self.assembled_facts.credential_types
+        )
+        if detached:
+            envelope.xdr = "assembled-expiry-xdr"
+            envelope.tx_hash = "assembled-expiry-hash"
+        return detached
+
 
 def test_review_is_derived_from_post_simulation_assembled_transaction():
     adapter = FakeAdapter()
@@ -94,6 +105,7 @@ def test_review_is_derived_from_post_simulation_assembled_transaction():
         "inspect",
         "simulate",
         "prepare",
+        "set-auth-expiration",
         "inspect",
     ]
     assert prepared.envelope is adapter.assembled
@@ -106,8 +118,26 @@ def test_review_is_derived_from_post_simulation_assembled_transaction():
     assert prepared.review.inclusion_fee_stroops == 100
     assert prepared.review.min_resource_fee == 4900
     assert prepared.review.simulation_ledger == 123456
-    assert prepared.review.transaction_hash == "assembled-hash"
+    assert prepared.review.authorization_expiration_ledger == 123556
+    assert prepared.review.transaction_hash == "assembled-expiry-hash"
     assert prepared.review.transaction_hash != adapter.candidate.hash_hex()
+
+
+def test_detached_authorization_expiration_is_set_before_review_binding():
+    adapter = FakeAdapter()
+
+    prepared = SorobanSimulationService(
+        adapter,
+        authorization_lifetime_ledgers=25,
+    ).prepare("main", adapter.candidate)
+
+    expiration_call = next(
+        call for call in adapter.calls if call[0] == "set-auth-expiration"
+    )
+    assert expiration_call[2] == 123481
+    assert prepared.review.authorization_expiration_ledger == 123481
+    assert prepared.reviewed_envelope_xdr == "assembled-expiry-xdr"
+    assert prepared.reviewed_transaction_hash == "assembled-expiry-hash"
 
 
 def test_candidate_with_preexisting_auth_is_rejected_before_rpc():
