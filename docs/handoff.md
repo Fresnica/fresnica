@@ -37,6 +37,7 @@ Current foundation includes:
 - a language-neutral Soroban authorization conformance vector;
 - `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification;
 - SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
+- Process Binding API v2 transport for those SDK v4 Soroban authorization operations, adopted only for the concrete RefPython trusted-host consumer;
 - RefPython Soroban simulation/assembly/review semantics over official `stellar-sdk` RPC preparation, with exact assembled-XDR/hash review binding and explicit restore handling.
 
 The next protocol work is **connecting that reviewed assembled object to authorization/signing/submission evidence, then RustClient RPC/Soroban capability work**, not new Core authorization primitives.
@@ -89,9 +90,9 @@ Post-merge: Main bundle
 
 ## 7. Immediate next work
 
-1. connect RefPython's reviewed assembled Soroban object to source-account/detached G authorization plus SDK/Core signing, then prove Testnet submit/status reconciliation;
-2. use that evidence to add the RustClient RPC/Soroban capability reference;
-3. adapt Native/Process/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
+1. connect RefPython's reviewed assembled Soroban object to source-account/detached G authorization through Process Binding v2 + SDK/Core, then prove Testnet submit/status reconciliation;
+2. model the authorized-XDR transition explicitly: only expected auth signature fields may change before the final transaction hash is frozen for source-account signing;
+3. use that evidence to add the RustClient RPC/Soroban capability reference; keep Native/WASM demand-driven;
 4. add SEP-53-aligned message signing as the next independent Core signing domain;
 5. continue supply-chain and Backup v1 hardening in parallel;
 6. resume Agent integration only when the upstream exact-envelope signing seam exists.

@@ -8,6 +8,6 @@ The host owns persistence, networking, OS authentication, lifecycle and UI. The 
 
 ## Security classification
 
-This binary is a **privileged owner/host binding**, not a sandbox or authorization boundary. API v1 includes owner-only operations that transport passphrases, generated/revealed mnemonic or secret material, and raw `WalletUnlockKey` values over stdin/stdout. The parent process must already be trusted to receive those values and must control child-process integrity, pipes, logging, crash collection and lifecycle.
+This binary is a **privileged owner/host binding**, not a sandbox or authorization boundary. API v2 includes owner-only operations that transport passphrases, generated/revealed mnemonic or secret material, and raw `WalletUnlockKey` values over stdin/stdout. It also carries the SDK v4 Soroban authorization-entry protected/passcode and external Ed25519 prepare/apply operations. The parent process must already be trusted to receive those values and must control child-process integrity, pipes, logging, crash collection and lifecycle.
 
 Do not expose `fresnica-process` directly as a network daemon, MCP/agent tool, renderer/browser API, untrusted plugin interface or shared multi-tenant service. A future Agent Access API must be a separate, narrower surface that cannot Reveal material, derive/export unlock keys or accept owner passphrases.

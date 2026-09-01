@@ -6,7 +6,7 @@ use fresnica_sdk::{FresnicaSdk, SdkError, SdkSigningMaterialKind, SDK_API_VERSIO
 use serde_json::{json, Map, Value};
 use zeroize::Zeroizing;
 
-pub const PROCESS_BINDING_API_VERSION: u64 = 1;
+pub const PROCESS_BINDING_API_VERSION: u64 = 2;
 
 fn main() {
     match run() {
@@ -200,6 +200,43 @@ fn run() -> Result<Value, BridgeError> {
             )?;
             Ok(json!({"transaction_xdr": STANDARD.encode(signed)}))
         }
+        "sign-soroban-authorization" => {
+            let envelope = take_value(object, "envelope")?;
+            let unlock_key =
+                decode_base64(&take_sensitive_string(object, "unlock_key")?, "unlock_key")?;
+            let expected = take_string(object, "expected_signer_public_key")?;
+            let authorization_entry_xdr = decode_base64(
+                &take_string(object, "authorization_entry_xdr")?,
+                "authorization_entry_xdr",
+            )?;
+            let network_passphrase = take_string(object, "network_passphrase")?;
+            let signed = sdk.sign_soroban_authorization_xdr(
+                envelope.to_string(),
+                unlock_key,
+                expected,
+                authorization_entry_xdr,
+                network_passphrase,
+            )?;
+            Ok(json!({"authorization_entry_xdr": STANDARD.encode(signed)}))
+        }
+        "sign-soroban-authorization-with-passcode" => {
+            let envelope = take_value(object, "envelope")?;
+            let passcode = take_sensitive_string(object, "passcode")?;
+            let expected = take_string(object, "expected_signer_public_key")?;
+            let authorization_entry_xdr = decode_base64(
+                &take_string(object, "authorization_entry_xdr")?,
+                "authorization_entry_xdr",
+            )?;
+            let network_passphrase = take_string(object, "network_passphrase")?;
+            let signed = sdk.sign_soroban_authorization_xdr_with_passcode(
+                envelope.to_string(),
+                passcode.as_str().to_owned(),
+                expected,
+                authorization_entry_xdr,
+                network_passphrase,
+            )?;
+            Ok(json!({"authorization_entry_xdr": STANDARD.encode(signed)}))
+        }
         "reveal" => {
             let envelope = take_value(object, "envelope")?;
             let passcode = take_sensitive_string(object, "passcode")?;
@@ -231,6 +268,23 @@ fn run() -> Result<Value, BridgeError> {
                 "network_passphrase": prepared.network_passphrase,
             }))
         }
+        "prepare-soroban-authorization-signing" => {
+            let authorization_entry_xdr = decode_base64(
+                &take_string(object, "authorization_entry_xdr")?,
+                "authorization_entry_xdr",
+            )?;
+            let network_passphrase = take_string(object, "network_passphrase")?;
+            let prepared = sdk.prepare_soroban_authorization_signing(
+                authorization_entry_xdr,
+                network_passphrase,
+            )?;
+            Ok(json!({
+                "authorization_hash": STANDARD.encode(prepared.authorization_hash),
+                "authorization_entry_xdr": STANDARD.encode(prepared.authorization_entry_xdr),
+                "authorization_preimage_xdr": STANDARD.encode(prepared.authorization_preimage_xdr),
+                "network_passphrase": prepared.network_passphrase,
+            }))
+        }
         "apply-ed25519-signature" => {
             let transaction_xdr =
                 decode_base64(&take_string(object, "transaction_xdr")?, "transaction_xdr")?;
@@ -244,6 +298,22 @@ fn run() -> Result<Value, BridgeError> {
                 signature,
             )?;
             Ok(json!({"transaction_xdr": STANDARD.encode(signed)}))
+        }
+        "apply-soroban-ed25519-signature" => {
+            let authorization_entry_xdr = decode_base64(
+                &take_string(object, "authorization_entry_xdr")?,
+                "authorization_entry_xdr",
+            )?;
+            let network_passphrase = take_string(object, "network_passphrase")?;
+            let signer_public_key = take_string(object, "signer_public_key")?;
+            let signature = decode_base64(&take_string(object, "signature")?, "signature")?;
+            let signed = sdk.apply_soroban_ed25519_signature(
+                authorization_entry_xdr,
+                network_passphrase,
+                signer_public_key,
+                signature,
+            )?;
+            Ok(json!({"authorization_entry_xdr": STANDARD.encode(signed)}))
         }
         _ => Err(BridgeError::InvalidRequest("unsupported operation")),
     }

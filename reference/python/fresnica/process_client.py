@@ -26,7 +26,7 @@ from .errors import (
 from .secret_store import WalletUnlockKey
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,14 @@ class GeneratedMnemonicResult:
 class Ed25519SigningRequestResult:
     transaction_hash: bytes
     transaction_xdr: str
+    network_passphrase: str
+
+
+@dataclass(frozen=True)
+class SorobanAuthorizationSigningRequestResult:
+    authorization_hash: bytes
+    authorization_entry_xdr: str
+    authorization_preimage_xdr: str
     network_passphrase: str
 
 
@@ -293,6 +301,60 @@ class FresnicaProcessClient:
             raise SignerError(str(exc)) from exc
         return _signed_xdr(result)
 
+    def sign_soroban_authorization(
+        self,
+        envelope: dict,
+        unlock_key: WalletUnlockKey,
+        expected_signer_public_key: str,
+        authorization_entry_xdr: str,
+        network_passphrase: str,
+    ) -> str:
+        try:
+            result = self._call(
+                {
+                    "operation": "sign-soroban-authorization",
+                    "envelope": envelope,
+                    "unlock_key": base64.b64encode(unlock_key.as_bytes()).decode("ascii"),
+                    "expected_signer_public_key": expected_signer_public_key,
+                    "authorization_entry_xdr": authorization_entry_xdr,
+                    "network_passphrase": network_passphrase,
+                }
+            )
+        except _ProcessProtocolError as exc:
+            if exc.code == "invalid-unlock-key":
+                raise InvalidUnlockKeyError("Invalid wallet unlock key") from exc
+            if exc.code == "identity-mismatch":
+                raise WalletLockedError("Signer identity does not match expected signer") from exc
+            raise SignerError(str(exc)) from exc
+        return _signed_authorization_xdr(result)
+
+    def sign_soroban_authorization_with_passcode(
+        self,
+        envelope: dict,
+        passcode: str,
+        expected_signer_public_key: str,
+        authorization_entry_xdr: str,
+        network_passphrase: str,
+    ) -> str:
+        try:
+            result = self._call(
+                {
+                    "operation": "sign-soroban-authorization-with-passcode",
+                    "envelope": envelope,
+                    "passcode": passcode,
+                    "expected_signer_public_key": expected_signer_public_key,
+                    "authorization_entry_xdr": authorization_entry_xdr,
+                    "network_passphrase": network_passphrase,
+                }
+            )
+        except _ProcessProtocolError as exc:
+            if exc.code == "invalid-passcode":
+                raise InvalidPasswordError("Invalid wallet password") from exc
+            if exc.code == "identity-mismatch":
+                raise WalletLockedError("Signer identity does not match expected signer") from exc
+            raise SignerError(str(exc)) from exc
+        return _signed_authorization_xdr(result)
+
     def reveal(self, envelope: dict, passcode: str, expected_signer_public_key: str) -> dict:
         try:
             result = self._call(
@@ -338,6 +400,46 @@ class FresnicaProcessClient:
             raise FresnicaProcessUnavailableError("Fresnica process binding returned malformed signing request")
         return Ed25519SigningRequestResult(transaction_hash, normalized_xdr, returned_network)
 
+    def prepare_soroban_authorization_signing(
+        self,
+        authorization_entry_xdr: str,
+        network_passphrase: str,
+    ) -> SorobanAuthorizationSigningRequestResult:
+        try:
+            result = self._call(
+                {
+                    "operation": "prepare-soroban-authorization-signing",
+                    "authorization_entry_xdr": authorization_entry_xdr,
+                    "network_passphrase": network_passphrase,
+                }
+            )
+        except _ProcessProtocolError as exc:
+            raise SignerError(str(exc)) from exc
+        try:
+            authorization_hash = base64.b64decode(result["authorization_hash"], validate=True)
+            normalized_xdr = result["authorization_entry_xdr"]
+            preimage_xdr = result["authorization_preimage_xdr"]
+            returned_network = result["network_passphrase"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FresnicaProcessUnavailableError(
+                "Fresnica process binding returned malformed Soroban authorization signing request"
+            ) from exc
+        if (
+            len(authorization_hash) != 32
+            or not isinstance(normalized_xdr, str)
+            or not isinstance(preimage_xdr, str)
+            or not isinstance(returned_network, str)
+        ):
+            raise FresnicaProcessUnavailableError(
+                "Fresnica process binding returned malformed Soroban authorization signing request"
+            )
+        return SorobanAuthorizationSigningRequestResult(
+            authorization_hash,
+            normalized_xdr,
+            preimage_xdr,
+            returned_network,
+        )
+
     def apply_ed25519_signature(
         self,
         transaction_xdr: str,
@@ -360,6 +462,29 @@ class FresnicaProcessClient:
         except _ProcessProtocolError as exc:
             raise SignerError(str(exc)) from exc
         return _signed_xdr(result)
+
+    def apply_soroban_ed25519_signature(
+        self,
+        authorization_entry_xdr: str,
+        network_passphrase: str,
+        signer_public_key: str,
+        signature: bytes,
+    ) -> str:
+        if not isinstance(signature, bytes) or len(signature) != 64:
+            raise SignerError("External signer must return a 64-byte Ed25519 signature")
+        try:
+            result = self._call(
+                {
+                    "operation": "apply-soroban-ed25519-signature",
+                    "authorization_entry_xdr": authorization_entry_xdr,
+                    "network_passphrase": network_passphrase,
+                    "signer_public_key": signer_public_key,
+                    "signature": base64.b64encode(signature).decode("ascii"),
+                }
+            )
+        except _ProcessProtocolError as exc:
+            raise SignerError(str(exc)) from exc
+        return _signed_authorization_xdr(result)
 
 
     def derive_mnemonic_signer(self, envelope: dict, passcode: str, expected_signer_public_key: str, index: int) -> ProtectedSoftwareSignerResult:
@@ -437,4 +562,18 @@ def _signed_xdr(result: dict) -> str:
         raise FresnicaProcessUnavailableError("Fresnica process binding returned malformed signed transaction") from exc
     if not isinstance(signed_xdr, str):
         raise FresnicaProcessUnavailableError("Fresnica process binding returned malformed signed transaction")
+    return signed_xdr
+
+
+def _signed_authorization_xdr(result: dict) -> str:
+    try:
+        signed_xdr = result["authorization_entry_xdr"]
+    except (KeyError, TypeError) as exc:
+        raise FresnicaProcessUnavailableError(
+            "Fresnica process binding returned malformed signed Soroban authorization entry"
+        ) from exc
+    if not isinstance(signed_xdr, str):
+        raise FresnicaProcessUnavailableError(
+            "Fresnica process binding returned malformed signed Soroban authorization entry"
+        )
     return signed_xdr
