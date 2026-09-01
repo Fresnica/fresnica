@@ -37,6 +37,7 @@ Current foundation includes:
 - a language-neutral Soroban authorization conformance vector;
 - `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification;
 - SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
+- Process Binding API v2 transport for those SDK v4 Soroban authorization operations, adopted only for the concrete RefPython trusted-host consumer;
 - RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation.
 
 The next protocol work is **RustClient RPC/Soroban capability work using that RefPython evidence**, not new Core authorization primitives.

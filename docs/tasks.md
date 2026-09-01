@@ -18,7 +18,7 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Add a language-neutral Soroban authorization signing conformance vector
 - [x] Expose protected/external Soroban authorization through `CoreClientApi` with stable `invalid-authorization` errors
 - [x] Expose the proven Soroban authorization contract through the platform-neutral SDK
-- [ ] Extend Native/Process/WASM bindings only after the SDK contract is stable and required by consumers
+- [x] Extend Process Binding to SDK v4 Soroban authorization only for the concrete RefPython consumer; keep Native/WASM demand-driven
 - [ ] Add standard message signing/verification as a separate domain with SEP-53 alignment
 - [x] Use RefPython to prove Soroban simulation/assembly/review semantics
 - [x] Prove source-account and detached Classic G-account Soroban authorization/signing plus Testnet submit/status reconciliation in RefPython
@@ -69,7 +69,7 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Explicit passphrase-only Reveal / Export boundary
 - [x] External Ed25519 transaction prepare/apply boundary with signature verification
 - [x] Finite XDR decoding depth/input bounds and fail-closed unsupported envelope handling
-- [x] Formal SDK Process Binding API v1; duplicate Core/SDK bridge binaries retired
+- [x] Formal SDK Process Binding API v2; v1 owner operations retained and SDK v4 Soroban authorization transport added for RefPython
 - [x] Machine-readable SDK compatibility manifest and source-drift validation
 - [x] Native SDK release contract and published `native-sdk-v0.2.1` baseline
 
