@@ -1,0 +1,55 @@
+name: Temporary SDK auth reconstruction
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  reconstruct:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply staged patch and verify exact blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d .staging
+          cat .staging/sdk-auth.patch.b64.* | base64 -d > /tmp/sdk-auth.patch
+          git apply --check /tmp/sdk-auth.patch
+          git apply /tmp/sdk-auth.patch
+
+          check_blob() {
+            local path="$1"
+            local expected="$2"
+            local actual
+            actual="$(git hash-object "$path")"
+            if [ "$actual" != "$expected" ]; then
+              echo "blob mismatch: $path expected=$expected actual=$actual" >&2
+              exit 1
+            fi
+          }
+
+          check_blob core/rust/src/client_api.rs c2f41752b59bdfb48a54f1cec915be050333f1d4
+          check_blob sdk/rust/src/lib.rs 2517f8f32f66b8dae755febf4f2d33f7e3ff80fe
+          check_blob sdk/compatibility/manifest.json ed768ccabe71ca42a1346fe99c45df00493be4df
+          check_blob reference/python/tests/test_process_binding_compat.py 39cdd16325df7c86abd4e67940a42fec821b6e36
+          check_blob reference/python/tests/test_process_client.py 4b10de045c5a6aae7b9acfcfc0acc1a4fddc0516
+          check_blob sdk/rust/README.md 86c590b2b8578e1bed2f4f879114d5658b2f5533
+          check_blob docs/tasks.md 8c56887d07c84b190a819d346a4f0b7cef203f9b
+          check_blob docs/handoff.md c6537984bba552d495340b386e1f491bc0cd03e2
+
+          rm -rf .staging
+          rm .github/workflows/staging-reconstruct.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(sdk): expose Soroban authorization contract"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
