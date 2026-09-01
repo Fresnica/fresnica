@@ -12,6 +12,9 @@ jobs:
         working-directory: reference/python
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Fresnica Process Binding
+        run: cargo build --release --manifest-path ../../bindings/process/Cargo.toml --bin fresnica-process
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -19,7 +22,9 @@ jobs:
       - name: Run live Testnet probes
         env:
           FRESNICA_LIVE_TESTNET: "1"
+          FRESNICA_PROCESS_BIN: ${{ github.workspace }}/bindings/process/target/release/fresnica-process
         run: >-
           uv run pytest -q -s
           tests/test_sdex_testnet_live.py
           tests/test_transfer_testnet_live.py
+          tests/test_soroban_testnet_live.py

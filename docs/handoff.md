@@ -37,9 +37,9 @@ Current foundation includes:
 - a language-neutral Soroban authorization conformance vector;
 - `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification;
 - SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
-- RefPython Soroban simulation/assembly/review semantics over official `stellar-sdk` RPC preparation, with exact assembled-XDR/hash review binding and explicit restore handling.
+- RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation.
 
-The next protocol work is **connecting that reviewed assembled object to authorization/signing/submission evidence, then RustClient RPC/Soroban capability work**, not new Core authorization primitives.
+The next protocol work is **RustClient RPC/Soroban capability work using that RefPython evidence**, not new Core authorization primitives.
 
 ## 3. Security boundary
 
@@ -89,12 +89,11 @@ Post-merge: Main bundle
 
 ## 7. Immediate next work
 
-1. connect RefPython's reviewed assembled Soroban object to source-account/detached G authorization plus SDK/Core signing, then prove Testnet submit/status reconciliation;
-2. use that evidence to add the RustClient RPC/Soroban capability reference;
-3. adapt Native/Process/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
-4. add SEP-53-aligned message signing as the next independent Core signing domain;
-5. continue supply-chain and Backup v1 hardening in parallel;
-6. resume Agent integration only when the upstream exact-envelope signing seam exists.
+1. use the completed RefPython Soroban simulation/authorization/submission evidence to add the RustClient RPC/Soroban capability reference;
+2. adapt Native/Process/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
+3. add SEP-53-aligned message signing as the next independent Core signing domain;
+4. continue supply-chain and Backup v1 hardening in parallel;
+5. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
 ## 8. Start here next session
 
