@@ -9,6 +9,14 @@ pub struct TransactionSigningRequest {
     pub network_passphrase: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SorobanAuthorizationSigningRequest {
+    pub authorization_hash: [u8; 32],
+    pub authorization_entry_xdr: Vec<u8>,
+    pub authorization_preimage_xdr: Vec<u8>,
+    pub network_passphrase: String,
+}
+
 pub trait ClassicSigner {
     fn public_key(&self) -> &str;
     fn sign_transaction(
@@ -17,12 +25,20 @@ pub trait ClassicSigner {
     ) -> Result<[u8; 64], SignerError>;
 
     fn signature_hint(&self) -> Result<[u8; 4], SignerError> {
-        let public = PublicKey::from_string(self.public_key())
-            .map_err(|_| SignerError::InvalidPublicKey)?;
+        let public =
+            PublicKey::from_string(self.public_key()).map_err(|_| SignerError::InvalidPublicKey)?;
         Ok(public.0[28..32]
             .try_into()
             .expect("Stellar Ed25519 public keys are 32 bytes"))
     }
+}
+
+pub trait SorobanAuthorizationSigner {
+    fn public_key(&self) -> &str;
+    fn sign_soroban_authorization(
+        &self,
+        request: &SorobanAuthorizationSigningRequest,
+    ) -> Result<[u8; 64], SignerError>;
 }
 
 pub struct SoftwareSigner {
@@ -44,6 +60,10 @@ impl SoftwareSigner {
             public_key,
         }
     }
+
+    pub fn public_key(&self) -> &str {
+        &self.public_key
+    }
 }
 
 impl ClassicSigner for SoftwareSigner {
@@ -59,8 +79,23 @@ impl ClassicSigner for SoftwareSigner {
     }
 }
 
-type ExternalSigningProvider =
-    dyn Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>;
+impl SorobanAuthorizationSigner for SoftwareSigner {
+    fn public_key(&self) -> &str {
+        &self.public_key
+    }
+
+    fn sign_soroban_authorization(
+        &self,
+        request: &SorobanAuthorizationSigningRequest,
+    ) -> Result<[u8; 64], SignerError> {
+        Ok(self
+            .signing_key
+            .sign(&request.authorization_hash)
+            .to_bytes())
+    }
+}
+
+type ExternalSigningProvider = dyn Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError>;
 
 pub struct ExternalEd25519Signer {
     public_key: String,
@@ -72,8 +107,8 @@ impl ExternalEd25519Signer {
     where
         F: Fn(&TransactionSigningRequest) -> Result<[u8; 64], SignerError> + 'static,
     {
-        let public = PublicKey::from_string(public_key.trim())
-            .map_err(|_| SignerError::InvalidPublicKey)?;
+        let public =
+            PublicKey::from_string(public_key.trim()).map_err(|_| SignerError::InvalidPublicKey)?;
         Ok(Self {
             public_key: format!("{public}"),
             sign_request: Box::new(sign_request),
@@ -89,6 +124,41 @@ impl ClassicSigner for ExternalEd25519Signer {
     fn sign_transaction(
         &self,
         request: &TransactionSigningRequest,
+    ) -> Result<[u8; 64], SignerError> {
+        (self.sign_request)(request)
+    }
+}
+
+type ExternalSorobanAuthorizationSigningProvider =
+    dyn Fn(&SorobanAuthorizationSigningRequest) -> Result<[u8; 64], SignerError>;
+
+pub struct ExternalSorobanEd25519Signer {
+    public_key: String,
+    sign_request: Box<ExternalSorobanAuthorizationSigningProvider>,
+}
+
+impl ExternalSorobanEd25519Signer {
+    pub fn new<F>(public_key: &str, sign_request: F) -> Result<Self, SignerError>
+    where
+        F: Fn(&SorobanAuthorizationSigningRequest) -> Result<[u8; 64], SignerError> + 'static,
+    {
+        let public =
+            PublicKey::from_string(public_key.trim()).map_err(|_| SignerError::InvalidPublicKey)?;
+        Ok(Self {
+            public_key: format!("{public}"),
+            sign_request: Box::new(sign_request),
+        })
+    }
+}
+
+impl SorobanAuthorizationSigner for ExternalSorobanEd25519Signer {
+    fn public_key(&self) -> &str {
+        &self.public_key
+    }
+
+    fn sign_soroban_authorization(
+        &self,
+        request: &SorobanAuthorizationSigningRequest,
     ) -> Result<[u8; 64], SignerError> {
         (self.sign_request)(request)
     }
