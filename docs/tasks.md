@@ -13,8 +13,8 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Move the Rust SDK-boundary guard to repository-level `scripts/validate-rust-sdk-boundary.sh`
 - [x] Remove the stale direct `fresnica-core` dependency from the Rust CLI and keep product layers behind SDK/reference semantics
 - [x] Stop `Required CI` from compiling CLI/TUI as immediate shared-contract dependencies; keep their dedicated workflows during migration
-- [ ] Create `Fresnica/fresnica-terminal` and migrate Rust CLI + TUI together
-- [ ] After independent terminal CI is green, remove `clients/rust-cli`, `clients/rust-tui` and their product workflows from this repository
+- [x] Create `Fresnica/fresnica-terminal` and migrate Rust CLI + TUI together
+- [x] After independent terminal CI is green, remove terminal product source and product workflows from this shared repository
 - [ ] Enable repository ruleset/branch protection and retire historical probe/relay/validation branches through an admin-capable path
 
 ### Modern Stellar Core Capability Baseline
@@ -95,7 +95,7 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Ledger Authorization and Signing Coordination for local Ed25519 multisig paths
 - [x] `PreconditionsV2.extraSigners` and recognition of existing Ed25519, preauth, Hash-X and signed-payload material
 - [x] Pending/uncertain-submission guard and confirmed-success/post-refresh isolation
-- [x] Native Rust CLI and engineering/reference TUI consume the same capability layer; source migration to `fresnica-terminal` is pending
+- [x] Native Rust CLI and TUI live in `Fresnica/fresnica-terminal` and consume the same capability layer through a pinned shared-repository revision
 
 ## Network / Anchor baseline
 
