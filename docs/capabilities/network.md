@@ -22,15 +22,15 @@ The exact network passphrase is security-significant because it participates in 
 
 ## Provider transition rationale
 
-The Rust reference currently uses Horizon for curated Classic account/balance/offer/trade/history resources, but this is transitional rather than a shared contract. Stellar's current API guidance marks Horizon as nearing end-of-life and recommends RPC for real-time access; the official Rust SDK set provides XDR/StrKey/RPC components but no SDF-maintained Horizon client. Fresnica therefore will not build a general Rust Horizon SDK.
+The Rust reference uses Horizon for curated Classic account/balance/offer/trade/history resources, but this is transitional rather than a shared contract. It now also uses the official Protocol-28 `stellar-rpc-client` for Soroban network verification, account sequence/fee lookup, simulation, submission and status reconciliation. The resulting hybrid boundary is intentional: Soroban state/simulation/submission is RPC-backed while Classic signer/threshold discovery remains Horizon-backed until equivalent semantics are proven. Stellar's current API guidance marks Horizon as nearing end-of-life and recommends RPC for real-time access; the official Rust SDK set provides XDR/StrKey/RPC components but no SDF-maintained Horizon client. Fresnica therefore will not build a general Rust Horizon SDK.
 
 ```text
 Application Capabilities -> Fresnica Network / Gateway -> Horizon (current) / RPC / Portfolio / history provider
 ```
 
-`HorizonGateway` names the current provider adapter. Provider JSON should terminate at the gateway/normalization boundary; write-policy code should consume typed semantic views as they are justified. Reuse official Stellar protocol types such as `stellar_xdr::Asset`. Migrate endpoint families to RPC/Portfolio only when equivalent semantics and uncertain-submission behavior are preserved. Do not build a lowest-common-denominator blockchain ORM.
+`HorizonGateway` names the current Classic provider adapter; `RpcGateway` is the first-class Soroban RPC adapter. Provider JSON should terminate at the gateway/normalization boundary; write-policy code should consume typed semantic views as they are justified. Reuse official Stellar protocol types such as `stellar_xdr::Asset`. Migrate endpoint families to RPC/Portfolio only when equivalent semantics and uncertain-submission behavior are preserved. Do not build a lowest-common-denominator blockchain ORM.
 
-Planned stages: isolate Horizon calls; normalize write-critical views; add RPC for covered real-time state/submission; add Portfolio/account data when suitable; retire Horizon endpoint families independently with conformance evidence.
+Planned stages: isolate Horizon calls; normalize write-critical views; use RPC for covered Soroban real-time state/submission; add Portfolio/account data when suitable; retire Horizon endpoint families independently with conformance evidence.
 
 ## Stable responsibilities
 
@@ -52,6 +52,8 @@ Current reference implementations provide useful evidence for the shared network
 
 - [`reference/python/fresnica/network.py`](../../reference/python/fresnica/network.py)
 - [`reference/python/tests/test_cli_network.py`](../../reference/python/tests/test_cli_network.py)
+- [`clients/rust-client/src/rpc_gateway.rs`](../../clients/rust-client/src/rpc_gateway.rs)
+- [`clients/rust-client/src/soroban.rs`](../../clients/rust-client/src/soroban.rs)
 - [`clients/rust-client/src/transaction.rs`](../../clients/rust-client/src/transaction.rs)
 - [`clients/rust-client/src/service.rs`](../../clients/rust-client/src/service.rs)
 - [`clients/rust-client/src/anchor_protocol.rs`](../../clients/rust-client/src/anchor_protocol.rs)
@@ -84,6 +86,10 @@ This reinforces that network choice is not merely a display setting.
 
 A timeout or connection failure after submission may leave final chain outcome uncertain. The Transaction Capability owns the semantic distinction between deterministic rejection and uncertain submission; Network/Gateway must preserve enough information for reconciliation rather than collapsing both into one generic failure.
 
+### 5. Provider families may migrate independently
+
+The Rust Soroban reference proves that one endpoint family can move to RPC without forcing an all-at-once Classic migration. `RpcGateway` verifies the RPC network passphrase and owns Soroban simulation/submission/status transport, while final Classic account signer/threshold authorization still consumes the established Horizon-backed semantic plan. This hybrid is a staged implementation boundary, not a new shared requirement that products use both providers.
+
 ## Candidate semantics for promotion
 
 1. Separate cryptographic network identity from provider endpoint selection.
@@ -91,6 +97,7 @@ A timeout or connection failure after submission may leave final chain outcome u
 3. Reject known network mismatches before signing/protocol actions continue.
 4. Normalize provider-specific transport results before Flows consume them.
 5. Preserve uncertain-submission semantics for later transaction reconciliation.
+6. Allow provider endpoint families to migrate independently when their security and reconciliation semantics remain intact.
 
 ## Implementation freedom
 
