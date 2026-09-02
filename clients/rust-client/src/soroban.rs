@@ -462,6 +462,9 @@ fn assemble_reviewed_transaction(
     let total_fee = u64::from(inclusion_fee_stroops)
         .checked_add(simulation.min_resource_fee)
         .ok_or_else(|| "Soroban total fee overflow".to_owned())?;
+    if transaction_data.resource_fee as u64 > total_fee {
+        return Err("Soroban simulation resource fee exceeds the total transaction fee".to_owned());
+    }
     envelope.tx.fee = u32::try_from(total_fee).map_err(|_| {
         "Soroban total fee exceeds a v1 transaction fee; fee-bump support is not implemented"
             .to_owned()
@@ -842,6 +845,27 @@ mod tests {
         assert_eq!(prepared.review.authorization_expiration_ledger, None);
         assert_eq!(prepared.review.simulation_ledger, 123_456);
         prepared.assert_review_binding().unwrap();
+    }
+
+    #[test]
+    fn simulation_rejects_resource_fee_above_total_fee() {
+        let request =
+            SorobanInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "transfer", vec![]);
+        let mut response = simulation(source_auth());
+        let transaction_data = transaction_data(5_001);
+        response.transaction_data =
+            STANDARD.encode(transaction_data.to_xdr(Limits::none()).unwrap());
+
+        let error = assemble_reviewed_transaction(
+            "main".to_owned(),
+            TESTNET,
+            &request,
+            candidate(&request),
+            response,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("resource fee exceeds the total transaction fee"));
     }
 
     #[test]
