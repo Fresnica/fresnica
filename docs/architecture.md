@@ -73,7 +73,7 @@ The architecture standardizes behavior rather than source code.
 ```text
 Payment Capability Contract
         |
-        +--> Rust implementation (`clients/rust-client`)
+        +--> Rust implementation (`reference/rust-client`)
         +--> Mobile implementation (for example Stellar JS SDK + Native SDK)
         +--> Web implementation
         +--> Desktop implementation

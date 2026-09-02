@@ -6,21 +6,32 @@ This is the continuation/state document for the shared Fresnica repository. Stab
 
 Do not treat a handoff SHA as permanent truth. Verify GitHub `main`, CI and release metadata before development.
 
-## 1. Logical project boundaries
+## 1. Repository boundary
 
-The repository is a monorepo, but development should treat these as independently evolving layers:
+`Fresnica/fresnica` is the shared **Core / SDK / Specification / Reference** repository.
 
 ```text
 Protocol/Core       slow security and protocol primitives
 SDK                 stable cross-language semantic contract
 Conformance         shared executable vectors
-RefPython           semantic laboratory
-Rust Client         wallet capability reference implementation
-Bindings/Adapters   platform delivery
-Products            Mobile/Web/Desktop/Agent, developed independently
+RefPython           semantic/protocol laboratory
+Rust Reference      reusable Application Capability reference
+Bindings/Adapters   platform delivery of shared security semantics
+Products            Mobile/Terminal/Web/Desktop/Agent in independent repos
 ```
 
-Core should change slowly. SDK adapts Core into stable platform-neutral semantics. RefPython may explore application semantics first. RustClient and independent products may advance in parallel without forcing product logic into Core.
+Current source placement:
+
+```text
+core/rust
+sdk/*
+bindings/*
+spec/test-vectors
+reference/python
+reference/rust-client
+```
+
+The Rust CLI and TUI still live under `clients/` only as migration source. The agreed target is one independent `Fresnica/fresnica-terminal` repository containing both; do not split CLI and TUI into separate repositories. The connected GitHub capability cannot create a repository and `Fresnica/fresnica-terminal` does not yet exist, so do not delete the only current terminal source until that target exists and its CI is green.
 
 ## 2. Modern Stellar baseline
 
@@ -39,10 +50,10 @@ Current foundation includes:
 - SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
 - Process Binding API v2 transport for those SDK v4 Soroban authorization operations, adopted only for the concrete RefPython trusted-host consumer;
 - RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation;
-- RustClient `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization;
+- `reference/rust-client` `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization;
 - an opt-in RefPython Ledger Stellar HID provider layered above Core's external Ed25519 prepare/apply boundary, with deterministic SEP-5/APDU/request-binding tests and a successful physical macOS Testnet clear-signing proof using Ledger Stellar app 6.0.3, path `m/44'/148'/0'`, Blind Signing disabled, and transaction `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`.
 
-The next protocol work should be **consumer- or provider-driven**: concrete C-account/passkey/smart-account providers before generic provider abstractions, Native/WASM expansion only for real consumers, and SEP-53 message signing as its own Core signing domain.
+The next protocol work should remain **consumer- or provider-driven**: SEP-53 message signing is the next independent Core signing domain; C-account/passkey/smart-account work starts from a concrete provider rather than a speculative universal abstraction.
 
 ## 3. Security boundary
 
@@ -57,11 +68,13 @@ unsupported authorization/signature forms fail closed
 
 Core must not expose a generic hash-signing oracle merely to make an integration easier.
 
+Ledger hardware evidence reinforces this boundary: hardware transport and derivation-path UX stay above Core; Core only prepares/verifies exact signing meaning.
+
 ## 4. Soroban ownership
 
 Core owns deterministic security primitives only. It does not own RPC, `simulateTransaction`, sequence fetching, resource estimation, contract-spec interpretation, smart-account deployment or product approval flows.
 
-RefPython should first validate simulation/assembly/review semantics. RustClient may then implement the reference wallet/network capability. Concrete C-account/passkey/smart-account providers should precede generic provider abstractions.
+RefPython validates product/protocol semantics first. `reference/rust-client` is the Rust reference implementation. Concrete C-account/passkey/smart-account providers should precede generic provider abstractions.
 
 ## 5. Agent boundary
 
@@ -76,34 +89,41 @@ Do not:
 
 The upstream exact-envelope signer seam remains the prerequisite for Fresnica Agent integration.
 
-## 6. CI workflow
+## 6. CI and repository cleanup state
 
 Repository validation is layered:
 
 ```text
 Local: portable rustfmt + diff review
-Draft/focused pushes: Required CI + directly relevant lightweight workflows
-Ready/non-draft PR: expensive path-relevant integration/platform matrix
+Required CI: shared Core/SDK/binding/reference contracts
+Path workflows: affected reference/product integration
 Merge: squash
 Post-merge: Main bundle
 ```
 
-`Required CI / validate` is the stable merge-gate name. It should test affected Rust surfaces and immediate contract dependencies, not compile every downstream client/platform on every push.
+The repository-level SDK boundary guard lives at `scripts/validate-rust-sdk-boundary.sh`; shared validation no longer depends on a script owned by the CLI product tree.
+
+`Required CI / validate` tests `reference/rust-client` directly when affected and no longer compiles CLI/TUI merely because the Rust reference changed. CLI/TUI retain dedicated workflows until they move to `fresnica-terminal`.
 
 ## 7. Immediate next work
 
-1. keep Ledger provider mechanics in RefPython/reference or product repositories; add more device-model evidence only when a concrete product needs broader hardware support;
-2. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it, before extracting a generic provider interface;
-3. adapt Native/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
-4. add SEP-53-aligned message signing as the next independent Core signing domain;
+1. create `Fresnica/fresnica-terminal`, migrate Rust CLI + TUI together, pin/review the shared Fresnica dependency boundary, and prove independent terminal CI;
+2. after that proof, remove `clients/rust-cli`, `clients/rust-tui` and their product workflows from this repository;
+3. add SEP-53-aligned message signing as the next independent Core signing domain;
+4. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it;
 5. continue supply-chain and Backup v1 hardening in parallel;
 6. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
-## 8. Start here next session
+## 8. Known repository administration gaps
+
+- `main` branch protection/ruleset is still disabled.
+- Many historical probe/relay/validation branches remain. The current GitHub connector can list but not delete branch refs, so they require a repository-admin cleanup path outside this connector.
+- The connected GitHub capability can modify existing repositories but cannot create `Fresnica/fresnica-terminal`.
+
+## 9. Start here next session
 
 1. Verify GitHub `main`, `Required CI` and the newest Main bundle.
 2. Restore that Main bundle in isolated execution.
-3. Read the Modern Stellar baseline plus the relevant Core/Capability contract.
-4. Use CodebaseMemory for orientation/blast-radius analysis, then verify conclusions against source.
-5. Run the portable rustfmt tool before pushing Rust changes.
-6. Keep Core changes surgical and protocol/security-driven.
+3. Read the architecture/roadmap plus the relevant Core/Capability contract.
+4. Keep Core changes surgical and protocol/security-driven.
+5. If `Fresnica/fresnica-terminal` exists, finish terminal extraction before adding new terminal product features.

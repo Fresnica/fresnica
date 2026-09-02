@@ -31,7 +31,7 @@ version = 1
 
 Reference evidence:
 
-- [`clients/rust-client/src/storage.rs`](../../clients/rust-client/src/storage.rs)
+- [`reference/rust-client/src/storage.rs`](../../reference/rust-client/src/storage.rs)
 - [`clients/rust-cli/src/main.rs`](../../clients/rust-cli/src/main.rs)
 - [`reference/python/fresnica/wallet_backup.py`](../../reference/python/fresnica/wallet_backup.py)
 - [`reference/python/fresnica/manager.py`](../../reference/python/fresnica/manager.py)

@@ -6,6 +6,17 @@ This list tracks shared-repository work only. Independent product implementation
 
 ## Current shared-repository priorities
 
+### Repository boundary cleanup
+
+- [x] Reclassify `Fresnica/fresnica` as Core / SDK / Specification / Reference rather than a wallet product monorepo
+- [x] Move the Rust Capability implementation from `clients/rust-client` to `reference/rust-client`
+- [x] Move the Rust SDK-boundary guard to repository-level `scripts/validate-rust-sdk-boundary.sh`
+- [x] Remove the stale direct `fresnica-core` dependency from the Rust CLI and keep product layers behind SDK/reference semantics
+- [x] Stop `Required CI` from compiling CLI/TUI as immediate shared-contract dependencies; keep their dedicated workflows during migration
+- [ ] Create `Fresnica/fresnica-terminal` and migrate Rust CLI + TUI together
+- [ ] After independent terminal CI is green, remove `clients/rust-cli`, `clients/rust-tui` and their product workflows from this repository
+- [ ] Enable repository ruleset/branch protection and retire historical probe/relay/validation branches through an admin-capable path
+
 ### Modern Stellar Core Capability Baseline
 
 - [x] Adopt the Modern Stellar Core Capability Baseline as the staged evolution target
@@ -75,16 +86,16 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Machine-readable SDK compatibility manifest and source-drift validation
 - [x] Native SDK release contract and published `native-sdk-v0.2.1` baseline
 
-## Shared Rust capability implementation
+## Rust capability reference implementation
 
-- [x] Reusable `clients/rust-client` implementation shared by CLI/TUI
+- [x] Reusable `reference/rust-client` implementation shared by CLI/TUI
 - [x] Wallet lifecycle and watch-only/local-signer enforcement
 - [x] Balance/availability, Payment, Trustline and transaction prepare-review-submit
 - [x] SDEX BUY/SELL intent preservation, exact `price_r`, offers, order book, trades, fills and candles
 - [x] Ledger Authorization and Signing Coordination for local Ed25519 multisig paths
 - [x] `PreconditionsV2.extraSigners` and recognition of existing Ed25519, preauth, Hash-X and signed-payload material
 - [x] Pending/uncertain-submission guard and confirmed-success/post-refresh isolation
-- [x] Native Rust CLI and engineering/reference TUI over the same capability layer
+- [x] Native Rust CLI and engineering/reference TUI consume the same capability layer; source migration to `fresnica-terminal` is pending
 
 ## Network / Anchor baseline
 

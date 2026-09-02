@@ -11,8 +11,7 @@ name = "fresnica"
 path = "src/main.rs"
 
 [dependencies]
-fresnica-core = { path = "../../core/rust" }
-fresnica-client = { path = "../rust-client" }
+fresnica-client = { path = "../../reference/rust-client" }
 fresnica-sdk = { path = "../../sdk/rust" }
 rpassword = "=7.5.4"
 serde = { version = "1", features = ["derive"] }

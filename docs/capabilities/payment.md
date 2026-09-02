@@ -102,4 +102,4 @@ Stable product-level categories should cover invalid input/asset/destination, in
 
 ## Reference implementation
 
-The current Rust reference implementation is `clients/rust-client::payment` and is consumed by both CLI and TUI.
+The current Rust reference implementation is `reference/rust-client::payment` and is consumed by both CLI and TUI.

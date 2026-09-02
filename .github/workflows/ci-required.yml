@@ -24,7 +24,7 @@ jobs:
         with:
           components: rustfmt
       - run: node sdk/compatibility/validate.mjs
-      - run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
+      - run: bash scripts/validate-rust-sdk-boundary.sh
       - name: Detect affected Rust surfaces
         id: affected
         shell: bash
@@ -54,9 +54,7 @@ jobs:
           flag core '^(core/rust/|spec/test-vectors/)'
           flag sdk '^(core/rust/|sdk/rust/|spec/test-vectors/)'
           flag process '^(core/rust/|sdk/rust/|bindings/process/|spec/test-vectors/)'
-          flag rust_client '^clients/rust-client/'
-          flag rust_cli '^(clients/rust-client/|clients/rust-cli/)'
-          flag rust_tui '^(clients/rust-client/|clients/rust-tui/)'
+          flag rust_reference '^reference/rust-client/'
           flag native '^bindings/native/'
       - name: Check changed Rust formatting
         if: steps.affected.outputs.rust == 'true'
@@ -82,15 +80,9 @@ jobs:
       - name: Test Process Binding
         if: steps.affected.outputs.process == 'true'
         run: cargo test --manifest-path bindings/process/Cargo.toml
-      - name: Test Rust capability client
-        if: steps.affected.outputs.rust_client == 'true'
-        run: cargo test --manifest-path clients/rust-client/Cargo.toml
-      - name: Test Rust CLI
-        if: steps.affected.outputs.rust_cli == 'true'
-        run: cargo test --manifest-path clients/rust-cli/Cargo.toml
-      - name: Test Rust TUI
-        if: steps.affected.outputs.rust_tui == 'true'
-        run: cargo test --manifest-path clients/rust-tui/Cargo.toml
+      - name: Test Rust capability reference
+        if: steps.affected.outputs.rust_reference == 'true'
+        run: cargo test --manifest-path reference/rust-client/Cargo.toml
       - name: Test Native Binding host contract
         if: steps.affected.outputs.native == 'true'
         run: cargo test --manifest-path bindings/native/Cargo.toml

@@ -192,7 +192,7 @@ It must call SDK/Core for security-owned signing behavior.
 
 ## 3.4 Rust Client
 
-`clients/rust-client` remains a wallet/reference implementation and may evolve more quickly than Core.
+`reference/rust-client` remains a wallet/reference implementation and may evolve more quickly than Core.
 
 It may own/reference:
 

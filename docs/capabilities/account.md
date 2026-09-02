@@ -82,7 +82,7 @@ Relevant evidence includes:
 
 - [`sdk/rust/src/lib.rs`](../../sdk/rust/src/lib.rs)
 - [`core/rust/src/client_api.rs`](../../core/rust/src/client_api.rs)
-- [`clients/rust-client/src/wallet.rs`](../../clients/rust-client/src/wallet.rs)
+- [`reference/rust-client/src/wallet.rs`](../../reference/rust-client/src/wallet.rs)
 - [`reference/python/tests/test_wallet_state.py`](../../reference/python/tests/test_wallet_state.py)
 
 These implementations are evidence for the Normative identity rules; their storage record shapes are not part of this contract.

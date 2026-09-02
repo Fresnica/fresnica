@@ -87,7 +87,7 @@ Relevant evidence includes:
 
 - [`sdk/rust/src/lib.rs`](../../sdk/rust/src/lib.rs)
 - [`core/rust/src/client_api.rs`](../../core/rust/src/client_api.rs)
-- [`clients/rust-client/src/wallet.rs`](../../clients/rust-client/src/wallet.rs)
+- [`reference/rust-client/src/wallet.rs`](../../reference/rust-client/src/wallet.rs)
 - [`spec/test-vectors/wallet-v1.json`](../../spec/test-vectors/wallet-v1.json)
 - [`spec/test-vectors/transaction-signing-v1.json`](../../spec/test-vectors/transaction-signing-v1.json)
 

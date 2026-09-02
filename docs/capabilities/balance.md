@@ -107,7 +107,7 @@ The reserve/availability semantics above are exercised independently by the Pyth
 
 - [`reference/python/fresnica/availability.py`](../../reference/python/fresnica/availability.py)
 - [`reference/python/tests/test_availability.py`](../../reference/python/tests/test_availability.py)
-- [`clients/rust-client/src/transaction.rs`](../../clients/rust-client/src/transaction.rs)
-- [`clients/rust-client/src/payment.rs`](../../clients/rust-client/src/payment.rs)
+- [`reference/rust-client/src/transaction.rs`](../../reference/rust-client/src/transaction.rs)
+- [`reference/rust-client/src/payment.rs`](../../reference/rust-client/src/payment.rs)
 
 The current Rust implementation also applies the same availability primitives to Payment, Trustline and SDEX preflight. A future normalized cross-platform balance DTO may be standardized separately without changing these invariants.

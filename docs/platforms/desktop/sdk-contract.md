@@ -35,8 +35,7 @@ Rust is already a first-class direct-consumer surface through `sdk/rust`.
 
 Use cases include:
 
-- `clients/rust-cli`;
-- `clients/rust-tui`;
+- the independent `fresnica-terminal` CLI and TUI;
 - native Rust desktop applications;
 - engineering/conformance clients.
 

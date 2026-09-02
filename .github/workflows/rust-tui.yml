@@ -5,9 +5,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - "clients/rust-client/**"
+      - "reference/rust-client/**"
       - "clients/rust-tui/**"
-      - "clients/rust-cli/scripts/validate-sdk-boundary.sh"
+      - "scripts/validate-rust-sdk-boundary.sh"
       - "core/rust/**"
       - "sdk/rust/**"
       - ".github/workflows/rust-tui.yml"
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
-      - run: cargo test --manifest-path clients/rust-client/Cargo.toml
+      - run: bash scripts/validate-rust-sdk-boundary.sh
+      - run: cargo test --manifest-path reference/rust-client/Cargo.toml
       - run: cargo test --manifest-path clients/rust-tui/Cargo.toml
       - run: cargo build --release --manifest-path clients/rust-tui/Cargo.toml --bin fresnica-tui

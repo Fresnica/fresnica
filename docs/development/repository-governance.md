@@ -19,7 +19,7 @@ GitHub CI remains a backstop, not the first formatter.
 
 ### Required CI
 
-`.github/workflows/ci-required.yml` owns the stable merge gate. It always validates SDK compatibility metadata and the SDK-boundary guard, checks only changed Rust files for formatting, then tests affected Rust surfaces and their immediate Core/SDK/Process dependencies. It does not build release binaries or run every downstream product/toolchain on every push.
+`.github/workflows/ci-required.yml` owns the stable merge gate. It always validates SDK compatibility metadata and the repository-level SDK-boundary guard, checks only changed Rust files for formatting, then tests affected shared Rust surfaces and their immediate Core/SDK/Process/reference dependencies. It does not build release binaries or run every downstream product/toolchain on every push.
 
 The stable check name remains:
 
@@ -29,7 +29,7 @@ Required CI / validate
 
 ### Integration CI
 
-Expensive downstream workflows remain path-scoped and run for non-draft pull requests (or explicit `workflow_dispatch`). These include Native/Apple/Android packaging, WASM packaging, RefPython Process Binding integration, Rust CLI/TUI release compatibility and other consumer-toolchain gates.
+Expensive downstream workflows remain path-scoped and run for non-draft pull requests (or explicit `workflow_dispatch`). These include Native/Apple/Android packaging, WASM packaging, RefPython Process Binding integration and, while terminal source remains here, Rust CLI/TUI compatibility. Product workflows move with their product repositories.
 
 Recommended development sequence:
 

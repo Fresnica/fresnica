@@ -2,7 +2,7 @@
 name = "fresnica-client"
 version = "0.1.0"
 edition = "2021"
-description = "Reusable Rust application client and wallet services for Fresnica engineering clients"
+description = "Reusable Rust Application Capability reference implementation for Fresnica"
 license = "MIT"
 publish = false
 

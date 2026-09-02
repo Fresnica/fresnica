@@ -39,8 +39,8 @@ The current Python and Rust terminal implementations provide useful product evid
 - [`reference/python/fresnica/manager.py`](../../reference/python/fresnica/manager.py)
 - [`reference/python/tests/test_wallet_state.py`](../../reference/python/tests/test_wallet_state.py)
 - [`reference/python/tests/test_wallet_backup.py`](../../reference/python/tests/test_wallet_backup.py)
-- [`clients/rust-client/src/wallet.rs`](../../clients/rust-client/src/wallet.rs)
-- [`clients/rust-client/src/storage.rs`](../../clients/rust-client/src/storage.rs)
+- [`reference/rust-client/src/wallet.rs`](../../reference/rust-client/src/wallet.rs)
+- [`reference/rust-client/src/storage.rs`](../../reference/rust-client/src/storage.rs)
 
 These implementations should be treated as evidence for candidate cross-platform semantics, not as a requirement to copy their record layout.
 
