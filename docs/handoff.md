@@ -1,6 +1,6 @@
 # Fresnica Project Handoff
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 This is the continuation/state document for the shared Fresnica repository. Stable architecture and security rules live in the common contracts; start at the [repository README](../README.md), [`docs/README.md`](README.md), and the [Modern Stellar Core Capability Baseline](development/modern-stellar-core-capability-baseline.md).
 
@@ -39,7 +39,8 @@ Current foundation includes:
 - SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
 - Process Binding API v2 transport for those SDK v4 Soroban authorization operations, adopted only for the concrete RefPython trusted-host consumer;
 - RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation;
-- RustClient `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization.
+- RustClient `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization;
+- an opt-in RefPython Ledger Stellar HID provider layered above Core's external Ed25519 prepare/apply boundary, with deterministic SEP-5/APDU/request-binding tests and a successful physical macOS Testnet clear-signing proof using Ledger Stellar app 6.0.3, path `m/44'/148'/0'`, Blind Signing disabled, and transaction `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`.
 
 The next protocol work should be **consumer- or provider-driven**: concrete C-account/passkey/smart-account providers before generic provider abstractions, Native/WASM expansion only for real consumers, and SEP-53 message signing as its own Core signing domain.
 
@@ -91,11 +92,12 @@ Post-merge: Main bundle
 
 ## 7. Immediate next work
 
-1. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it, before extracting a generic provider interface;
-2. adapt Native/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
-3. add SEP-53-aligned message signing as the next independent Core signing domain;
-4. continue supply-chain and Backup v1 hardening in parallel;
-5. resume Agent integration only when the upstream exact-envelope signing seam exists.
+1. keep Ledger provider mechanics in RefPython/reference or product repositories; add more device-model evidence only when a concrete product needs broader hardware support;
+2. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it, before extracting a generic provider interface;
+3. adapt Native/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
+4. add SEP-53-aligned message signing as the next independent Core signing domain;
+5. continue supply-chain and Backup v1 hardening in parallel;
+6. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
 ## 8. Start here next session
 

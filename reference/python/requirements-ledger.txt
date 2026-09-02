@@ -1,0 +1,2 @@
+# Opt-in physical Ledger transport for RefPython hardware-signer probes.
+ledgercomm[hid]==1.2.1

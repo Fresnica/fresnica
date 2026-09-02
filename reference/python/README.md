@@ -183,6 +183,43 @@ signing material. `wallet testnet-fund` is rejected outside testnet. Balance,
 history, and send commands also verify that the selected runtime network matches
 the wallet record, preventing accidental cross-network use.
 
+### Physical Ledger Testnet proof
+
+RefPython contains an opt-in Ledger Stellar HID provider used only to prove the
+External Signer Capability against a real device. Ledger transport stays outside
+Core: the device receives public signing material, while Fresnica SDK/Core
+normalizes the transaction and verifies/applies the returned Ed25519 signature.
+
+On macOS, close Ledger Live, connect and unlock the Ledger, and open the Stellar
+app. Leave **Blind Signing disabled** for this Classic payment proof; the test
+fails if it is enabled. Then build the Process Binding and install the opt-in HID
+dependency:
+
+```bash
+cargo build --release \
+  --manifest-path bindings/process/Cargo.toml \
+  --bin fresnica-process
+
+cd reference/python
+uv sync --locked
+uv pip install -r requirements-ledger.txt
+```
+
+Run the physical Testnet proof:
+
+```bash
+FRESNICA_LIVE_LEDGER=1 \
+FRESNICA_PROCESS_BIN=../../bindings/process/target/release/fresnica-process \
+uv run --no-sync pytest -q -s tests/test_ledger_testnet_live.py
+```
+
+The default Ledger path is `m/44'/148'/0'`. Override it with
+`FRESNICA_LEDGER_PATH` when testing another account index. The probe funds only
+Testnet accounts, prints the randomly generated destination for device-screen
+comparison, asks the Ledger to clear-sign a 1 XLM Testnet payment, passes the
+returned signature through Core verification, and then submits the exact signed
+envelope. It never requests or persists Ledger seed/private-key material.
+
 If an XLM destination does not exist, `send` reviews and submits a Stellar
 `CreateAccount` operation instead of a `Payment`. Issued assets still require an
 existing destination account and trustline.
