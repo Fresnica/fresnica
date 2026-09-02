@@ -47,10 +47,10 @@ This list tracks shared-repository work only. Independent product implementation
 ### Protocol/provider work — demand-driven
 
 - [x] Add an opt-in RefPython Ledger Stellar HID provider over the existing Core external Ed25519 prepare/apply boundary, with deterministic APDU/path/chunking tests
-- [ ] Run the Ledger provider on a physical device against Testnet and record the compatibility evidence before promoting Ledger behavior to Reference Semantics
+- [x] Run the Ledger provider on a physical macOS-connected device against Testnet with Ledger Stellar app 6.0.3, path `m/44'/148'/0'`, Blind Signing disabled, and record transaction `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`
 - [ ] Add provider-backed collection for Hash-X, signed-payload and external signer conditions before claiming general Classic multisig/delegated signing support
 - [ ] Add SEP-12 nested structured values and optional `/customer/files` file-ID workflow only when a concrete anchor requires them
-- [ ] Add hardware transport adapters only after a concrete provider and exact-XDR compatibility gate exist
+- [ ] Add product hardware transport adapters only after a concrete product needs them; reuse the proven RefPython/Core boundary rather than moving HID into Core
 - [ ] Add Windows/Linux non-Rust packaging only after a concrete consumer language/framework is selected
 
 ## Established architecture and contracts

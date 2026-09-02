@@ -2,7 +2,7 @@
 
 Maturity: **Defined**
 
-Status: provider boundary defined; concrete hardware transport remains demand/provider gated.
+Status: provider boundary defined; first RefPython Ledger physical Testnet compatibility gate verified.
 
 ## Purpose
 
@@ -57,11 +57,13 @@ A provider becomes implementation-ready only when it can consume/sign the exact 
 
 Do not solve a provider/XDR-version mismatch by downgrading Fresnica or introducing an implicit lossy transaction reinterpretation merely to claim hardware support. Exact current dependency/version status belongs in the project roadmap rather than this long-lived Capability contract.
 
-This Ledger section is a **reference design and compatibility constraint**, not Reference Semantics backed by a completed Fresnica hardware implementation.
+This Ledger section is a **reference design and compatibility constraint**, not universal cross-device Reference Semantics.
 
 ## Implementation evidence status
 
-RefPython now carries an opt-in Ledger Stellar HID provider/probe that exercises the existing Core prepare/apply boundary. Deterministic provider tests do not count as physical-device evidence; the first real-device Testnet run remains the compatibility gate before Ledger behavior is promoted to Reference Semantics.
+RefPython carries an opt-in Ledger Stellar HID provider/probe over the existing Core prepare/apply boundary. Deterministic tests cover SEP-5 path packing, Ledger APDU chunking and fail-closed request binding.
+
+The first physical-device compatibility gate succeeded on macOS on 2026-09-02 with the Ledger Stellar app **6.0.3**, default path `m/44'/148'/0'`, and Blind Signing disabled. The probe clear-signed and submitted a 1 XLM Testnet payment from `GB7FRMMSEU7NBDF64G5PVBIXPONG6ESDQTLGKZ6SVBA7XEJFFHQEVT3J` to `GB4QLYW37ZD2YSDJOENU5GZONPFNWGKO55E4XHDHJBHMKZ3IJ34Y7O6J`; the submitted transaction hash was `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`, and the live pytest completed `1 passed`. Device model was not recorded, so this evidence proves the concrete Mac/HID/Stellar-app path rather than universal Ledger-model compatibility.
 
 A future Ledger or other provider implementation may submit a documentation PR recording:
 
@@ -87,4 +89,4 @@ A first hardware implementation should prove:
 6. reject a signature from another signer/account/path;
 7. support repeatable emulator/provider tests before requiring physical devices for routine CI.
 
-Provider transport details remain platform-specific and can evolve without changing this Defined capability boundary.
+The RefPython Ledger proof now satisfies this first implementation target for the tested Mac/HID/Stellar-app path. Provider transport details remain platform-specific and can evolve without changing this Defined capability boundary.
