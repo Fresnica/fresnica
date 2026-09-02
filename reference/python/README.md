@@ -191,7 +191,9 @@ Core: the device receives public signing material, while Fresnica SDK/Core
 normalizes the transaction and verifies/applies the returned Ed25519 signature.
 
 On macOS, close Ledger Live, connect and unlock the Ledger, and open the Stellar
-app. Then build the Process Binding and install the opt-in HID dependency:
+app. Leave **Blind Signing disabled** for this Classic payment proof; the test
+fails if it is enabled. Then build the Process Binding and install the opt-in HID
+dependency:
 
 ```bash
 cargo build --release \
@@ -213,7 +215,8 @@ uv run --no-sync pytest -q -s tests/test_ledger_testnet_live.py
 
 The default Ledger path is `m/44'/148'/0'`. Override it with
 `FRESNICA_LEDGER_PATH` when testing another account index. The probe funds only
-Testnet accounts, asks the Ledger to sign a 1 XLM Testnet payment, passes the
+Testnet accounts, prints the randomly generated destination for device-screen
+comparison, asks the Ledger to clear-sign a 1 XLM Testnet payment, passes the
 returned signature through Core verification, and then submits the exact signed
 envelope. It never requests or persists Ledger seed/private-key material.
 

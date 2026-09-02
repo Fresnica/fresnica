@@ -57,6 +57,10 @@ def test_ledger_signs_core_verified_testnet_payment():
     print("\nLedger: unlock the device, open the Stellar app, and close Ledger Live.")
     with LedgerStellarProvider(path=path) as ledger:
         config = ledger.get_configuration()
+        if config.blind_signing_enabled:
+            pytest.fail(
+                "Disable Blind Signing in the Ledger Stellar app before this clear-signing proof"
+            )
         address = ledger.get_public_key(confirm_on_device=True)
         print(f"Ledger Stellar app: {config.version}")
         print(f"Derivation path: {path}")
@@ -65,6 +69,8 @@ def test_ledger_signs_core_verified_testnet_payment():
         _fund_if_needed(adapter, friendbot, address)
         destination = Keypair.random()
         _fund_if_needed(adapter, friendbot, destination.public_key)
+        print(f"Testnet destination: {destination.public_key}")
+        print("Expected Ledger review: 1 XLM and memo fresnica-ledger-proof.")
 
         source_account = adapter.server.load_account(address)
         envelope = (
