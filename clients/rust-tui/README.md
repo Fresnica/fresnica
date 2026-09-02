@@ -1,7 +1,7 @@
 # Fresnica Rust TUI
 
 `fresnica-tui` is the native engineering/reference terminal UI for Fresnica.
-It consumes `clients/rust-client`; it does not own separate wallet, crypto, or
+It consumes `reference/rust-client`; it does not own separate wallet, crypto, or
 Horizon semantics.
 
 Current reference slice:

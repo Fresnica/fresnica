@@ -1,6 +1,6 @@
 # Terminal Engineering Clients
 
-The Rust CLI and TUI are engineering/reference products that consume the Rust Application Capability implementation in `clients/rust-client`.
+The Rust CLI and TUI are engineering/reference products being extracted together into `Fresnica/fresnica-terminal` that consume the Rust Application Capability implementation in `reference/rust-client`.
 
 They are useful executable references, but their command syntax, local file storage and terminal interaction are not cross-platform contracts.
 

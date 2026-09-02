@@ -70,7 +70,7 @@ A Capability may have multiple conforming implementations:
 ```text
 Payment Capability Contract
         |
-        +--> Rust reference implementation (`clients/rust-client`)
+        +--> Rust reference implementation (`reference/rust-client`)
         +--> Mobile implementation (for example Stellar JS SDK + Native SDK)
         +--> Web implementation
         +--> Desktop implementation
@@ -355,16 +355,16 @@ Core cryptographic vectors remain SDK/Core-owned. Application semantic fixtures 
 Current reference implementations map to the common vocabulary approximately as:
 
 ```text
-clients/rust-client::wallet       -> Account / Signer / current terminal Wallet implementations
-clients/rust-client::storage      -> terminal Backup / Restore v1 reference implementation
+reference/rust-client::wallet       -> Account / Signer / current terminal Wallet implementations
+reference/rust-client::storage      -> terminal Backup / Restore v1 reference implementation
 historical mobile-sdk-v0.1.0 portable-backup donor -> portable Backup / Restore v2 staging evidence
-clients/rust-client::service      -> Account / Balance / History reference accessors
-clients/rust-client::payment      -> Payment implementation
-clients/rust-client::transaction  -> Transaction + part of Signing Coordination
-clients/rust-client::trustline    -> Trustline implementation
-clients/rust-client::dex          -> SDEX implementation
-clients/rust-client::anchor*      -> Anchor implementation
-clients/rust-client::contacts     -> Contacts implementation
+reference/rust-client::service      -> Account / Balance / History reference accessors
+reference/rust-client::payment      -> Payment implementation
+reference/rust-client::transaction  -> Transaction + part of Signing Coordination
+reference/rust-client::trustline    -> Trustline implementation
+reference/rust-client::dex          -> SDEX implementation
+reference/rust-client::anchor*      -> Anchor implementation
+reference/rust-client::contacts     -> Contacts implementation
 reference/python/fresnica/asset_catalog.py -> Asset Discovery / Catalog reference implementation
 ```
 

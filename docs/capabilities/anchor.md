@@ -201,7 +201,7 @@ This is especially useful for Mobile because SEP-24 browser handoff, SEP-6 requi
 
 ## Reference implementation status
 
-The current Rust reference implementation (`clients/rust-client::anchor` and `anchor_protocol`) implements most of the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
+The current Rust reference implementation (`reference/rust-client::anchor` and `anchor_protocol`) implements most of the Classic scope above. The Rust CLI is a presentation/orchestration consumer and keeps authentication tokens in zeroizing in-memory values.
 
 The Rust and RefPython references require exact-case SEP-1 `code + issuer` identity and reject automatic HTTP redirects for Anchor protocol requests, preserving the endpoint security boundary rather than following a redirected target implicitly. Rust Classic SEP-10 now builds a Ledger Authorization plan from current Horizon state and uses Signing Coordination to collect only the needed local software Ed25519 signatures. Activated accounts use the medium threshold and still require at least one actual client signature when that threshold is zero; unactivated accounts use the SEP-10 master-key proof; the anchor server key is explicitly excluded from client weight. RefPython still rejects an attached local signer whose key differs from the Classic account identity. Hash-X, signed-payload and external/provider signer collection remain deferred, so this is not general delegated-signing support.
 

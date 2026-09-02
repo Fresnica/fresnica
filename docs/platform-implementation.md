@@ -15,7 +15,7 @@ A conforming Fresnica product may implement Application Capabilities using the l
 Examples:
 
 ```text
-Rust CLI/TUI
+Rust terminal product (`fresnica-terminal`)
   Application Flows
       -> `fresnica-client` Capability implementation
       -> `fresnica-sdk` / Rust Core
@@ -94,7 +94,7 @@ A platform Stellar SDK may still build transactions, query network state or impl
 
 ## 5. Rust reference implementation
 
-`clients/rust-client` is the current reference implementation for many Application Capabilities used by CLI/TUI.
+`reference/rust-client` is the current reference implementation for many Application Capabilities used by CLI/TUI.
 
 Its roles are:
 

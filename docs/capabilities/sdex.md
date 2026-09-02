@@ -163,4 +163,4 @@ Offer writes use the common Transaction and Signing Coordination contracts. A pr
 
 Normative pair/offer/fill semantics are captured in [`../../spec/test-vectors/sdex-v1.json`](../../spec/test-vectors/sdex-v1.json).
 
-The current Rust reference implementation is `clients/rust-client::dex`.
+The current Rust reference implementation is `reference/rust-client::dex`.

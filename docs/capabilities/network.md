@@ -52,11 +52,11 @@ Current reference implementations provide useful evidence for the shared network
 
 - [`reference/python/fresnica/network.py`](../../reference/python/fresnica/network.py)
 - [`reference/python/tests/test_cli_network.py`](../../reference/python/tests/test_cli_network.py)
-- [`clients/rust-client/src/rpc_gateway.rs`](../../clients/rust-client/src/rpc_gateway.rs)
-- [`clients/rust-client/src/soroban.rs`](../../clients/rust-client/src/soroban.rs)
-- [`clients/rust-client/src/transaction.rs`](../../clients/rust-client/src/transaction.rs)
-- [`clients/rust-client/src/service.rs`](../../clients/rust-client/src/service.rs)
-- [`clients/rust-client/src/anchor_protocol.rs`](../../clients/rust-client/src/anchor_protocol.rs)
+- [`reference/rust-client/src/rpc_gateway.rs`](../../reference/rust-client/src/rpc_gateway.rs)
+- [`reference/rust-client/src/soroban.rs`](../../reference/rust-client/src/soroban.rs)
+- [`reference/rust-client/src/transaction.rs`](../../reference/rust-client/src/transaction.rs)
+- [`reference/rust-client/src/service.rs`](../../reference/rust-client/src/service.rs)
+- [`reference/rust-client/src/anchor_protocol.rs`](../../reference/rust-client/src/anchor_protocol.rs)
 
 ### 1. Network identity and provider endpoint are separate concerns
 

@@ -31,7 +31,7 @@ The Python and Rust terminal implementations preserve the same useful destinatio
 - [`reference/python/fresnica/contacts.py`](../../reference/python/fresnica/contacts.py)
 - [`reference/python/tests/test_contacts.py`](../../reference/python/tests/test_contacts.py)
 - [`reference/python/tests/test_tui_contacts.py`](../../reference/python/tests/test_tui_contacts.py)
-- [`clients/rust-client/src/contacts.rs`](../../clients/rust-client/src/contacts.rs)
+- [`reference/rust-client/src/contacts.rs`](../../reference/rust-client/src/contacts.rs)
 
 ### 1. Resolution accepts either an alias or a direct destination
 

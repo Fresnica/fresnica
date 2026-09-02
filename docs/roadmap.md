@@ -1,8 +1,8 @@
 # Fresnica Roadmap
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
-Fresnica is a shared Stellar wallet/security foundation. The repository is a monorepo for development convenience, but its components evolve at different speeds and should be treated as logically separate projects.
+Fresnica is a shared Stellar wallet/security foundation. `Fresnica/fresnica` is converging on one clear responsibility: **Core / SDK / Specification / Reference**. Product UI/application code belongs in independent repositories.
 
 ## Direction
 
@@ -20,16 +20,35 @@ Stellar protocol / CAP / stable standards
        +------------+-------------+
        |                          |
        v                          v
-   RefPython                  Rust Client
-semantic laboratory       wallet capability reference
+   RefPython              Rust Capability Reference
+semantic laboratory        reference/rust-client
        |                          |
        +------------+-------------+
                     |
-       Mobile / Web / Desktop / Agent
-             independent products
+         Capability contracts/evidence
+                    |
+       +------------+-------------+
+       |            |             |
+       v            v             v
+    Mobile       Terminal      Web/Desktop/Agent
+ independent    independent       independent
+   product        product           products
 ```
 
-The target baseline is [`development/modern-stellar-core-capability-baseline.md`](development/modern-stellar-core-capability-baseline.md).
+The protocol target remains [`development/modern-stellar-core-capability-baseline.md`](development/modern-stellar-core-capability-baseline.md).
+
+## Repository boundary cleanup
+
+Current cleanup sequence:
+
+1. keep Core, SDK, bindings, specifications and reference implementations here;
+2. keep `reference/python` as the readable semantic/protocol laboratory;
+3. keep `reference/rust-client` as the reusable Rust Capability reference;
+4. extract Rust CLI + TUI together into `Fresnica/fresnica-terminal`;
+5. after terminal CI is independently green, remove terminal product source/workflows from this repository;
+6. keep product-specific hardware/UI/provider mechanics in product/reference layers rather than moving them into Core.
+
+The terminal repository does not yet exist in the connected GitHub installation, so the shared repository must not delete the only current CLI/TUI source before that migration target exists.
 
 ## Modern Stellar foundation
 
@@ -48,41 +67,29 @@ Completed:
 - language-neutral Soroban authorization signing vectors exist;
 - `CoreClientApi` exposes protected and external Ed25519 auth-entry signing with stable `invalid-authorization` semantics.
 
-Next:
+Next Core-domain work:
 
-- complete the platform-neutral SDK contract for Soroban authorization;
-- add standard message-signing semantics (SEP-53 alignment) as a separate signing domain;
-- keep protocol-version/network feature gating above Core where network state is known.
+- add standard message-signing semantics with SEP-53 alignment as a separate signing domain;
+- keep protocol-version/network feature gating above Core where network state is known;
+- add C-account/smart-account primitives only when a concrete provider proves the required boundary.
 
 ### M1 — SDK adaptation
 
-Expose stable, domain-specific APIs rather than a generic hash-signing oracle:
+The SDK already exposes domain-specific Classic transaction signing, Soroban authorization signing and external prepare/apply semantics. Process Binding v2 carries the Soroban authorization contract for the concrete RefPython consumer.
 
-```text
-Classic transaction signing
-Soroban authorization signing
-standard message signing
-external signing prepare/apply
-verification
-```
-
-Native/Process/WASM bindings follow only after the platform-neutral SDK contract is proven.
+Native/WASM expansion remains consumer-driven. Do not add bindings merely for matrix symmetry.
 
 ### M2 — reference semantics
 
-RefPython should lead Soroban wallet semantics that are not cryptographic authority:
+RefPython has proven Soroban simulation/assembly/review, source-account and detached Classic G-account authorization/signing/submission, plus physical Ledger Classic clear-signing through the External Signer boundary.
 
-- RPC simulation and assembly lifecycle;
-- review-before/after-simulation integrity;
-- invocation/auth-entry presentation;
-- G-account fee/source versus C-account authorization relationships;
-- stale simulation/error behavior.
-
-RustClient should then provide the Rust reference implementation for RPC/gateway, simulation, contract invocation and wallet capability composition.
+`reference/rust-client` provides the Rust reference implementation for RPC/gateway, Soroban lifecycle and wallet capability composition.
 
 ### M3 — concrete providers
 
-Smart-account/passkey/contract-account support should start with one real provider and conformance evidence, then extract a generic provider boundary. Do not design a universal provider abstraction from hypothetical use cases.
+Smart-account/passkey/contract-account support should start with one real provider and conformance evidence, then extract generic semantics. Do not design a universal provider abstraction from hypothetical use cases.
+
+Ledger is the first hardware-signer evidence: physical macOS/Testnet clear signing succeeded with Stellar app 6.0.3 while Blind Signing was disabled. This proves the provider-neutral Core boundary; it does not imply universal Ledger-model certification.
 
 ## Parallel security tracks
 
@@ -91,7 +98,7 @@ These remain important but should not displace the Modern Stellar Core baseline:
 - Native SDK release supply-chain pinning, dependency audit, SBOM and provenance;
 - Backup v1 metadata-mutation regressions and terminal/legacy containment;
 - Process Binding privilege-profile review before non-RefPython Desktop use;
-- hardware/external signer transports only with concrete provider demand.
+- product hardware adapters only where a concrete consumer needs them.
 
 ## Agent integration
 
@@ -104,8 +111,8 @@ The dormant operation-type `AgentCapability` is not a product policy engine and 
 Development uses layered validation:
 
 - portable rustfmt locally before push;
-- `Required CI / validate` for affected Core/SDK/direct Rust contracts;
-- expensive platform/integration workflows only for non-draft/final PR validation;
+- `Required CI / validate` for affected Core/SDK/binding/reference contracts;
+- product/integration workflows only for the affected product/reference surface;
 - Main bundle after merge for isolated development recovery.
 
 Repository branch protection/ruleset should eventually require PRs and `Required CI / validate`, prohibit force-push/deletion, and require current branches/conversation resolution.

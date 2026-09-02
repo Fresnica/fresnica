@@ -6,7 +6,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "clients/rust-cli/**"
-      - "clients/rust-client/**"
+      - "reference/rust-client/**"
+      - "scripts/validate-rust-sdk-boundary.sh"
       - "core/rust/**"
       - "sdk/rust/**"
       - "reference/python/fresnica/storage.py"
@@ -21,8 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: bash clients/rust-cli/scripts/validate-sdk-boundary.sh
-      - run: cargo test --manifest-path clients/rust-client/Cargo.toml
+      - run: bash scripts/validate-rust-sdk-boundary.sh
+      - run: cargo test --manifest-path reference/rust-client/Cargo.toml
       - run: cargo test --manifest-path clients/rust-cli/Cargo.toml
       - run: cargo build --release --manifest-path clients/rust-cli/Cargo.toml --bin fresnica
       - name: Install uv
