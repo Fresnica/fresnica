@@ -39,16 +39,14 @@ The protocol target remains [`development/modern-stellar-core-capability-baselin
 
 ## Repository boundary cleanup
 
-Current cleanup sequence:
+Repository cleanup status:
 
-1. keep Core, SDK, bindings, specifications and reference implementations here;
-2. keep `reference/python` as the readable semantic/protocol laboratory;
-3. keep `reference/rust-client` as the reusable Rust Capability reference;
-4. extract Rust CLI + TUI together into `Fresnica/fresnica-terminal`;
-5. after terminal CI is independently green, remove terminal product source/workflows from this repository;
-6. keep product-specific hardware/UI/provider mechanics in product/reference layers rather than moving them into Core.
-
-The terminal repository does not yet exist in the connected GitHub installation, so the shared repository must not delete the only current CLI/TUI source before that migration target exists.
+1. Core, SDK, bindings, specifications and reference implementations stay here;
+2. `reference/python` remains the readable semantic/protocol laboratory;
+3. `reference/rust-client` remains the reusable Rust Capability reference;
+4. Rust CLI + TUI are extracted together into [`Fresnica/fresnica-terminal`](https://github.com/Fresnica/fresnica-terminal) with pinned shared dependencies and independent CI;
+5. terminal product source/workflows are removed from this shared repository;
+6. product-specific hardware/UI/provider mechanics stay in product/reference layers rather than moving into Core.
 
 ## Modern Stellar foundation
 

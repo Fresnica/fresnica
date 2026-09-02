@@ -38,7 +38,7 @@ docs/                    architecture, capability, platform and development docs
 scripts/                 repository-level validation helpers
 ```
 
-`clients/rust-cli` and `clients/rust-tui` are retained temporarily as migration source while the terminal product is extracted to the independent `Fresnica/fresnica-terminal` repository. They are not part of the long-term shared-repository boundary.
+The native terminal products now live in the independent [`Fresnica/fresnica-terminal`](https://github.com/Fresnica/fresnica-terminal) repository and consume the shared Rust capability reference from here.
 
 ## Product boundaries
 
@@ -48,7 +48,7 @@ scripts/                 repository-level validation helpers
 - **Reference implementations** prove semantics; they are not mandatory runtime dependencies for every product.
 - **Products** choose platform-appropriate Stellar SDKs, persistence, network clients and UI frameworks while preserving normative contracts.
 
-Current/future product repositories include `fresnica-mobile` and the planned `fresnica-terminal`; Web/Desktop products should follow the same boundary rather than being folded back into this repository.
+Current product repositories include `fresnica-mobile` and [`fresnica-terminal`](https://github.com/Fresnica/fresnica-terminal); Web/Desktop products should follow the same boundary rather than being folded back into this repository.
 
 ## Hardware signer status
 

@@ -31,7 +31,7 @@ reference/python
 reference/rust-client
 ```
 
-The Rust CLI and TUI still live under `clients/` only as migration source. The agreed target is one independent `Fresnica/fresnica-terminal` repository containing both; do not split CLI and TUI into separate repositories. The connected GitHub capability cannot create a repository and `Fresnica/fresnica-terminal` does not yet exist, so do not delete the only current terminal source until that target exists and its CI is green.
+The native Rust CLI and TUI now live together in [`Fresnica/fresnica-terminal`](https://github.com/Fresnica/fresnica-terminal). This shared repository retains `reference/rust-client` as the reusable Rust Capability reference; terminal product code and product CI no longer live here.
 
 ## 2. Modern Stellar baseline
 
@@ -103,22 +103,19 @@ Post-merge: Main bundle
 
 The repository-level SDK boundary guard lives at `scripts/validate-rust-sdk-boundary.sh`; shared validation no longer depends on a script owned by the CLI product tree.
 
-`Required CI / validate` tests `reference/rust-client` directly when affected and no longer compiles CLI/TUI merely because the Rust reference changed. CLI/TUI retain dedicated workflows until they move to `fresnica-terminal`.
+`Required CI / validate` tests `reference/rust-client` directly when affected and does not compile terminal products. CLI/TUI product CI now lives in `Fresnica/fresnica-terminal`.
 
 ## 7. Immediate next work
 
-1. create `Fresnica/fresnica-terminal`, migrate Rust CLI + TUI together, pin/review the shared Fresnica dependency boundary, and prove independent terminal CI;
-2. after that proof, remove `clients/rust-cli`, `clients/rust-tui` and their product workflows from this repository;
-3. add SEP-53-aligned message signing as the next independent Core signing domain;
-4. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it;
-5. continue supply-chain and Backup v1 hardening in parallel;
-6. resume Agent integration only when the upstream exact-envelope signing seam exists.
+1. add SEP-53-aligned message signing as the next independent Core signing domain;
+2. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it;
+3. continue supply-chain and Backup v1 hardening in parallel;
+4. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
 ## 8. Known repository administration gaps
 
 - `main` branch protection/ruleset is still disabled.
 - Many historical probe/relay/validation branches remain. The current GitHub connector can list but not delete branch refs, so they require a repository-admin cleanup path outside this connector.
-- The connected GitHub capability can modify existing repositories but cannot create `Fresnica/fresnica-terminal`.
 
 ## 9. Start here next session
 
@@ -126,4 +123,4 @@ The repository-level SDK boundary guard lives at `scripts/validate-rust-sdk-boun
 2. Restore that Main bundle in isolated execution.
 3. Read the architecture/roadmap plus the relevant Core/Capability contract.
 4. Keep Core changes surgical and protocol/security-driven.
-5. If `Fresnica/fresnica-terminal` exists, finish terminal extraction before adding new terminal product features.
+5. For terminal product changes, work in `Fresnica/fresnica-terminal` and update its pinned `FRESNICA_REV` explicitly when adopting a new shared revision.

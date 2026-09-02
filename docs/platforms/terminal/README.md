@@ -1,6 +1,6 @@
-# Terminal Engineering Clients
+# Terminal Products
 
-The Rust CLI and TUI are engineering/reference products being extracted together into `Fresnica/fresnica-terminal` that consume the Rust Application Capability implementation in `reference/rust-client`.
+The native Rust CLI and TUI live together in [`Fresnica/fresnica-terminal`](https://github.com/Fresnica/fresnica-terminal) and consume this repository's `reference/rust-client` capability implementation through a pinned Git revision.
 
 They are useful executable references, but their command syntax, local file storage and terminal interaction are not cross-platform contracts.
 
