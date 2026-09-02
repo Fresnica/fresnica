@@ -125,6 +125,7 @@ pub enum ClassicOperationKind {
     ManageBuyOffer,
     ChangeTrust,
     ManageData,
+    InvokeHostFunction,
     BumpSequence,
 }
 
@@ -422,6 +423,9 @@ fn operation_authorization(
         OperationBody::ManageBuyOffer(_) => Some((ClassicOperationKind::ManageBuyOffer, medium)),
         OperationBody::ChangeTrust(_) => Some((ClassicOperationKind::ChangeTrust, medium)),
         OperationBody::ManageData(_) => Some((ClassicOperationKind::ManageData, medium)),
+        OperationBody::InvokeHostFunction(_) => {
+            Some((ClassicOperationKind::InvokeHostFunction, medium))
+        }
         OperationBody::BumpSequence(_) => Some((
             ClassicOperationKind::BumpSequence,
             AuthorizationThreshold::Low,

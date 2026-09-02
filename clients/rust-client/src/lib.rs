@@ -7,7 +7,9 @@ pub mod dex;
 pub mod horizon_gateway;
 pub mod ledger_authorization;
 pub mod payment;
+pub mod rpc_gateway;
 pub mod signing_coordination;
+pub mod soroban;
 pub mod storage;
 pub mod transaction;
 pub mod trustline;
@@ -50,9 +52,14 @@ pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
     PreparedPayment,
 };
+pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
 pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
 pub use signing_coordination::{
     select_local_ed25519_signers, sign_needed_local_ed25519, sign_with_local_ed25519,
+};
+pub use soroban::{
+    authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
+    submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
 };
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
 pub use transaction::{

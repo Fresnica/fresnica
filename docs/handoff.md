@@ -38,9 +38,10 @@ Current foundation includes:
 - `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification;
 - SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
 - Process Binding API v2 transport for those SDK v4 Soroban authorization operations, adopted only for the concrete RefPython trusted-host consumer;
-- RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation.
+- RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation;
+- RustClient `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization.
 
-The next protocol work is **RustClient RPC/Soroban capability work using that RefPython evidence**, not new Core authorization primitives.
+The next protocol work should be **consumer- or provider-driven**: concrete C-account/passkey/smart-account providers before generic provider abstractions, Native/WASM expansion only for real consumers, and SEP-53 message signing as its own Core signing domain.
 
 ## 3. Security boundary
 
@@ -90,8 +91,8 @@ Post-merge: Main bundle
 
 ## 7. Immediate next work
 
-1. use the completed RefPython Soroban simulation/authorization/submission evidence to add the RustClient RPC/Soroban capability reference;
-2. adapt Native/Process/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
+1. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it, before extracting a generic provider interface;
+2. adapt Native/WASM only where a concrete consumer needs the stable SDK v4 Soroban authorization contract;
 3. add SEP-53-aligned message signing as the next independent Core signing domain;
 4. continue supply-chain and Backup v1 hardening in parallel;
 5. resume Agent integration only when the upstream exact-envelope signing seam exists.
