@@ -88,6 +88,66 @@ class FresnicaProcessProtectedSigner(Signer):
         )
 
 
+class FresnicaProcessExternalEd25519Signer(Signer):
+    """External Ed25519 signer verified and applied by Fresnica SDK/Core.
+
+    The external provider receives only public transaction material. Core
+    normalizes the transaction before the provider sees it and verifies the
+    returned signature against both the expected signer identity and exact
+    transaction before Python mutates the in-memory envelope.
+    """
+
+    def __init__(
+        self,
+        public_key: str,
+        core_client,
+        sign_request: Callable[[ExternalSigningRequest], bytes],
+    ):
+        self.keypair = Keypair.from_public_key(public_key)
+        if not callable(sign_request):
+            raise TypeError("External sign_request provider must be callable")
+        self.core_client = core_client
+        self.sign_request = sign_request
+
+    @property
+    def public_key(self) -> str:
+        return self.keypair.public_key
+
+    def sign(self, transaction):
+        prepared = self.core_client.prepare_ed25519_signing(
+            transaction.to_xdr(),
+            transaction.network_passphrase,
+        )
+        request = ExternalSigningRequest(
+            transaction_hash=prepared.transaction_hash,
+            transaction_xdr=prepared.transaction_xdr,
+            network_passphrase=prepared.network_passphrase,
+        )
+        try:
+            signature = self.sign_request(request)
+        except SignerError:
+            raise
+        except Exception as exc:
+            raise SignerError("External signer failed") from exc
+        if not isinstance(signature, bytes) or len(signature) != 64:
+            raise SignerError("External signer must return a 64-byte Ed25519 signature")
+
+        signed_xdr = self.core_client.apply_ed25519_signature(
+            prepared.transaction_xdr,
+            prepared.network_passphrase,
+            self.public_key,
+            signature,
+        )
+        signed = TransactionEnvelope.from_xdr(
+            signed_xdr,
+            prepared.network_passphrase,
+        )
+        if signed.hash() != prepared.transaction_hash:
+            raise SignerError("Core returned a signed transaction with a different transaction hash")
+        transaction.signatures = signed.signatures
+        return transaction
+
+
 class ExternalEd25519Signer(Signer):
     """Verified adapter for a hardware/device/process Ed25519 signer.
 

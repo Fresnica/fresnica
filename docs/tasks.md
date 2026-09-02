@@ -1,6 +1,6 @@
 # Fresnica Tasks
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 This list tracks shared-repository work only. Independent product implementation belongs in the corresponding product repository.
 
@@ -46,6 +46,8 @@ This list tracks shared-repository work only. Independent product implementation
 
 ### Protocol/provider work — demand-driven
 
+- [x] Add an opt-in RefPython Ledger Stellar HID provider over the existing Core external Ed25519 prepare/apply boundary, with deterministic APDU/path/chunking tests
+- [ ] Run the Ledger provider on a physical device against Testnet and record the compatibility evidence before promoting Ledger behavior to Reference Semantics
 - [ ] Add provider-backed collection for Hash-X, signed-payload and external signer conditions before claiming general Classic multisig/delegated signing support
 - [ ] Add SEP-12 nested structured values and optional `/customer/files` file-ID workflow only when a concrete anchor requires them
 - [ ] Add hardware transport adapters only after a concrete provider and exact-XDR compatibility gate exist

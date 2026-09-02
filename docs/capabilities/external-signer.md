@@ -61,7 +61,7 @@ This Ledger section is a **reference design and compatibility constraint**, not 
 
 ## Implementation evidence status
 
-No concrete hardware provider is currently mature enough to define additional cross-platform semantics beyond the provider-neutral boundary above.
+RefPython now carries an opt-in Ledger Stellar HID provider/probe that exercises the existing Core prepare/apply boundary. Deterministic provider tests do not count as physical-device evidence; the first real-device Testnet run remains the compatibility gate before Ledger behavior is promoted to Reference Semantics.
 
 A future Ledger or other provider implementation may submit a documentation PR recording:
 
