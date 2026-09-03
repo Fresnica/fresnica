@@ -6,8 +6,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "adapters/react-native/**"
-      - "bindings/native/Cargo.toml"
-      - "bindings/native/src/**"
+      - "bindings/native/**"
+      - "sdk/rust/**"
+      - "core/rust/**"
+      - "spec/test-vectors/**"
       - ".github/workflows/react-native-adapter.yml"
 
 jobs:
@@ -23,7 +25,87 @@ jobs:
       - name: Test adapter contract and one-time build tooling
         run: npm test --prefix adapters/react-native
 
+  native-sdk-aar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect Native SDK source changes
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=/tmp/fresnica-adapter-native-changes.txt
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" > "$changed"
+          cat "$changed"
+          if grep -Eq '^(bindings/native/|sdk/rust/|core/rust/|spec/test-vectors/)' "$changed"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        if: steps.source.outputs.changed == 'true'
+        with:
+          distribution: "temurin"
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.source.outputs.changed == 'true'
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.source.outputs.changed == 'true'
+        with:
+          gradle-version: "9.4.1"
+      - name: Install Android compile platform
+        if: steps.source.outputs.changed == 'true'
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 -print -quit)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;36.0.0"
+      - name: Build compile-contract Native SDK AAR from pull-request source
+        if: steps.source.outputs.changed == 'true'
+        run: |
+          rm -rf bindings/native/build/android/kotlin bindings/native/build/android/jniLibs
+          mkdir -p bindings/native/build/android/kotlin
+          cargo build --manifest-path bindings/native/Cargo.toml
+          (
+            cd bindings/native
+            cargo run --features bindgen --bin uniffi-bindgen -- \
+              generate --library target/debug/libfresnica_native_sdk.so \
+              --language kotlin --out-dir build/android/kotlin
+          )
+          gradle -p bindings/native/platform/android assembleRelease --stacktrace
+          AAR="$(find bindings/native/platform/android/build/outputs/aar -type f -name '*release.aar' -print -quit)"
+          test -s "$AAR"
+          cp "$AAR" /tmp/fresnica-native-sdk.aar
+      - name: Download released Native SDK AAR
+        if: steps.source.outputs.changed != 'true'
+        run: |
+          VERSION="$(node -p "require('./adapters/react-native/adapter-contract.json').fresnicaNativeSdkVersion")"
+          curl --fail --location --retry 3 \
+            "https://github.com/manran/fresnica/releases/download/native-sdk-v${VERSION}/fresnica-native-sdk-${VERSION}.aar" \
+            --output /tmp/fresnica-native-sdk.aar
+          test -s /tmp/fresnica-native-sdk.aar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-aar-for-react-native-adapter
+          path: /tmp/fresnica-native-sdk.aar
+          if-no-files-found: error
+
   android-consumer-toolchain:
+    needs: [contract, native-sdk-aar]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     strategy:
@@ -67,12 +149,13 @@ jobs:
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;36.0.0"
-      - name: Download pinned Native SDK AAR
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-sdk-aar-for-react-native-adapter
+          path: /tmp/fresnica-native-sdk-artifact
+      - name: Use matched Native SDK AAR
         run: |
-          VERSION="$(node -p "require('./adapters/react-native/adapter-contract.json').fresnicaNativeSdkVersion")"
-          curl --fail --location --retry 3 \
-            "https://github.com/manran/fresnica/releases/download/native-sdk-v${VERSION}/fresnica-native-sdk-${VERSION}.aar" \
-            --output /tmp/fresnica-native-sdk.aar
+          cp /tmp/fresnica-native-sdk-artifact/fresnica-native-sdk.aar /tmp/fresnica-native-sdk.aar
           test -s /tmp/fresnica-native-sdk.aar
       - name: Create consumer-owned Android toolchain fixture
         run: |

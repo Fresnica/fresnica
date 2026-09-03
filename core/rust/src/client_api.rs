@@ -4,19 +4,20 @@ use zeroize::Zeroizing;
 
 use crate::{
     derive_verified_unlock_key, export_signing_material, generate_protected_mnemonic,
-    parse_soroban_authorization_entry_xdr, parse_transaction_envelope_xdr,
+    parse_soroban_authorization_entry_xdr, parse_transaction_envelope_xdr, prepare_message_signing,
     prepare_soroban_authorization_signing, protect_mnemonic_signing_material,
-    protect_secret_signing_material, sign_protected_soroban_authorization_entry,
-    sign_protected_transaction_envelope, sign_soroban_authorization_entry,
-    sign_transaction_envelope, soroban_authorization_entry_xdr, transaction_envelope_xdr,
-    transaction_hash, unlock_software_signer, AccountIdentity, AccountKind,
-    ExportedSigningMaterial, ExternalEd25519Signer, ExternalSorobanEd25519Signer,
-    ProtectedSignerError, ProtectedSigningError, ProtectionError, ProtectionRegistry,
-    SecretStoreError, SignerError, SorobanAuthorizationSigningError, TransactionSigningError,
-    WalletMaterialError, WalletUnlockKey,
+    protect_secret_signing_material, sign_protected_message,
+    sign_protected_soroban_authorization_entry, sign_protected_transaction_envelope,
+    sign_soroban_authorization_entry, sign_transaction_envelope, soroban_authorization_entry_xdr,
+    transaction_envelope_xdr, transaction_hash, unlock_software_signer, verify_message_signature,
+    AccountIdentity, AccountKind, ExportedSigningMaterial, ExternalEd25519Signer,
+    ExternalSorobanEd25519Signer, MessageSigningError, ProtectedSignerError, ProtectedSigningError,
+    ProtectionError, ProtectionRegistry, SecretStoreError, SignerError,
+    SorobanAuthorizationSigningError, TransactionSigningError, WalletMaterialError,
+    WalletUnlockKey,
 };
 
-pub const CLIENT_API_VERSION: u64 = 4;
+pub const CLIENT_API_VERSION: u64 = 5;
 
 /// Transport-neutral Core boundary for process, mobile, desktop, and SDK hosts.
 ///
@@ -234,6 +235,24 @@ impl CoreClientApi {
         transaction_envelope_xdr(&transaction).map_err(|_| ClientApiError::invalid_transaction())
     }
 
+    pub fn sign_message(
+        &self,
+        protected_envelope: &Value,
+        unlock_key: &WalletUnlockKey,
+        expected_signer_public_key: &str,
+        message: &[u8],
+    ) -> Result<Vec<u8>, ClientApiError> {
+        sign_protected_message(
+            &self.registry,
+            protected_envelope,
+            unlock_key,
+            expected_signer_public_key,
+            message,
+        )
+        .map(|signature| signature.to_vec())
+        .map_err(classify_protected_signing_error)
+    }
+
     pub fn sign_soroban_authorization_xdr(
         &self,
         protected_envelope: &Value,
@@ -289,6 +308,15 @@ impl CoreClientApi {
         })
     }
 
+    pub fn prepare_message_signing(&self, message: &[u8]) -> ClientMessageSigningRequest {
+        let request = prepare_message_signing(message);
+        ClientMessageSigningRequest {
+            message_hash: request.message_hash,
+            message: request.message,
+            encoded_message: request.encoded_message,
+        }
+    }
+
     pub fn prepare_soroban_authorization_signing(
         &self,
         authorization_entry_xdr: &[u8],
@@ -323,6 +351,19 @@ impl CoreClientApi {
         sign_transaction_envelope(&mut transaction, network_passphrase, &signer)
             .map_err(classify_external_transaction_error)?;
         transaction_envelope_xdr(&transaction).map_err(|_| ClientApiError::invalid_transaction())
+    }
+
+    pub fn verify_message_signature(
+        &self,
+        message: &[u8],
+        signer_public_key: &str,
+        signature: &[u8],
+    ) -> Result<(), ClientApiError> {
+        let signature: [u8; 64] = signature
+            .try_into()
+            .map_err(|_| ClientApiError::invalid_input("signature must be 64 bytes"))?;
+        verify_message_signature(signer_public_key, message, &signature)
+            .map_err(classify_message_signing_error)
     }
 
     pub fn apply_soroban_ed25519_signature(
@@ -387,6 +428,13 @@ pub struct ClientEd25519SigningRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientMessageSigningRequest {
+    pub message_hash: [u8; 32],
+    pub message: Vec<u8>,
+    pub encoded_message: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientSorobanAuthorizationSigningRequest {
     pub authorization_hash: [u8; 32],
     pub authorization_entry_xdr: Vec<u8>,
@@ -404,6 +452,7 @@ pub enum ClientApiErrorCode {
     IdentityMismatch,
     InvalidTransaction,
     InvalidAuthorization,
+    InvalidMessageSignature,
     CoreError,
 }
 
@@ -417,6 +466,7 @@ impl ClientApiErrorCode {
             Self::IdentityMismatch => "identity-mismatch",
             Self::InvalidTransaction => "invalid-transaction",
             Self::InvalidAuthorization => "invalid-authorization",
+            Self::InvalidMessageSignature => "invalid-message-signature",
             Self::CoreError => "core-error",
         }
     }
@@ -487,6 +537,13 @@ impl ClientApiError {
         }
     }
 
+    fn invalid_message_signature() -> Self {
+        Self {
+            code: ClientApiErrorCode::InvalidMessageSignature,
+            message: "invalid SEP-53 message signature".to_owned(),
+        }
+    }
+
     fn core(message: impl Into<String>) -> Self {
         Self {
             code: ClientApiErrorCode::CoreError,
@@ -544,6 +601,7 @@ fn classify_protected_signing_error(error: ProtectedSigningError) -> ClientApiEr
     match error {
         ProtectedSigningError::Unlock(error) => classify_protected_signer_error(error),
         ProtectedSigningError::Transaction(_) => ClientApiError::invalid_transaction(),
+        ProtectedSigningError::Message(error) => classify_message_signing_error(error),
         ProtectedSigningError::SorobanAuthorization(error) => {
             classify_soroban_authorization_error(error)
         }
@@ -566,6 +624,13 @@ fn classify_external_transaction_error(error: TransactionSigningError) -> Client
         TransactionSigningError::Xdr(_)
         | TransactionSigningError::InvalidSignature
         | TransactionSigningError::DuplicateSignature => ClientApiError::invalid_transaction(),
+    }
+}
+
+fn classify_message_signing_error(error: MessageSigningError) -> ClientApiError {
+    match error {
+        MessageSigningError::Signer(error) => classify_external_signer_error(error),
+        MessageSigningError::InvalidSignature => ClientApiError::invalid_message_signature(),
     }
 }
 
@@ -658,6 +723,13 @@ mod tests {
         .unwrap()
     }
 
+    fn message_signing_vector() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/message-signing-v1.json"
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn parses_classic_and_contract_account_identity() {
         let api = CoreClientApi::new();
@@ -692,6 +764,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(signed, decode_hex(SIGNED_XDR_HEX));
+    }
+
+    #[test]
+    fn typed_api_roundtrips_sep53_message_vector() {
+        let vector = message_signing_vector();
+        let case = &vector["cases"][0];
+        let secret = case["secret"].as_str().unwrap();
+        let public_key = case["public_key"].as_str().unwrap();
+        let message = decode_hex(case["message_hex"].as_str().unwrap());
+        let expected_payload = decode_hex(case["encoded_message_hex"].as_str().unwrap());
+        let expected_hash = decode_hex(case["message_hash_hex"].as_str().unwrap());
+        let expected_signature = decode_hex(case["signature_hex"].as_str().unwrap());
+
+        let api = CoreClientApi::new();
+        let protected = api
+            .protect_secret(secret, "passcode", Some(public_key))
+            .unwrap();
+        let unlock_key = api
+            .derive_unlock_key(&protected.envelope, "passcode", public_key)
+            .unwrap();
+
+        let prepared = api.prepare_message_signing(&message);
+        assert_eq!(prepared.message, message);
+        assert_eq!(prepared.encoded_message, expected_payload);
+        assert_eq!(prepared.message_hash.as_slice(), expected_hash);
+
+        let signature = api
+            .sign_message(
+                &protected.envelope,
+                &unlock_key,
+                public_key,
+                &prepared.message,
+            )
+            .unwrap();
+        assert_eq!(signature, expected_signature);
+        api.verify_message_signature(&prepared.message, public_key, &signature)
+            .unwrap();
+
+        let invalid = api
+            .verify_message_signature(&prepared.message, public_key, &[0u8; 64])
+            .unwrap_err();
+        assert_eq!(invalid.code(), ClientApiErrorCode::InvalidMessageSignature);
+        assert_eq!(invalid.code().as_str(), "invalid-message-signature");
     }
 
     #[test]

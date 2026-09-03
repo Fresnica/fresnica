@@ -13,17 +13,18 @@ Implemented production primitives currently include:
 - SEP-0005 deterministic Classic public-key derivation, mnemonic generation, and supported-language detection
 - Classic Ed25519 software signer
 - External Ed25519 transaction signer for hardware, device, or process-backed providers
+- SEP-53 v1.0.0 message payload/hash/sign/verify with separate software and external-message signer contracts
 - Classic transaction envelope hashing and decorated-signature attachment through the official `stellar-xdr` crate
 - Canonical password-protected wallet envelopes using Scrypt + AES-256-GCM
 - protected wallet initialization from Stellar secret or mnemonic material
 - protected mnemonic generation for new software wallets
 - `WalletUnlockKey`, the 32-byte Scrypt output used to open that same canonical envelope
 - Verified unlock-key derivation with public-key identity validation before client enrollment
-- One-shot protected transaction signing using `WalletUnlockKey`
+- One-shot protected transaction and SEP-53 message signing using `WalletUnlockKey`
 - Explicit passcode-only signing-material export for user-requested reveal/migration flows
 - Agent Access capability checks before Classic transaction signing
 
-Transaction building, network submission, client persistence, OS authentication, SDEX, anchors, Soroban account authorization, passkeys, and UI remain outside the current Rust Core slice.
+Transaction building, network submission, client persistence, OS authentication, SDEX, anchors, passkey/provider mechanics, and UI remain outside the Rust Core security boundary.
 
 ## Client / Core boundary
 
@@ -57,7 +58,9 @@ External signers hold only the declared Stellar public key and a provider callba
 
 For local software wallets, `sign_protected_transaction_envelope` accepts the canonical protected wallet envelope plus `WalletUnlockKey`, verifies the expected public identity, signs, and drops the secret-bearing signer without returning private signing material to the client.
 
-Arbitrary message signing remains a separate future capability following SEP-53 and must preserve SEP-53 domain separation.
+SEP-53 message signing is a separate public capability. Core prepends the exact UTF-8 prefix `Stellar Signed Message:\n`, appends the caller's exact message bytes without normalization, hashes the resulting payload once with SHA-256, and signs/verifies that digest. `MessageSigningRequest` carries the original message, encoded SEP-53 payload, and digest so an external provider can review the semantic object instead of receiving only an opaque hash. Fresnica verifies the provider's returned signature before accepting it.
+
+SEP-53 itself has no network passphrase or dapp-origin/replay semantics. Those belong to the reviewed challenge/session above Core; Core does not silently inject them and does not expose a generic `sign_hash` oracle.
 
 ## Secret-protection boundary
 

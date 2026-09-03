@@ -354,6 +354,117 @@ class FresnicaCoreModule(
     }
 
     @ReactMethod
+    fun signMessageWithSystemAuth(
+        envelopeJson: String,
+        expectedSignerPublicKey: String,
+        message: String,
+        reason: String,
+        promise: Promise,
+    ) {
+        val activity = currentFragmentActivity()
+        if (activity == null) {
+            promise.reject(ERROR_SYSTEM_AUTH_UNAVAILABLE, "A FragmentActivity is required for biometric signing")
+            return
+        }
+        if (!requireNonBlank(reason, "reason", promise)) return
+        val messageBytes = message.toByteArray(Charsets.UTF_8)
+        if (!authenticationInProgress.compareAndSet(false, true)) {
+            messageBytes.fill(0)
+            promise.reject(ERROR_AUTH_IN_PROGRESS, "Another Fresnica biometric operation is already active")
+            return
+        }
+
+        val session = try {
+            authorization.beginSystemAuthMessageSign(
+                envelopeJson,
+                expectedSignerPublicKey,
+                messageBytes,
+            )
+        } catch (error: Throwable) {
+            authenticationInProgress.set(false)
+            reject(promise, error)
+            return
+        } finally {
+            messageBytes.fill(0)
+        }
+
+        activity.runOnUiThread {
+            val prompt = BiometricPrompt(
+                activity,
+                ContextCompat.getMainExecutor(activity),
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        try {
+                            if (result.cryptoObject?.cipher !== session.cipher) {
+                                runCatching { authorization.cancelSystemAuthMessageSign(session) }
+                                promise.reject(
+                                    ERROR_SYSTEM_AUTH_FAILED,
+                                    "BiometricPrompt did not authorize the Fresnica message-signing Cipher",
+                                )
+                                return
+                            }
+                            val signature = authorization.finishSystemAuthMessageSign(session)
+                            try {
+                                promise.resolve(Base64.encodeToString(signature, Base64.NO_WRAP))
+                            } finally {
+                                signature.fill(0)
+                            }
+                        } catch (error: Throwable) {
+                            reject(promise, error)
+                        } finally {
+                            authenticationInProgress.set(false)
+                        }
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        try {
+                            runCatching { authorization.cancelSystemAuthMessageSign(session) }
+                            promise.reject(
+                                biometricErrorCode(errorCode),
+                                errString.toString(),
+                            )
+                        } finally {
+                            authenticationInProgress.set(false)
+                        }
+                    }
+                },
+            )
+            prompt.authenticate(
+                promptInfo(reason),
+                BiometricPrompt.CryptoObject(session.cipher),
+            )
+        }
+    }
+
+    @ReactMethod
+    fun signMessageWithPasscode(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        message: String,
+        promise: Promise,
+    ) {
+        val messageBytes = message.toByteArray(Charsets.UTF_8)
+        try {
+            val signature = authorization.signMessageWithPasscode(
+                envelopeJson,
+                appPasscode,
+                expectedSignerPublicKey,
+                messageBytes,
+            )
+            try {
+                promise.resolve(Base64.encodeToString(signature, Base64.NO_WRAP))
+            } finally {
+                signature.fill(0)
+            }
+        } catch (error: Throwable) {
+            reject(promise, error)
+        } finally {
+            messageBytes.fill(0)
+        }
+    }
+
+    @ReactMethod
     fun signWithSystemAuth(
         envelopeJson: String,
         expectedSignerPublicKey: String,
@@ -562,6 +673,7 @@ class FresnicaCoreModule(
             is NativeSdkException.InvalidProtectedData -> promise.reject(ERROR_INVALID_PROTECTED_DATA, error.detail, error)
             is NativeSdkException.IdentityMismatch -> promise.reject(ERROR_IDENTITY_MISMATCH, error.detail, error)
             is NativeSdkException.InvalidTransaction -> promise.reject(ERROR_INVALID_TRANSACTION, error.detail, error)
+            is NativeSdkException.InvalidMessageSignature -> promise.reject(ERROR_INVALID_MESSAGE_SIGNATURE, error.detail, error)
             is NativeSdkException.CoreException -> promise.reject(ERROR_CORE, error.detail, error)
             is KeyPermanentlyInvalidatedException -> promise.reject(
                 ERROR_SYSTEM_AUTH_INVALIDATED,
@@ -609,6 +721,7 @@ class FresnicaCoreModule(
         private const val ERROR_INVALID_PROTECTED_DATA = "invalid-protected-data"
         private const val ERROR_IDENTITY_MISMATCH = "identity-mismatch"
         private const val ERROR_INVALID_TRANSACTION = "invalid-transaction"
+        private const val ERROR_INVALID_MESSAGE_SIGNATURE = "invalid-message-signature"
         private const val ERROR_CORE = "core-error"
         private const val ERROR_AUTH_IN_PROGRESS = "auth-in-progress"
         private const val ERROR_USER_CANCEL = "user-cancel"

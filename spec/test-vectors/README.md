@@ -7,6 +7,7 @@ Current sets:
 - `wallet-v1.json`: deterministic SEP-0005 mnemonic/passphrase/account-index derivation to Stellar public keys.
 - `protection-v1.json`: password and system-key wallet-secret encryption compatibility.
 - `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
+- `message-signing-v1.json`: SEP-53 v1.0.0 prefixed-message payload, single SHA-256 digest, Ed25519 signature, UTF-8, and raw-binary compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
 - `asset-identity-v1.json`: exact Classic native/issued asset identity, including case-sensitive issued codes and `xlm:G...` constructor-normalization hazards.
 - `smart-account-auth-v1.json`: real Protocol 27 Testnet smart-account authorization captured after a confirmed WebAuthn/passkey transfer and accepted by the provider fixture verifier.
@@ -38,7 +39,13 @@ The vector freezes compatibility with existing Fresnica records; it does not cla
 
 Implementations must agree on the unsigned envelope XDR, network-specific transaction hash, raw Ed25519 signature, four-byte Stellar signature hint, and final decorated-signature envelope XDR. The transaction hash is the signing payload; raw XDR and network passphrase are review/context inputs for external signers rather than arbitrary bytes to sign.
 
-This vector deliberately covers Classic transaction signing only. SEP-53 arbitrary-message signing and Soroban contract authorization require separate domain-specific vectors.
+This vector deliberately covers Classic transaction signing only. SEP-53 message signing and Soroban contract authorization use separate domain-specific vectors.
+
+## SEP-53 message signing
+
+`message-signing-v1.json` copies the three public test cases from final SEP-53 v1.0.0: ASCII UTF-8, non-ASCII UTF-8, and arbitrary binary bytes. The included seed is public standard test material and must never be used as a wallet credential.
+
+Implementations must preserve the exact message bytes, prepend UTF-8 `Stellar Signed Message:\n`, hash that encoded payload exactly once with SHA-256, and sign/verify the resulting 32-byte digest with Ed25519. SEP-53 does not add a network passphrase, origin, nonce, expiry, or account scope. Dapp authentication challenges that require those properties must carry or independently bind them at the Dapp/session layer.
 
 ## Classic asset identity
 

@@ -182,7 +182,7 @@ React Native old -> new
 
 ## Compatibility manifest
 
-Every generated adapter binary set should have a machine-readable manifest. At minimum it records:
+Every generated adapter binary set should have a machine-readable manifest. For example, the latest published 0.2.1 baseline records:
 
 ```json
 {
@@ -251,7 +251,10 @@ Consumer application
   = pinned Native SDK + generated adapter binaries + compatibility manifest
 ```
 
-The first generalized release was `native-sdk-v0.1.0`. The current Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.1. Adapter 0.2.1 is a build-tooling compatibility patch: it keeps the same framework/API surface while removing Fresnica-owned Android Gradle/AGP/Kotlin version selection. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
+The first generalized release was `native-sdk-v0.1.0`. The latest published Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.1. Adapter 0.2.1 is a build-tooling compatibility patch: it keeps the same framework/API surface while removing Fresnica-owned Android Gradle/AGP/Kotlin version selection. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
+
+
+The current development source is 0.3.0 / Native Binding API 3 / SDK API 5 / Core Client API 5 with React Native adapter source 0.3.0. It adds `signMessageWithSystemAuth` and `signMessageWithPasscode` for SEP-53 dapp challenges. This source version must not be treated as a published binary baseline until the matching Native SDK release exists.
 
 The transitional `bindings/mobile` source is retired from `main`; #81-#84 semantics remain migration acceptance criteria and history remains in Git/tags.
 

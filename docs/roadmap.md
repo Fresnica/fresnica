@@ -1,6 +1,6 @@
 # Fresnica Roadmap
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 Fresnica is a shared Stellar wallet/security foundation. `Fresnica/fresnica` is converging on one clear responsibility: **Core / SDK / Specification / Reference**. Product UI/application code belongs in independent repositories.
 
@@ -61,19 +61,19 @@ Completed:
 - Protocol-28-ready `stellar-xdr` is used ahead of Mainnet activation;
 - Soroban authorization parsing/preimage/hash/signature primitives support legacy Address and CAP-71 AddressV2;
 - direct G-account Ed25519 Soroban authorization signing is supported;
+- final SEP-53 v1.0.0 message signing/verification is a separate Core/SDK domain with shared cross-language vectors and a concrete Native/React Native Mobile path;
 - C-account/custom/delegated authorization remains fail closed/provider-owned;
 - language-neutral Soroban authorization signing vectors exist;
 - `CoreClientApi` exposes protected and external Ed25519 auth-entry signing with stable `invalid-authorization` semantics.
 
 Next Core-domain work:
 
-- add standard message-signing semantics with SEP-53 alignment as a separate signing domain;
 - keep protocol-version/network feature gating above Core where network state is known;
 - add C-account/smart-account primitives only when a concrete provider proves the required boundary.
 
 ### M1 — SDK adaptation
 
-The SDK already exposes domain-specific Classic transaction signing, Soroban authorization signing and external prepare/apply semantics. Process Binding v2 carries the Soroban authorization contract for the concrete RefPython consumer.
+The SDK already exposes domain-specific Classic transaction signing, SEP-53 message signing, Soroban authorization signing and external prepare/apply/verify semantics. Process Binding v2 carries the Soroban authorization contract for the concrete RefPython consumer.
 
 Native/WASM expansion remains consumer-driven. Do not add bindings merely for matrix symmetry.
 
@@ -113,4 +113,4 @@ Development uses layered validation:
 - product/integration workflows only for the affected product/reference surface;
 - Main bundle after merge for isolated development recovery.
 
-Repository branch protection/ruleset should eventually require PRs and `Required CI / validate`, prohibit force-push/deletion, and require current branches/conversation resolution.
+Repository rulesets are active on the default branch: PRs and the stable required CI are mandatory, merge history is squash/linear, signed commits are required, conversations must resolve, and force-push/deletion are prohibited. Historical development branches remain separate cleanup debt.

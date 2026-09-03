@@ -349,6 +349,59 @@ public final class FresnicaCoreModule: NSObject {
         }
     }
 
+    @objc(signMessageWithSystemAuth:expectedSignerPublicKey:message:reason:resolver:rejecter:)
+    public func signMessageWithSystemAuth(
+        _ envelopeJson: String,
+        expectedSignerPublicKey: String,
+        message: String,
+        reason: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        guard requireNonBlank(reason, field: "reason", reject: reject) else { return }
+        var messageBytes = Data(message.utf8)
+        defer { wipe(&messageBytes) }
+
+        do {
+            var signature = try authorization.signMessageWithSystemAuth(
+                envelopeJson: envelopeJson,
+                expectedSignerPublicKey: expectedSignerPublicKey,
+                message: messageBytes,
+                reason: reason
+            )
+            defer { wipe(&signature) }
+            resolve(signature.base64EncodedString())
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
+    @objc(signMessageWithPasscode:appPasscode:expectedSignerPublicKey:message:resolver:rejecter:)
+    public func signMessageWithPasscode(
+        _ envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        message: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        var messageBytes = Data(message.utf8)
+        defer { wipe(&messageBytes) }
+
+        do {
+            var signature = try authorization.signMessageWithPasscode(
+                envelopeJson: envelopeJson,
+                appPasscode: appPasscode,
+                expectedSignerPublicKey: expectedSignerPublicKey,
+                message: messageBytes
+            )
+            defer { wipe(&signature) }
+            resolve(signature.base64EncodedString())
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
     @objc(signWithSystemAuth:expectedSignerPublicKey:transactionXdrBase64:networkPassphrase:reason:resolver:rejecter:)
     public func signWithSystemAuth(
         _ envelopeJson: String,
@@ -533,6 +586,7 @@ public final class FresnicaCoreModule: NSObject {
             case let .InvalidProtectedData(detail): return ("invalid-protected-data", detail)
             case let .IdentityMismatch(detail): return ("identity-mismatch", detail)
             case let .InvalidTransaction(detail): return ("invalid-transaction", detail)
+            case let .InvalidMessageSignature(detail): return ("invalid-message-signature", detail)
             case let .CoreError(detail): return ("core-error", detail)
             @unknown default:
                 return ("core-error", "Unknown Native SDK error")

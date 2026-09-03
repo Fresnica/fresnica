@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
 
-pub const NATIVE_BINDING_API_VERSION: u64 = 2;
+pub const NATIVE_BINDING_API_VERSION: u64 = 3;
 
 #[derive(uniffi::Object)]
 pub struct FresnicaSdkApi;
@@ -189,6 +189,40 @@ impl FresnicaSdkApi {
             .map_err(NativeSdkError::from)
     }
 
+    pub fn sign_message(
+        &self,
+        envelope_json: String,
+        unlock_key: Vec<u8>,
+        expected_signer_public_key: String,
+        message: Vec<u8>,
+    ) -> Result<Vec<u8>, NativeSdkError> {
+        self.sdk()
+            .sign_message(
+                envelope_json,
+                unlock_key,
+                expected_signer_public_key,
+                message,
+            )
+            .map_err(NativeSdkError::from)
+    }
+
+    pub fn sign_message_with_passcode(
+        &self,
+        envelope_json: String,
+        app_passcode: String,
+        expected_signer_public_key: String,
+        message: Vec<u8>,
+    ) -> Result<Vec<u8>, NativeSdkError> {
+        self.sdk()
+            .sign_message_with_passcode(
+                envelope_json,
+                app_passcode,
+                expected_signer_public_key,
+                message,
+            )
+            .map_err(NativeSdkError::from)
+    }
+
     pub fn reveal(
         &self,
         envelope_json: String,
@@ -215,6 +249,26 @@ impl FresnicaSdkApi {
             transaction_xdr: request.transaction_xdr,
             network_passphrase: request.network_passphrase,
         })
+    }
+
+    pub fn prepare_message_signing(&self, message: Vec<u8>) -> NativeMessageSigningRequest {
+        let request = self.sdk().prepare_message_signing(message);
+        NativeMessageSigningRequest {
+            message_hash: request.message_hash,
+            message: request.message,
+            encoded_message: request.encoded_message,
+        }
+    }
+
+    pub fn verify_message_signature(
+        &self,
+        message: Vec<u8>,
+        signer_public_key: String,
+        signature: Vec<u8>,
+    ) -> Result<(), NativeSdkError> {
+        self.sdk()
+            .verify_message_signature(message, signer_public_key, signature)
+            .map_err(NativeSdkError::from)
     }
 
     pub fn apply_ed25519_signature(
@@ -277,6 +331,13 @@ pub struct NativeEd25519SigningRequest {
     pub network_passphrase: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
+pub struct NativeMessageSigningRequest {
+    pub message_hash: Vec<u8>,
+    pub message: Vec<u8>,
+    pub encoded_message: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 #[serde(rename_all = "kebab-case")]
 pub enum NativeSigningMaterialKind {
@@ -303,6 +364,7 @@ pub enum NativeSdkErrorCode {
     InvalidProtectedData,
     IdentityMismatch,
     InvalidTransaction,
+    InvalidMessageSignature,
     CoreError,
 }
 
@@ -315,6 +377,7 @@ impl NativeSdkErrorCode {
             Self::InvalidProtectedData => "invalid-protected-data",
             Self::IdentityMismatch => "identity-mismatch",
             Self::InvalidTransaction => "invalid-transaction",
+            Self::InvalidMessageSignature => "invalid-message-signature",
             Self::CoreError => "core-error",
         }
     }
@@ -329,6 +392,7 @@ pub enum NativeSdkError {
     InvalidProtectedData { detail: String },
     IdentityMismatch { detail: String },
     InvalidTransaction { detail: String },
+    InvalidMessageSignature { detail: String },
     CoreError { detail: String },
 }
 
@@ -341,6 +405,7 @@ impl NativeSdkError {
             Self::InvalidProtectedData { .. } => NativeSdkErrorCode::InvalidProtectedData,
             Self::IdentityMismatch { .. } => NativeSdkErrorCode::IdentityMismatch,
             Self::InvalidTransaction { .. } => NativeSdkErrorCode::InvalidTransaction,
+            Self::InvalidMessageSignature { .. } => NativeSdkErrorCode::InvalidMessageSignature,
             Self::CoreError { .. } => NativeSdkErrorCode::CoreError,
         }
     }
@@ -353,6 +418,7 @@ impl NativeSdkError {
             | Self::InvalidProtectedData { detail }
             | Self::IdentityMismatch { detail }
             | Self::InvalidTransaction { detail }
+            | Self::InvalidMessageSignature { detail }
             | Self::CoreError { detail } => detail,
         }
     }
@@ -366,6 +432,7 @@ impl NativeSdkError {
             NativeSdkErrorCode::InvalidProtectedData => Self::InvalidProtectedData { detail },
             NativeSdkErrorCode::IdentityMismatch => Self::IdentityMismatch { detail },
             NativeSdkErrorCode::InvalidTransaction => Self::InvalidTransaction { detail },
+            NativeSdkErrorCode::InvalidMessageSignature => Self::InvalidMessageSignature { detail },
             NativeSdkErrorCode::CoreError => Self::CoreError { detail },
         }
     }
@@ -388,6 +455,7 @@ impl From<SdkError> for NativeSdkError {
             SdkErrorCode::InvalidProtectedData => NativeSdkErrorCode::InvalidProtectedData,
             SdkErrorCode::IdentityMismatch => NativeSdkErrorCode::IdentityMismatch,
             SdkErrorCode::InvalidTransaction => NativeSdkErrorCode::InvalidTransaction,
+            SdkErrorCode::InvalidMessageSignature => NativeSdkErrorCode::InvalidMessageSignature,
             SdkErrorCode::CoreError => NativeSdkErrorCode::CoreError,
             _ => NativeSdkErrorCode::CoreError,
         };
@@ -441,6 +509,13 @@ mod tests {
     fn signing_vector() -> Value {
         serde_json::from_str(include_str!(
             "../../../spec/test-vectors/transaction-signing-v1.json"
+        ))
+        .unwrap()
+    }
+
+    fn message_signing_vector() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/message-signing-v1.json"
         ))
         .unwrap()
     }
@@ -540,6 +615,70 @@ mod tests {
             )
             .unwrap();
         assert_eq!(signed, expected_signed);
+    }
+
+    #[test]
+    fn native_sep53_message_paths_match_shared_vector() {
+        let vector = message_signing_vector();
+        let case = &vector["cases"][0];
+        let secret = case["secret"].as_str().unwrap();
+        let public_key = case["public_key"].as_str().unwrap();
+        let message = decode_hex(case["message_hex"].as_str().unwrap());
+        let expected_payload = decode_hex(case["encoded_message_hex"].as_str().unwrap());
+        let expected_hash = decode_hex(case["message_hash_hex"].as_str().unwrap());
+        let expected_signature = decode_hex(case["signature_hex"].as_str().unwrap());
+
+        let api = FresnicaSdkApi::new();
+        let protected = api
+            .protect_secret(
+                secret.to_owned(),
+                "passcode".to_owned(),
+                Some(public_key.to_owned()),
+            )
+            .unwrap();
+        let unlock_key = api
+            .derive_unlock_key(
+                protected.envelope_json.clone(),
+                "passcode".to_owned(),
+                public_key.to_owned(),
+            )
+            .unwrap();
+
+        let signature = api
+            .sign_message(
+                protected.envelope_json.clone(),
+                unlock_key,
+                public_key.to_owned(),
+                message.clone(),
+            )
+            .unwrap();
+        assert_eq!(signature, expected_signature);
+
+        let passcode_signature = api
+            .sign_message_with_passcode(
+                protected.envelope_json,
+                "passcode".to_owned(),
+                public_key.to_owned(),
+                message.clone(),
+            )
+            .unwrap();
+        assert_eq!(passcode_signature, expected_signature);
+
+        let request = api.prepare_message_signing(message.clone());
+        assert_eq!(request.message, message);
+        assert_eq!(request.encoded_message, expected_payload);
+        assert_eq!(request.message_hash, expected_hash);
+        api.verify_message_signature(
+            request.message.clone(),
+            public_key.to_owned(),
+            expected_signature,
+        )
+        .unwrap();
+
+        let invalid = api
+            .verify_message_signature(request.message, public_key.to_owned(), vec![0u8; 64])
+            .unwrap_err();
+        assert_eq!(invalid.code(), NativeSdkErrorCode::InvalidMessageSignature);
     }
 
     #[test]

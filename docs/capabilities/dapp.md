@@ -15,6 +15,7 @@ A Dapp implementation may support requests involving:
 - account identity/connection;
 - transaction review/signing;
 - transaction submission;
+- SEP-53 message signing for explicit dapp challenges;
 - other wallet authorization operations explicitly supported by Fresnica.
 
 Every request must reuse existing Account, Transaction, Signer and Signing Coordination semantics. Dapp transport must not create an alternate signing/security model.
@@ -22,6 +23,12 @@ Every request must reuse existing Account, Transaction, Signer and Signing Coord
 Remote application names, icons, descriptions, requested amounts and other display metadata are **untrusted metadata**. When a request asks the wallet to sign a Stellar transaction, the authoritative review must be derived from the exact transaction/envelope semantics that will be signed, not from the remote application's claim about what that transaction does. Remote metadata may supplement that review but cannot replace or contradict it.
 
 If Fresnica cannot fully understand the transaction/authorization semantics required for its normal review policy, the ordinary Dapp approval path must fail closed. "The SDK can parse this XDR" is not sufficient evidence that the wallet can safely explain/authorize it. A future explicitly designed expert/raw-signing Flow may choose another policy, but ordinary Dapp approval must not silently degrade into blind signing.
+
+For a message-signing request, the authoritative review object is the exact message text/bytes that enter the SEP-53 domain. The Mobile React Native bridge uses JavaScript `String` -> UTF-8 bytes without normalization; Core/SDK retain raw-byte support for non-framework consumers. The transport may encode the resulting 64-byte Ed25519 signature for its wire protocol, but must not reinterpret the message before signing.
+
+SEP-53 deliberately does **not** carry network passphrase, origin, nonce, expiry, or account scope. An authentication challenge must therefore include the security-significant fields in the reviewed message and/or bind them independently to the authenticated dapp session. Replay prevention, challenge expiry, peer/origin validation, bounded/displayable challenge policy and SEP-43 session/network selection remain Dapp/product responsibilities above Core.
+
+A valid SEP-53 signature proves control of the selected Ed25519 signer key, **not ledger authority over an arbitrary Stellar account**. In multisig or disabled-master-key accounts, a signer key can differ from the account ID and its weight may be insufficient for account control. Dapp product semantics must preserve `Account identity != Signer capability`; they must not relabel a signer-key proof as full account ownership without separate ledger-policy evidence.
 
 ## Platform-specific mechanisms
 
@@ -42,7 +49,8 @@ A Dapp request must not:
 - receive raw private software signer material;
 - bypass transaction review/confirmation policy;
 - substitute remote application-provided descriptions for review derived from the exact transaction being authorized;
-- sign arbitrary bytes through the Stellar transaction-signing path;
+- sign arbitrary bytes through the Stellar transaction-signing path or generic raw-hash signing;
+- normalize, rewrite, or decorate a reviewed SEP-53 challenge after user review;
 - treat a remote application's claimed account/signer identity as trusted without local validation;
 - bypass the stronger Reveal/Export boundary.
 
@@ -50,7 +58,7 @@ A Dapp session/permission must also be bound to the actual remote peer/origin pl
 
 ## Implementation evidence status
 
-Fresnica does not yet have a sufficiently mature Dapp implementation to define a shared request/session/result model. This is intentional: Mobile or Web should not wait for a speculative universal API before building the first useful implementation.
+Fresnica now has one concrete implementation requirement from Mobile: SEP-53 challenge signing through the Native SDK / React Native adapter. It still does not have enough transport/session evidence to define a universal shared request/session/result model. This is intentional: Mobile or Web should not wait for a speculative universal API before building the first useful implementation.
 
 The first concrete implementation should contribute evidence back to this document, including:
 

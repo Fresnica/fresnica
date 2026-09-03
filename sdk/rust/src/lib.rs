@@ -16,7 +16,7 @@ use serde_json::Value;
 use zeroize::{Zeroize, Zeroizing};
 
 /// Version of the platform-neutral Fresnica SDK semantic contract.
-pub const SDK_API_VERSION: u64 = 4;
+pub const SDK_API_VERSION: u64 = 5;
 
 /// Stateless platform-neutral entry point.
 ///
@@ -259,6 +259,51 @@ impl FresnicaSdk {
         .map_err(SdkError::from)
     }
 
+    /// Sign exact message bytes according to SEP-53. Network/session context is not
+    /// added implicitly; callers that need it must include it in the reviewed message.
+    pub fn sign_message(
+        &self,
+        envelope_json: String,
+        unlock_key: Vec<u8>,
+        expected_signer_public_key: String,
+        message: Vec<u8>,
+    ) -> Result<Vec<u8>, SdkError> {
+        let envelope = parse_envelope(&envelope_json)?;
+        let unlock_key = sdk_unlock_key(unlock_key)?;
+        self.core()
+            .sign_message(
+                &envelope,
+                &unlock_key,
+                &expected_signer_public_key,
+                &message,
+            )
+            .map_err(SdkError::from)
+    }
+
+    /// Sign exact SEP-53 message bytes with a fresh application passcode without
+    /// exposing `WalletUnlockKey` material outside Rust.
+    pub fn sign_message_with_passcode(
+        &self,
+        envelope_json: String,
+        passcode: String,
+        expected_signer_public_key: String,
+        message: Vec<u8>,
+    ) -> Result<Vec<u8>, SdkError> {
+        let envelope = parse_envelope(&envelope_json)?;
+        let passcode = Zeroizing::new(passcode);
+        let core = self.core();
+        let unlock_key = core
+            .derive_unlock_key(&envelope, passcode.as_str(), &expected_signer_public_key)
+            .map_err(SdkError::from)?;
+        core.sign_message(
+            &envelope,
+            &unlock_key,
+            &expected_signer_public_key,
+            &message,
+        )
+        .map_err(SdkError::from)
+    }
+
     pub fn sign_soroban_authorization_xdr(
         &self,
         envelope_json: String,
@@ -364,6 +409,15 @@ impl FresnicaSdk {
         })
     }
 
+    pub fn prepare_message_signing(&self, message: Vec<u8>) -> SdkMessageSigningRequest {
+        let request = self.core().prepare_message_signing(&message);
+        SdkMessageSigningRequest {
+            message_hash: request.message_hash.to_vec(),
+            message: request.message,
+            encoded_message: request.encoded_message,
+        }
+    }
+
     pub fn prepare_soroban_authorization_signing(
         &self,
         authorization_entry_xdr: Vec<u8>,
@@ -395,6 +449,17 @@ impl FresnicaSdk {
                 &signer_public_key,
                 &signature,
             )
+            .map_err(SdkError::from)
+    }
+
+    pub fn verify_message_signature(
+        &self,
+        message: Vec<u8>,
+        signer_public_key: String,
+        signature: Vec<u8>,
+    ) -> Result<(), SdkError> {
+        self.core()
+            .verify_message_signature(&message, &signer_public_key, &signature)
             .map_err(SdkError::from)
     }
 
@@ -458,6 +523,13 @@ pub struct SdkEd25519SigningRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SdkMessageSigningRequest {
+    pub message_hash: Vec<u8>,
+    pub message: Vec<u8>,
+    pub encoded_message: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SdkSorobanAuthorizationSigningRequest {
     pub authorization_hash: Vec<u8>,
     pub authorization_entry_xdr: Vec<u8>,
@@ -493,6 +565,7 @@ pub enum SdkErrorCode {
     IdentityMismatch,
     InvalidTransaction,
     InvalidAuthorization,
+    InvalidMessageSignature,
     CoreError,
 }
 
@@ -506,6 +579,7 @@ impl SdkErrorCode {
             Self::IdentityMismatch => "identity-mismatch",
             Self::InvalidTransaction => "invalid-transaction",
             Self::InvalidAuthorization => "invalid-authorization",
+            Self::InvalidMessageSignature => "invalid-message-signature",
             Self::CoreError => "core-error",
         }
     }
@@ -544,6 +618,7 @@ impl From<ClientApiError> for SdkError {
             ClientApiErrorCode::IdentityMismatch => SdkErrorCode::IdentityMismatch,
             ClientApiErrorCode::InvalidTransaction => SdkErrorCode::InvalidTransaction,
             ClientApiErrorCode::InvalidAuthorization => SdkErrorCode::InvalidAuthorization,
+            ClientApiErrorCode::InvalidMessageSignature => SdkErrorCode::InvalidMessageSignature,
             ClientApiErrorCode::CoreError => SdkErrorCode::CoreError,
             _ => SdkErrorCode::CoreError,
         };
@@ -632,6 +707,13 @@ mod tests {
     fn soroban_authorization_vector() -> Value {
         serde_json::from_str(include_str!(
             "../../../spec/test-vectors/soroban-authorization-signing-v1.json"
+        ))
+        .unwrap()
+    }
+
+    fn message_signing_vector() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/message-signing-v1.json"
         ))
         .unwrap()
     }
@@ -777,6 +859,80 @@ mod tests {
             )
             .unwrap();
         assert_ne!(new_key, unlock_key);
+    }
+
+    #[test]
+    fn protected_and_external_sep53_message_paths_match_shared_vector() {
+        let vector = message_signing_vector();
+        let case = &vector["cases"][0];
+        let secret = case["secret"].as_str().unwrap();
+        let public_key = case["public_key"].as_str().unwrap();
+        let message = decode_hex(case["message_hex"].as_str().unwrap());
+        let expected_payload = decode_hex(case["encoded_message_hex"].as_str().unwrap());
+        let expected_hash = decode_hex(case["message_hash_hex"].as_str().unwrap());
+        let expected_signature = decode_hex(case["signature_hex"].as_str().unwrap());
+
+        let sdk = FresnicaSdk::new();
+        let protected = sdk
+            .protect_secret(
+                secret.to_owned(),
+                "passcode".to_owned(),
+                Some(public_key.to_owned()),
+            )
+            .unwrap();
+        let unlock_key = sdk
+            .derive_unlock_key(
+                protected.envelope_json.clone(),
+                "passcode".to_owned(),
+                public_key.to_owned(),
+            )
+            .unwrap();
+
+        let signature = sdk
+            .sign_message(
+                protected.envelope_json.clone(),
+                unlock_key,
+                public_key.to_owned(),
+                message.clone(),
+            )
+            .unwrap();
+        assert_eq!(signature, expected_signature);
+
+        let passcode_signature = sdk
+            .sign_message_with_passcode(
+                protected.envelope_json.clone(),
+                "passcode".to_owned(),
+                public_key.to_owned(),
+                message.clone(),
+            )
+            .unwrap();
+        assert_eq!(passcode_signature, expected_signature);
+
+        let prepared = sdk.prepare_message_signing(message.clone());
+        assert_eq!(prepared.message, message);
+        assert_eq!(prepared.encoded_message, expected_payload);
+        assert_eq!(prepared.message_hash, expected_hash);
+        sdk.verify_message_signature(
+            prepared.message.clone(),
+            public_key.to_owned(),
+            expected_signature.clone(),
+        )
+        .unwrap();
+
+        let invalid = sdk
+            .verify_message_signature(prepared.message, public_key.to_owned(), vec![0u8; 64])
+            .unwrap_err();
+        assert_eq!(invalid.code, SdkErrorCode::InvalidMessageSignature);
+
+        let wrong_passcode = sdk
+            .sign_message_with_passcode(
+                protected.envelope_json,
+                "wrong".to_owned(),
+                public_key.to_owned(),
+                b"challenge".to_vec(),
+            )
+            .unwrap_err();
+        assert_eq!(wrong_passcode.code, SdkErrorCode::InvalidPasscode);
     }
 
     #[test]

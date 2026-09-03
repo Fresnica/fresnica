@@ -1,6 +1,6 @@
 # Fresnica Tasks
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 This list tracks shared-repository work only. Independent product implementation belongs in the corresponding product repository.
 
@@ -15,7 +15,8 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Stop `Required CI` from compiling CLI/TUI as immediate shared-contract dependencies; keep their dedicated workflows during migration
 - [x] Create `Fresnica/fresnica-terminal` and migrate Rust CLI + TUI together
 - [x] After independent terminal CI is green, remove terminal product source and product workflows from this shared repository
-- [ ] Enable repository ruleset/branch protection and retire historical probe/relay/validation branches through an admin-capable path
+- [x] Enable repository ruleset/branch protection requiring PRs and the stable required CI; prohibit force-push/deletion
+- [ ] Retire historical probe/relay/validation branches through an admin-capable path
 
 ### Modern Stellar Core Capability Baseline
 
@@ -30,7 +31,8 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Expose protected/external Soroban authorization through `CoreClientApi` with stable `invalid-authorization` errors
 - [x] Expose the proven Soroban authorization contract through the platform-neutral SDK
 - [x] Extend Process Binding to SDK v4 Soroban authorization only for the concrete RefPython consumer; keep Native/WASM demand-driven
-- [ ] Add standard message signing/verification as a separate domain with SEP-53 alignment
+- [x] Add SEP-53 v1.0.0 message signing/verification as a separate Core/SDK domain with language-neutral vectors
+- [x] Expose SEP-53 through Native Binding API 3 and the React Native system-auth/passcode bridge for the concrete Mobile dapp challenge consumer
 - [x] Use RefPython to prove Soroban simulation/assembly/review semantics
 - [x] Prove source-account and detached Classic G-account Soroban authorization/signing plus Testnet submit/status reconciliation in RefPython
 - [x] Add RustClient RPC/gateway + Soroban transaction capability after RefPython evidence
@@ -128,4 +130,4 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Use a portable pinned rustfmt tool locally before pushing Rust changes
 - [x] Keep stable `Required CI / validate` while formatting changed Rust files and testing only affected immediate Rust contracts
 - [x] Defer expensive Native/Apple/Android/WASM/RefPython/CLI/TUI integration to final non-draft PR validation
-- [ ] Enable repository ruleset/branch protection requiring PRs and `Required CI / validate`; prohibit force-push and branch deletion
+- [x] Enable repository ruleset/branch protection requiring PRs and `Required CI / validate`; prohibit force-push and branch deletion

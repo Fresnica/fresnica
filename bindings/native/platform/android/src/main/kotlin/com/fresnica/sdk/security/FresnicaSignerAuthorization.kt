@@ -93,6 +93,56 @@ class FresnicaSignerAuthorization(
         session.clearTransaction()
     }
 
+    fun beginSystemAuthMessageSign(
+        envelopeJson: String,
+        expectedSignerPublicKey: String,
+        message: ByteArray,
+    ): MessageSigningSession = MessageSigningSession(
+        storeSession = keyStore.beginUnlock(expectedSignerPublicKey),
+        envelopeJson = envelopeJson,
+        expectedSignerPublicKey = expectedSignerPublicKey,
+        message = message.copyOf(),
+    )
+
+    fun finishSystemAuthMessageSign(session: MessageSigningSession): ByteArray {
+        session.consume()
+        try {
+            val unlockKey = keyStore.finishUnlock(session.storeSession)
+            try {
+                require(unlockKey.size == WalletUnlockKeyStore.UNLOCK_KEY_BYTES) {
+                    "Stored WalletUnlockKey has an invalid length"
+                }
+                return core.signMessage(
+                    session.envelopeJson,
+                    unlockKey,
+                    session.expectedSignerPublicKey,
+                    session.message,
+                )
+            } finally {
+                unlockKey.fill(0)
+            }
+        } finally {
+            session.clearMessage()
+        }
+    }
+
+    fun cancelSystemAuthMessageSign(session: MessageSigningSession) {
+        session.consume()
+        session.clearMessage()
+    }
+
+    fun signMessageWithPasscode(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        message: ByteArray,
+    ): ByteArray = core.signMessageWithPasscode(
+        envelopeJson,
+        appPasscode,
+        expectedSignerPublicKey,
+        message,
+    )
+
     fun signWithPasscode(
         envelopeJson: String,
         appPasscode: String,
@@ -123,6 +173,20 @@ class FresnicaSignerAuthorization(
         val cipher: Cipher get() = storeSession.cipher
         internal fun consume() { check(consumed.compareAndSet(false, true)) { "Domain enrollment session has already been consumed" } }
         internal fun tryConsume(): Boolean = consumed.compareAndSet(false, true)
+    }
+
+    class MessageSigningSession internal constructor(
+        internal val storeSession: WalletUnlockKeyStore.UnlockSession,
+        internal val envelopeJson: String,
+        internal val expectedSignerPublicKey: String,
+        message: ByteArray,
+    ) {
+        private val consumed = AtomicBoolean(false)
+        internal var message: ByteArray = message
+            private set
+        val cipher: Cipher get() = storeSession.cipher
+        internal fun consume() { check(consumed.compareAndSet(false, true)) { "Message signing session has already been consumed" } }
+        internal fun clearMessage() { message.fill(0); message = ByteArray(0) }
     }
 
     class SigningSession internal constructor(

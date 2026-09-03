@@ -37,8 +37,8 @@ def test_runtime_prefers_process_binding(tmp_path, monkeypatch, sdk_client):
 
 def test_process_binding_version(sdk_client):
     version = sdk_client.version()
-    assert version["sdk_api_version"] == 4
-    assert version["client_api_version"] == 4
+    assert version["sdk_api_version"] == 5
+    assert version["client_api_version"] == 5
 
 
 def test_mnemonic_hd_derivation_and_passcode_signing(sdk_client):
