@@ -52,9 +52,10 @@ Current foundation includes:
 - Process Binding API v2 remains the privileged transport for the Soroban authorization operations used by the concrete RefPython trusted-host consumer and now compiles against SDK API v5 without exposing SEP-53 remotely;
 - RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation;
 - `reference/rust-client` `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization;
-- an opt-in RefPython Ledger Stellar HID provider layered above Core's external Ed25519 prepare/apply boundary, with deterministic SEP-5/APDU/request-binding tests and a successful physical macOS Testnet clear-signing proof using Ledger Stellar app 6.0.3, path `m/44'/148'/0'`, Blind Signing disabled, and transaction `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`.
+- an opt-in RefPython Ledger Stellar HID provider layered above Core's external Ed25519 prepare/apply boundary, with deterministic SEP-5/APDU/request-binding tests and a successful physical macOS Testnet clear-signing proof using Ledger Stellar app 6.0.3, path `m/44'/148'/0'`, Blind Signing disabled, and transaction `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`;
+- published Native SDK v0.3.0 (`native-sdk-v0.3.0`) as the current Mobile baseline: Native Binding API 3 / SDK API 5 / Core Client API 5, built and released from exact main commit `b1d0427ec5c5398c3bb2e01b886e4e3084e46a73`.
 
-The next protocol work remains **consumer- or provider-driven**: Mobile can now consume the SEP-53 message domain for dapp challenges; C-account/passkey/smart-account work starts from a concrete provider rather than a speculative universal abstraction.
+The shared repository is now in **demand-driven maintenance**. Do not proactively expand Core merely to complete speculative protocol/provider surfaces. Keep protocol awareness current and fail closed; resume implementation when a real consumer/provider or an upstream security-significant change supplies evidence. Mobile can now consume `native-sdk-v0.3.0` for SEP-53 dapp challenges.
 
 ## 3. Security boundary
 
@@ -108,10 +109,16 @@ The repository-level SDK boundary guard lives at `scripts/validate-rust-sdk-boun
 
 ## 7. Immediate next work
 
-1. validate the first concrete Mobile dapp challenge/session flow against the SEP-53 Native/React Native contract without moving transport policy into Core;
-2. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it;
-3. continue supply-chain and Backup v1 hardening in parallel;
-4. resume Agent integration only when the upstream exact-envelope signing seam exists.
+Shared-repository active development is paused by default.
+
+Resume this repository when one of these triggers exists:
+
+1. a security-significant Stellar protocol change requires recognition, semantic preservation or fail-closed behavior;
+2. `fresnica-mobile` or another real consumer demonstrates a missing stable Core/SDK semantic;
+3. a concrete provider such as passkey/C-account or an additional hardware/signer form needs a proven shared security primitive;
+4. a security, dependency, release-pipeline or portable-backup issue requires a shared fix.
+
+Otherwise product work belongs in the independent product repository. The next concrete consumer milestone is Mobile adoption of `native-sdk-v0.3.0`, including the first SEP-53 dapp challenge/session flow; its transport/session policy remains Mobile-owned.
 
 ## 8. Known repository administration gaps
 
@@ -120,8 +127,8 @@ The repository-level SDK boundary guard lives at `scripts/validate-rust-sdk-boun
 
 ## 9. Start here next session
 
-1. Verify GitHub `main`, `Required CI` and the newest Main bundle.
+1. Verify GitHub `main`, `Required CI`, the newest Main bundle and current release metadata.
 2. Restore that Main bundle in isolated execution.
-3. Read the architecture/roadmap plus the relevant Core/Capability contract.
-4. Keep Core changes surgical and protocol/security-driven.
+3. Read the architecture/roadmap plus the relevant Core/Capability contract and [`docs/decisions/protocol-demand-development.md`](decisions/protocol-demand-development.md).
+4. Keep Core changes surgical, protocol/security-aware and demand-driven; do not resume shared implementation without one of the triggers above.
 5. For terminal product changes, work in `Fresnica/fresnica-terminal` and update its pinned `FRESNICA_REV` explicitly when adopting a new shared revision.

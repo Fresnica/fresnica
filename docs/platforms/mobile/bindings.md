@@ -49,24 +49,14 @@ The independent Mobile application owns:
 The latest **published** Mobile integration baseline uses these independent compatibility numbers:
 
 ```text
-Native package version:       0.2.1
-NATIVE_BINDING_API_VERSION:   2
-SDK_API_VERSION:              3
-CLIENT_API_VERSION:           3
-RN adapter source version:    0.2.1
-```
-
-The current development source for the next Mobile adoption is:
-
-```text
-Native package version:       0.3.0 (not yet published)
+Native package version:       0.3.0
 NATIVE_BINDING_API_VERSION:   3
 SDK_API_VERSION:              5
 CLIENT_API_VERSION:           5
 RN adapter source version:    0.3.0
 ```
 
-The 0.3.0 source line adds the SEP-53 message-signing domain needed by Mobile dapp challenges. Mobile must still pin an exact pre-1.0 **published** Native SDK release and matching adapter manifest; development source numbers do not authorize consuming a release artifact that does not yet exist. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.
+The 0.3.0 release adds the SEP-53 message-signing domain needed by Mobile dapp challenges. Mobile should pin the exact pre-1.0 `native-sdk-v0.3.0` release plus the matching adapter manifest rather than consuming moving development source. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.
 
 ## Native API
 
@@ -130,8 +120,7 @@ The v0.2 security boundary adds two important high-level semantics:
 - `deriveMnemonicSigner` derives another explicit HD index from an existing mnemonic-backed protected source without returning the mnemonic to JavaScript; the normal first index is `0`.
 - system auth is one device/app-level protection domain. `initializeSystemAuth` performs the one-time system-auth prompt; later `registerSignerSystemAuth` calls verify the Fresnica passcode and wrap each new signer unlock key with the existing domain public key without another biometric prompt. Face ID/fingerprint authorizes routine signing only and never substitutes for the Fresnica passcode.
 
-
-The development 0.3.0 adapter adds a third high-level signing surface for dapps: `signMessageWithSystemAuth` / `signMessageWithPasscode`. They accept a framework `String`, encode it as exact UTF-8 without normalization, and invoke Native/Core SEP-53 signing. They do not expose `WalletUnlockKey`, a generic hash signer, `prepareMessageSigning`, or `verifyMessageSignature` to JavaScript. Origin, selected account/network, nonce, expiry, replay protection and challenge-size/display policy remain Mobile dapp/session responsibilities.
+The 0.3.0 adapter adds a third high-level signing surface for dapps: `signMessageWithSystemAuth` / `signMessageWithPasscode`. They accept a framework `String`, encode it as exact UTF-8 without normalization, and invoke Native/Core SEP-53 signing. They do not expose `WalletUnlockKey`, a generic hash signer, `prepareMessageSigning`, or `verifyMessageSignature` to JavaScript. Origin, selected account/network, nonce, expiry, replay protection and challenge-size/display policy remain Mobile dapp/session responsibilities.
 
 It must not reimplement derivation, protected-envelope parsing, signer identity checks, transaction hashing/signing, signature verification, Keychain/Keystore policy, or `WalletUnlockKey` handling.
 

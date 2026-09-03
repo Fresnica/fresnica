@@ -86,7 +86,7 @@ This list tracks shared-repository work only. Independent product implementation
 - [x] Finite XDR decoding depth/input bounds and fail-closed unsupported envelope handling
 - [x] Formal SDK Process Binding API v2; v1 owner operations retained and SDK v4 Soroban authorization transport added for RefPython
 - [x] Machine-readable SDK compatibility manifest and source-drift validation
-- [x] Native SDK release contract and published `native-sdk-v0.2.1` baseline
+- [x] Native SDK release contract and published `native-sdk-v0.3.0` baseline (Native Binding API 3 / SDK API 5 / Core Client API 5)
 
 ## Rust capability reference implementation
 
