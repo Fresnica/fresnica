@@ -35,6 +35,8 @@ The canonical adapter exposes the established high-level surface:
 - `hasSignerSystemAuth`
 - `removeSignerSystemAuth`
 - `removeSystemAuthDomain`
+- `signMessageWithSystemAuth`
+- `signMessageWithPasscode`
 - `signWithSystemAuth`
 - `signWithPasscode`
 
@@ -43,6 +45,8 @@ It intentionally does **not** expose `deriveUnlockKey`, `validateUnlockKey`, or 
 `initializeSystemAuth` is one device/app-level enrollment. Later `registerSignerSystemAuth` calls verify the Fresnica passcode and wrap a new signer's independent `WalletUnlockKey` with the existing domain public key without another biometric prompt. `signWithSystemAuth` is the use-time biometric/system-auth boundary. System auth is not a substitute for the Fresnica passcode and cannot authorize Reveal / Export.
 
 `deriveMnemonicSigner` derives another explicit HD index from an already protected mnemonic-backed source without returning the mnemonic to JavaScript.
+
+`signMessageWithSystemAuth` and `signMessageWithPasscode` implement the Mobile dApp message-signing path over the Native SDK's SEP-53 domain. JavaScript supplies a `String`; the adapter signs its exact UTF-8 bytes and returns the 64-byte Ed25519 signature as Base64. SEP-43 transport code may encode that signature for its own wire format, but must not reinterpret or normalize the message. Challenge origin, account, network, nonce and expiry remain dApp/session semantics and must be part of the reviewed challenge or independently validated session context; SEP-53 itself does not add those fields.
 
 ## One-time Android adapter build
 

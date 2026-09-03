@@ -328,11 +328,13 @@ Soroban auth XDR
 
 This must be a different entry point from transaction signing.
 
-## 5.3 SEP-53 prefixed-message signing — secondary parity target
+## 5.3 SEP-53 prefixed-message signing — established Core/SDK domain
 
 Message signing is neither transaction signing nor Soroban authorization.
 
-Core/SDK should eventually provide a standard SEP-53 path rather than generic arbitrary-byte Ed25519 signing.
+Core/SDK provide a standard SEP-53 v1.0.0 path rather than generic arbitrary-byte Ed25519 signing. The contract preserves the exact source message bytes, encoded prefixed payload, and single-SHA-256 digest; external signers receive that full request and returned signatures are verified before acceptance.
+
+Native Binding API 3 exposes this domain for the concrete Mobile dapp consumer. The React Native adapter accepts JavaScript strings as exact UTF-8 bytes and keeps system-auth/passcode authorization native-only. SEP-53 itself does not add network/session/origin/replay context; those remain Dapp capability semantics.
 
 This makes the common wallet-facing signing set align naturally with the direction of SEP-43:
 
@@ -901,7 +903,7 @@ Legend:
 | AddressV2 | Established in Core | Core/SDK + gateway gating | preserve; CAP-71/P27 active and P28-ready |
 | delegated auth recognition | Established recognition; signing rejected | Core | preserve recognition; provider support later |
 | C-account auth provider | absent | provider + SDK seam | concrete implementation first |
-| SEP-53 signing | absent/partial elsewhere | Core/SDK | add after auth-entry priority |
+| SEP-53 signing | Established with final v1.0.0 vectors | Core/SDK; Native for Mobile | preserve separate message domain; product owns challenge/session policy |
 | RPC | not Core | RustClient/RefPython | add first-class gateway |
 | simulate/assemble | absent | RefPython/RustClient | add after Core auth vectors |
 | contract invocation review | absent | Capability/RefPython | define from evidence |

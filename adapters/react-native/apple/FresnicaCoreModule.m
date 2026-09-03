@@ -91,6 +91,20 @@ RCT_EXTERN_METHOD(removeSignerSystemAuth:(NSString *)expectedSignerPublicKey
 RCT_EXTERN_METHOD(removeSystemAuthDomain:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(signMessageWithSystemAuth:(NSString *)envelopeJson
+                  expectedSignerPublicKey:(NSString *)expectedSignerPublicKey
+                  message:(NSString *)message
+                  reason:(NSString *)reason
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(signMessageWithPasscode:(NSString *)envelopeJson
+                  appPasscode:(NSString *)appPasscode
+                  expectedSignerPublicKey:(NSString *)expectedSignerPublicKey
+                  message:(NSString *)message
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(signWithSystemAuth:(NSString *)envelopeJson
                   expectedSignerPublicKey:(NSString *)expectedSignerPublicKey
                   transactionXdrBase64:(NSString *)transactionXdrBase64

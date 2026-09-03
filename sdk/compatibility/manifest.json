@@ -2,32 +2,32 @@
   "schemaVersion": 1,
   "core": {
     "packageVersion": "0.2.0",
-    "clientApiVersion": 4
+    "clientApiVersion": 5
   },
   "sdk": {
     "packageVersion": "0.2.0",
-    "apiVersion": 4,
-    "requiresCoreClientApiVersion": 4
+    "apiVersion": 5,
+    "requiresCoreClientApiVersion": 5
   },
   "process": {
     "packageVersion": "0.2.0",
     "bindingApiVersion": 2,
-    "requiresSdkApiVersion": 4
+    "requiresSdkApiVersion": 5
   },
   "native": {
-    "packageVersion": "0.2.1",
-    "bindingApiVersion": 2,
-    "requiresSdkApiVersion": 4
+    "packageVersion": "0.3.0",
+    "bindingApiVersion": 3,
+    "requiresSdkApiVersion": 5
   },
   "wasm": {
     "packageVersion": "0.1.0",
     "bindingApiVersion": 1,
-    "requiresSdkApiVersion": 4
+    "requiresSdkApiVersion": 5
   },
   "adapters": {
     "reactNative": {
-      "sourceVersion": "0.2.1",
-      "requiresNativeBindingApiVersion": 2
+      "sourceVersion": "0.3.0",
+      "requiresNativeBindingApiVersion": 3
     }
   },
   "providers": {

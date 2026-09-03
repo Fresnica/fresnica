@@ -41,7 +41,7 @@ test('creates and verifies the compatibility manifest', async () => {
 
   assert.equal(manifest.framework, 'react-native');
   assert.equal(manifest.frameworkVersion, '0.74.2');
-  assert.equal(manifest.nativeBindingApiVersion, 2);
+  assert.equal(manifest.nativeBindingApiVersion, 3);
   assert.ok(manifest.androidHostDependencies.includes('com.facebook.react:react-android:0.74.2'));
   assert.deepEqual(manifest.appleHostLinkerFlags, ['-ObjC']);
   assert.equal(manifest.artifacts.android.fileName, 'adapter.aar');

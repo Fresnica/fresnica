@@ -6,6 +6,7 @@
 pub mod account;
 pub mod agent_access;
 pub mod client_api;
+pub mod message;
 pub mod protected_signer;
 pub mod protection;
 pub mod secret_store;
@@ -22,11 +23,16 @@ pub use agent_access::{
 };
 pub use client_api::{
     ClientAccountIdentity, ClientAccountKind, ClientApiError, ClientApiErrorCode,
-    ClientEd25519SigningRequest, ClientGeneratedMnemonic, ClientProtectedSoftwareSigner,
-    ClientSorobanAuthorizationSigningRequest, CoreClientApi, CLIENT_API_VERSION,
+    ClientEd25519SigningRequest, ClientGeneratedMnemonic, ClientMessageSigningRequest,
+    ClientProtectedSoftwareSigner, ClientSorobanAuthorizationSigningRequest, CoreClientApi,
+    CLIENT_API_VERSION,
+};
+pub use message::{
+    prepare_message_signing, sep53_message_hash, sep53_message_payload, sign_message,
+    verify_message_signature, MessageSigningError, SEP53_MESSAGE_PREFIX,
 };
 pub use protected_signer::{
-    derive_verified_unlock_key, export_signing_material,
+    derive_verified_unlock_key, export_signing_material, sign_protected_message,
     sign_protected_soroban_authorization_entry, sign_protected_transaction_envelope,
     unlock_software_signer, ExportedSigningMaterial, ProtectedSignerError, ProtectedSigningError,
 };
@@ -40,7 +46,8 @@ pub use secret_store::{
     SCRYPT_R,
 };
 pub use signer::{
-    ClassicSigner, ExternalEd25519Signer, ExternalSorobanEd25519Signer, SignerError,
+    ClassicSigner, ExternalEd25519Signer, ExternalMessageEd25519Signer,
+    ExternalSorobanEd25519Signer, MessageSigner, MessageSigningRequest, SignerError,
     SoftwareSigner, SorobanAuthorizationSigner, SorobanAuthorizationSigningRequest,
     TransactionSigningRequest,
 };

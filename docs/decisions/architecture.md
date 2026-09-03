@@ -2,6 +2,20 @@
 
 This file records design decisions that materially change Fresnica behavior or boundaries. Git history remains the detailed implementation record.
 
+## 2026-09-03 - SEP-53 is a separate message-signing domain; Mobile owns dapp challenge/session policy
+
+**Decision:** Fresnica Core implements final SEP-53 v1.0.0 as its own signing domain alongside Classic transaction signing and Soroban authorization signing. Core constructs `Stellar Signed Message:\n || message`, hashes that exact byte sequence once with SHA-256, and signs/verifies the digest with the selected Ed25519 signer. Core does not expose a generic `sign_hash` oracle.
+
+**Exact review binding:** the message-signing request preserves the original message bytes, encoded SEP-53 payload and digest. External providers receive the complete domain-specific request, and Core verifies the returned signature before accepting it. A framework string is converted to UTF-8 exactly once at the Mobile adapter boundary without normalization.
+
+**Dapp/session ownership:** SEP-53 does not carry origin, network passphrase, selected account, nonce or expiry. Mobile therefore owns peer/origin validation, account/network selection, nonce/replay control, expiry, bounded/displayable challenge policy and any SEP-43 transport encoding. Security-significant context must be inside the reviewed challenge and/or independently bound to the authenticated session.
+
+**Authority meaning:** a valid SEP-53 signature proves control of the selected Ed25519 signer key. It does not by itself prove that the key currently has sufficient ledger weight to control a Stellar account. `Account identity != Signer capability` remains mandatory for multisig/disabled-master-key accounts.
+
+**Mobile boundary:** Native Binding API 3 and React Native adapter source 0.3.0 add `signMessageWithSystemAuth` / `signMessageWithPasscode` while keeping routine unlock keys and low-level message prepare/verify primitives out of JavaScript. The source line is not a published Mobile release until a separate `native-sdk-v0.3.0` release marker is reviewed and landed.
+
+See [Dapp Interaction Capability](../capabilities/dapp.md), [Modern Stellar Core Capability Baseline](../development/modern-stellar-core-capability-baseline.md), and [Mobile / Native SDK Binding Architecture](../platforms/mobile/bindings.md).
+
 ## 2026-08-26 - One device System Auth Domain; Passcode remains higher authority; mnemonic HD derivation stays inside Core
 
 **Decision:** Mobile initializes system authentication once per device/application installation, not once per signer. The domain owns one auth-bound private wrapping key and a public wrapping key. Each protected software signer continues to have its own Core envelope, salt and `WalletUnlockKey`; the domain only wraps those independent unlock keys. No global Vault Master Key is introduced.
@@ -16,7 +30,7 @@ This file records design decisions that materially change Fresnica behavior or b
 
 **HD mnemonic accounts:** the first mnemonic signer normally uses index 0. `derive_mnemonic_signer` authenticates an existing mnemonic-backed protected source and derives an explicit later index inside Core, returning a new protected signer envelope without returning the mnemonic to Mobile/JavaScript. A secret-backed source is rejected. Mobile may group related signers under a Recovery Source for backup/UX purposes; **Account != Signer != Recovery Source**.
 
-**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). Native SDK v0.2.1 kept those API constants while correcting device-domain failure/cleanup atomicity. The current RN adapter source is 0.2.1; that patch changes consumer-build integration only and does not change the Native Binding/API surface.
+**Release boundary:** these changes were introduced in Native SDK v0.2.0 (Native Binding API 2 / SDK API 3 / Core Client API 3 / RN adapter source 0.2.0). Native SDK v0.2.1 kept those API constants while correcting device-domain failure/cleanup atomicity. The published v0.2.1 RN adapter source kept those API constants; that patch changed consumer-build integration only and did not change the Native Binding/API surface. The later 0.3.0 SEP-53 development source is recorded in the 2026-09-03 decision above.
 
 See [Mobile System Authentication](../platforms/mobile/system-auth.md), [Mobile / Rust Core Vault Contract](../platforms/mobile/security-vault-contract.md), [Wallet Protection Model](../core/protection.md), and [Mobile SDK Usage](../platforms/mobile/sdk-usage.md).
 

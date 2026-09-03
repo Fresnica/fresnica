@@ -16,6 +16,8 @@ native-sdk-vMAJOR.MINOR.PATCH
 
 Pre-1.0 consumers must pin an exact release. `NATIVE_BINDING_API_VERSION`, `SDK_API_VERSION` and `CLIENT_API_VERSION` remain independent runtime/API compatibility versions and are recorded in the release manifest; changing one of those constants requires explicit compatibility review even when the package version also changes.
 
+The current development source is `0.3.0` / Native Binding API 3 / SDK API 5 / Core Client API 5 because the Mobile dapp consumer requires SEP-53 message signing. This is source state, not a published release marker. The latest published Mobile security baseline remains `native-sdk-v0.2.1` until a separate reviewed `0.3.0` release marker is added.
+
 A release is immutable. The release workflow refuses to replace an existing tag/release. A correction requires a new package version and marker.
 
 ## Release intent

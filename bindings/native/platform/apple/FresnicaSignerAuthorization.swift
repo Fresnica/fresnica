@@ -72,6 +72,39 @@ public final class FresnicaSignerAuthorization {
         )
     }
 
+    public func signMessageWithSystemAuth(
+        envelopeJson: String,
+        expectedSignerPublicKey: String,
+        message: Data,
+        reason: String
+    ) throws -> Data {
+        var unlockKey = try keyStore.load(signerId: expectedSignerPublicKey, reason: reason)
+        defer { wipe(&unlockKey) }
+        guard unlockKey.count == FresnicaWalletUnlockKeyStore.unlockKeyLength else {
+            throw AuthorizationError.invalidUnlockKeyLength
+        }
+        return try core.signMessage(
+            envelopeJson: envelopeJson,
+            unlockKey: unlockKey,
+            expectedSignerPublicKey: expectedSignerPublicKey,
+            message: message
+        )
+    }
+
+    public func signMessageWithPasscode(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        message: Data
+    ) throws -> Data {
+        try core.signMessageWithPasscode(
+            envelopeJson: envelopeJson,
+            appPasscode: appPasscode,
+            expectedSignerPublicKey: expectedSignerPublicKey,
+            message: message
+        )
+    }
+
     public func signWithPasscode(
         envelopeJson: String,
         appPasscode: String,

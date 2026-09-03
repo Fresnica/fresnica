@@ -23,6 +23,8 @@ New Mobile work MUST NOT use the legacy `mobile-sdk-v0.1.0` artifact or the supe
 
 Pre-1.0 consumers should pin exact SDK and React Native versions. Do not use floating SDK versions or React Native semver ranges for the adapter build.
 
+> **SEP-53 development note:** the shared repository now contains Native SDK / RN adapter source `0.3.0` (Native Binding API 3 / SDK API 5 / Core Client API 5) with dapp message signing. It is not a published Mobile dependency yet. A Mobile branch that needs SEP-53 must wait for or explicitly adopt the reviewed `native-sdk-v0.3.0` release and rebuild the canonical adapter against that exact release; do not pretend the published `0.2.1` artifact has the new methods.
+
 ## 2. Mobile 消费的边界
 
 ```text

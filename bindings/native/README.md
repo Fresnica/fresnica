@@ -23,7 +23,8 @@ This is the authoritative native binding surface for new Mobile/native consumers
 - Protected envelopes remain opaque.
 - Routine `WalletUnlockKey` material is native-only and must not be surfaced by framework adapters to JavaScript/Dart.
 - Reveal/Export requires a fresh application passcode.
-- External/hardware signing uses prepare/apply operations; callbacks do not cross FFI.
+- External/hardware signing uses domain-specific prepare/apply or prepare/verify operations; callbacks do not cross FFI.
+- SEP-53 message signing is exposed as exact byte arrays at the native boundary; platform/framework adapters decide how a product string becomes bytes.
 - The Rust crate contains no React Native, Flutter, persistence, network, Keychain/Keystore, or UI behavior.
 - Platform packages may ship native signer-authorization helpers beside the generated SDK API. Those helpers protect/release `WalletUnlockKey` only inside native platform code and do not move OS authentication into Rust Core.
 - Secret-bearing generated/reveal records intentionally do not implement Rust `Debug`.
@@ -34,7 +35,7 @@ Kotlin package: `com.fresnica.sdk`
 
 Swift module: `FresnicaSDK`
 
-The exported object is `FresnicaSdkApi`, exposing the reviewed Rust SDK semantic operations, including `deriveMnemonicSigner` for deriving another explicit HD index from an authenticated mnemonic-backed protected source.
+The exported object is `FresnicaSdkApi`, exposing the reviewed Rust SDK semantic operations, including `deriveMnemonicSigner` for deriving another explicit HD index from an authenticated mnemonic-backed protected source and SEP-53 `signMessage` / `prepareMessageSigning` / `verifyMessageSignature` operations.
 
 Run:
 
@@ -62,7 +63,7 @@ The generalized native packages now own the reusable platform security helpers t
 
 These are not framework adapters. They implement the platform-side credential release/signing boundary while the framework adapter only drives platform UI/lifecycle glue.
 
-Native SDK v0.2 uses one device/app-level **System Auth Protection Domain** rather than one biometric enrollment per signer. Domain initialization performs one authenticated private-key challenge. Later signer registration derives a verified per-signer `WalletUnlockKey` from the Fresnica passcode and wraps it with the already-created domain public key, so adding a signer does not trigger another biometric prompt. Routine signing authenticates the domain private-key unwrap. Android drives the exact `Cipher` through `BiometricPrompt`; Apple uses the auth-bound `SecKey`/`LAContext` path. System auth remains lower privilege than the Fresnica passcode and cannot authorize Reveal / Export.
+The Native SDK uses one device/app-level **System Auth Protection Domain** rather than one biometric enrollment per signer. Domain initialization performs one authenticated private-key challenge. Later signer registration derives a verified per-signer `WalletUnlockKey` from the Fresnica passcode and wraps it with the already-created domain public key, so adding a signer does not trigger another biometric prompt. Routine signing authenticates the domain private-key unwrap. Android drives the exact `Cipher` through `BiometricPrompt`; Apple uses the auth-bound `SecKey`/`LAContext` path. System auth remains lower privilege than the Fresnica passcode and cannot authorize Reveal / Export.
 
 ## Apple compiled module
 

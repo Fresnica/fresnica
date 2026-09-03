@@ -1,6 +1,6 @@
 # Fresnica Project Handoff
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 This is the continuation/state document for the shared Fresnica repository. Stable architecture and security rules live in the common contracts; start at the [repository README](../README.md), [`docs/README.md`](README.md), and the [Modern Stellar Core Capability Baseline](development/modern-stellar-core-capability-baseline.md).
 
@@ -44,16 +44,17 @@ Current foundation includes:
 - Protocol-28-ready `stellar-xdr` ahead of Mainnet activation;
 - CAP-71 AddressV2-aware Soroban authorization preimage/hash/signature primitives;
 - direct G-account Ed25519 auth-entry signing and verification;
+- final SEP-53 v1.0.0 exact-message signing/verification as a separate domain with cross-language vectors, protected/external Core/SDK paths, Native Binding API 3, and React Native system-auth/passcode challenge signing for Mobile;
 - fail-closed C-account/custom/delegated authorization;
 - a language-neutral Soroban authorization conformance vector;
 - `CoreClientApi` protected/external auth-entry signing and `invalid-authorization` classification;
-- SDK API v4 auth-entry protected/passcode signing plus external prepare/apply over the shared conformance vector;
-- Process Binding API v2 transport for those SDK v4 Soroban authorization operations, adopted only for the concrete RefPython trusted-host consumer;
+- SDK API v5 preserves the auth-entry protected/passcode plus external prepare/apply contract and adds the separate SEP-53 protected/passcode + prepare/verify message domain over shared conformance vectors;
+- Process Binding API v2 remains the privileged transport for the Soroban authorization operations used by the concrete RefPython trusted-host consumer and now compiles against SDK API v5 without exposing SEP-53 remotely;
 - RefPython Soroban simulation/assembly/review plus source-account and detached Classic G-account authorization/signing/submission semantics over official `stellar-sdk`, with reviewed authorization expiry, exact assembled/authorized-object binding, explicit restore handling, and Testnet submit/status reconciliation;
 - `reference/rust-client` `RpcGateway` plus Soroban prepare/review/authorize/sign/submit semantics over official Protocol-28 `stellar-rpc-client`, keeping Soroban simulation/state/submission on RPC while reusing the existing Horizon-backed Classic signer/threshold lookup for envelope authorization;
 - an opt-in RefPython Ledger Stellar HID provider layered above Core's external Ed25519 prepare/apply boundary, with deterministic SEP-5/APDU/request-binding tests and a successful physical macOS Testnet clear-signing proof using Ledger Stellar app 6.0.3, path `m/44'/148'/0'`, Blind Signing disabled, and transaction `f91abc8bd8af37484bbb0c3c0e933e454df3131bb6b21598715e3af8f2beb4b0`.
 
-The next protocol work should remain **consumer- or provider-driven**: SEP-53 message signing is the next independent Core signing domain; C-account/passkey/smart-account work starts from a concrete provider rather than a speculative universal abstraction.
+The next protocol work remains **consumer- or provider-driven**: Mobile can now consume the SEP-53 message domain for dapp challenges; C-account/passkey/smart-account work starts from a concrete provider rather than a speculative universal abstraction.
 
 ## 3. Security boundary
 
@@ -107,14 +108,14 @@ The repository-level SDK boundary guard lives at `scripts/validate-rust-sdk-boun
 
 ## 7. Immediate next work
 
-1. add SEP-53-aligned message signing as the next independent Core signing domain;
+1. validate the first concrete Mobile dapp challenge/session flow against the SEP-53 Native/React Native contract without moving transport policy into Core;
 2. add a concrete C-account/passkey/smart-account provider only when a real product flow needs it;
 3. continue supply-chain and Backup v1 hardening in parallel;
 4. resume Agent integration only when the upstream exact-envelope signing seam exists.
 
 ## 8. Known repository administration gaps
 
-- `main` branch protection/ruleset is still disabled.
+- The default-branch repository ruleset is active and requires PRs plus the stable required CI, signed/linear history, resolved conversations, and no force-push/deletion.
 - Many historical probe/relay/validation branches remain. The current GitHub connector can list but not delete branch refs, so they require a repository-admin cleanup path outside this connector.
 
 ## 9. Start here next session

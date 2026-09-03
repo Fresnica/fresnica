@@ -10,6 +10,13 @@ pub struct TransactionSigningRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageSigningRequest {
+    pub message_hash: [u8; 32],
+    pub message: Vec<u8>,
+    pub encoded_message: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SorobanAuthorizationSigningRequest {
     pub authorization_hash: [u8; 32],
     pub authorization_entry_xdr: Vec<u8>,
@@ -31,6 +38,11 @@ pub trait ClassicSigner {
             .try_into()
             .expect("Stellar Ed25519 public keys are 32 bytes"))
     }
+}
+
+pub trait MessageSigner {
+    fn public_key(&self) -> &str;
+    fn sign_message(&self, request: &MessageSigningRequest) -> Result<[u8; 64], SignerError>;
 }
 
 pub trait SorobanAuthorizationSigner {
@@ -76,6 +88,16 @@ impl ClassicSigner for SoftwareSigner {
         request: &TransactionSigningRequest,
     ) -> Result<[u8; 64], SignerError> {
         Ok(self.signing_key.sign(&request.transaction_hash).to_bytes())
+    }
+}
+
+impl MessageSigner for SoftwareSigner {
+    fn public_key(&self) -> &str {
+        &self.public_key
+    }
+
+    fn sign_message(&self, request: &MessageSigningRequest) -> Result<[u8; 64], SignerError> {
+        Ok(self.signing_key.sign(&request.message_hash).to_bytes())
     }
 }
 
@@ -125,6 +147,38 @@ impl ClassicSigner for ExternalEd25519Signer {
         &self,
         request: &TransactionSigningRequest,
     ) -> Result<[u8; 64], SignerError> {
+        (self.sign_request)(request)
+    }
+}
+
+type ExternalMessageSigningProvider =
+    dyn Fn(&MessageSigningRequest) -> Result<[u8; 64], SignerError>;
+
+pub struct ExternalMessageEd25519Signer {
+    public_key: String,
+    sign_request: Box<ExternalMessageSigningProvider>,
+}
+
+impl ExternalMessageEd25519Signer {
+    pub fn new<F>(public_key: &str, sign_request: F) -> Result<Self, SignerError>
+    where
+        F: Fn(&MessageSigningRequest) -> Result<[u8; 64], SignerError> + 'static,
+    {
+        let public =
+            PublicKey::from_string(public_key.trim()).map_err(|_| SignerError::InvalidPublicKey)?;
+        Ok(Self {
+            public_key: format!("{public}"),
+            sign_request: Box::new(sign_request),
+        })
+    }
+}
+
+impl MessageSigner for ExternalMessageEd25519Signer {
+    fn public_key(&self) -> &str {
+        &self.public_key
+    }
+
+    fn sign_message(&self, request: &MessageSigningRequest) -> Result<[u8; 64], SignerError> {
         (self.sign_request)(request)
     }
 }

@@ -24,6 +24,8 @@ const REQUIRED_METHODS = [
   'hasSignerSystemAuth',
   'removeSignerSystemAuth',
   'removeSystemAuthDomain',
+  'signMessageWithSystemAuth',
+  'signMessageWithPasscode',
   'signWithSystemAuth',
   'signWithPasscode',
 ];
@@ -32,6 +34,9 @@ const FORBIDDEN_FRAMEWORK_METHODS = [
   'deriveUnlockKey',
   'validateUnlockKey',
   'signTransactionXdr',
+  'signMessage',
+  'prepareMessageSigning',
+  'verifyMessageSignature',
 ];
 
 test('Android adapter targets Native SDK and preserves the reviewed JS surface', async () => {
@@ -48,6 +53,7 @@ test('Android adapter targets Native SDK and preserves the reviewed JS surface',
   for (const method of FORBIDDEN_FRAMEWORK_METHODS) {
     assert.doesNotMatch(source, new RegExp(`fun ${method}\\(`), `forbidden Android framework method ${method}`);
   }
+  assert.match(source, /message\.toByteArray\(Charsets\.UTF_8\)/, 'Android must encode the reviewed dapp message as explicit UTF-8');
 });
 
 
@@ -77,13 +83,14 @@ test('Apple adapter targets Native SDK and preserves the reviewed bridge surface
   assert.doesNotMatch(source, /class FresnicaSignerAuthorization|class FresnicaWalletUnlockKeyStore/);
   assert.match(shim, /RCT_EXTERN_REMAP_MODULE\(FresnicaCore,\s*FresnicaCoreModule,\s*NSObject\)/);
   for (const method of REQUIRED_METHODS) {
-    assert.match(source, new RegExp(`@objc\\(${method}`), `missing Apple framework method ${method}`);
-    assert.match(shim, new RegExp(`RCT_EXTERN_METHOD\\(${method}`), `missing Apple shim method ${method}`);
+    assert.match(source, new RegExp(`@objc\\(${method}(?=[:)])`), `missing Apple framework method ${method}`);
+    assert.match(shim, new RegExp(`RCT_EXTERN_METHOD\\(${method}(?=[:)])`), `missing Apple shim method ${method}`);
   }
   for (const method of FORBIDDEN_FRAMEWORK_METHODS) {
-    assert.doesNotMatch(source, new RegExp(`@objc\\(${method}`), `forbidden Apple framework method ${method}`);
-    assert.doesNotMatch(shim, new RegExp(`RCT_EXTERN_METHOD\\(${method}`), `forbidden Apple shim method ${method}`);
+    assert.doesNotMatch(source, new RegExp(`@objc\\(${method}(?=[:)])`), `forbidden Apple framework method ${method}`);
+    assert.doesNotMatch(shim, new RegExp(`RCT_EXTERN_METHOD\\(${method}(?=[:)])`), `forbidden Apple shim method ${method}`);
   }
+  assert.match(source, /Data\(message\.utf8\)/, 'Apple must encode the reviewed dapp message as explicit UTF-8');
 });
 
 

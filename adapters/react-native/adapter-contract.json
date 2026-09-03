@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "framework": "react-native",
-  "adapterSourceVersion": "0.2.1",
-  "fresnicaNativeSdkVersion": "0.2.1",
-  "nativeBindingApiVersion": 2,
+  "adapterSourceVersion": "0.3.0",
+  "fresnicaNativeSdkVersion": "0.3.0",
+  "nativeBindingApiVersion": 3,
   "jsModuleName": "FresnicaCore",
   "androidHostDependencies": [
     "com.facebook.react:react-android:<frameworkVersion>",

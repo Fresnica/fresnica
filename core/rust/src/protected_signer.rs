@@ -7,10 +7,11 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::{
-    derive_classic_signer, detect_mnemonic_language, sign_soroban_authorization_entry,
-    sign_transaction_envelope, ProtectionCredential, ProtectionError, ProtectionRegistry,
-    SecretStoreError, SignerError, SoftwareSigner, SorobanAuthorizationSigningError,
-    TransactionSigningError, WalletDerivationError, WalletUnlockKey,
+    derive_classic_signer, detect_mnemonic_language, sign_message,
+    sign_soroban_authorization_entry, sign_transaction_envelope, MessageSigningError,
+    ProtectionCredential, ProtectionError, ProtectionRegistry, SecretStoreError, SignerError,
+    SoftwareSigner, SorobanAuthorizationSigningError, TransactionSigningError,
+    WalletDerivationError, WalletUnlockKey,
 };
 
 pub enum ExportedSigningMaterial {
@@ -115,6 +116,22 @@ pub fn sign_protected_transaction_envelope(
     )?;
     sign_transaction_envelope(transaction_envelope, network_passphrase, &signer)?;
     Ok(())
+}
+
+pub fn sign_protected_message(
+    registry: &ProtectionRegistry,
+    protected_envelope: &Value,
+    unlock_key: &WalletUnlockKey,
+    expected_public_key: &str,
+    message: &[u8],
+) -> Result<[u8; 64], ProtectedSigningError> {
+    let signer = unlock_software_signer(
+        registry,
+        protected_envelope,
+        unlock_key,
+        expected_public_key,
+    )?;
+    Ok(sign_message(message, &signer)?)
 }
 
 pub fn sign_protected_soroban_authorization_entry(
@@ -271,6 +288,8 @@ pub enum ProtectedSigningError {
     Unlock(#[from] ProtectedSignerError),
     #[error(transparent)]
     Transaction(#[from] TransactionSigningError),
+    #[error(transparent)]
+    Message(#[from] MessageSigningError),
     #[error(transparent)]
     SorobanAuthorization(#[from] SorobanAuthorizationSigningError),
 }

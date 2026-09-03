@@ -1,0 +1,43 @@
+{
+  "schema": "fresnica-message-signing-v1",
+  "source": "SEP-53 v1.0.0 final official test cases",
+  "prefix_utf8": "Stellar Signed Message:\n",
+  "cases": [
+    {
+      "name": "ascii",
+      "message_encoding": "utf8",
+      "message_utf8": "Hello, World!",
+      "message_hex": "48656c6c6f2c20576f726c6421",
+      "secret": "SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW",
+      "public_key": "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L",
+      "encoded_message_hex": "5374656c6c6172205369676e6564204d6573736167653a0a48656c6c6f2c20576f726c6421",
+      "message_hash_hex": "d52eb59c06bb510d065997ff93077068eed0a486c20215b5e02e1ab0d2ebea5f",
+      "signature_base64": "fO5dbYhXUhBMhe6kId/cuVq/AfEnHRHEvsP8vXh03M1uLpi5e46yO2Q8rEBzu3feXQewcQE5GArp88u6ePK6BA==",
+      "signature_hex": "7cee5d6d885752104c85eea421dfdcb95abf01f1271d11c4bec3fcbd7874dccd6e2e98b97b8eb23b643cac4073bb77de5d07b0710139180ae9f3cbba78f2ba04"
+    },
+    {
+      "name": "japanese",
+      "message_encoding": "utf8",
+      "message_utf8": "こんにちは、世界！",
+      "message_hex": "e38193e38293e381abe381a1e381afe38081e4b896e7958cefbc81",
+      "secret": "SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW",
+      "public_key": "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L",
+      "encoded_message_hex": "5374656c6c6172205369676e6564204d6573736167653a0ae38193e38293e381abe381a1e381afe38081e4b896e7958cefbc81",
+      "message_hash_hex": "7bde4f792e336ed43df42ad66a92b44cb1bc60708e8bee63494c289dee161682",
+      "signature_base64": "CDU265Xs8y3OWbB/56H9jPgUss5G9A0qFuTqH2zs2YDgTm+++dIfmAEceFqB7bhfN3am59lCtDXrCtwH2k1GBA==",
+      "signature_hex": "083536eb95ecf32dce59b07fe7a1fd8cf814b2ce46f40d2a16e4ea1f6cecd980e04e6fbef9d21f98011c785a81edb85f3776a6e7d942b435eb0adc07da4d4604"
+    },
+    {
+      "name": "binary",
+      "message_encoding": "base64",
+      "message_base64": "2zZDP1sa1BVBfLP7TeeMk3sUbaxAkUhBhDiNdrksaFo=",
+      "message_hex": "db36433f5b1ad415417cb3fb4de78c937b146dac4091484184388d76b92c685a",
+      "secret": "SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW",
+      "public_key": "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L",
+      "encoded_message_hex": "5374656c6c6172205369676e6564204d6573736167653a0adb36433f5b1ad415417cb3fb4de78c937b146dac4091484184388d76b92c685a",
+      "message_hash_hex": "460008feac2bccee41de48c2717db5d2e81591f71205dd612c4e8ce7125dea2f",
+      "signature_base64": "VA1+7hefNwv2NKScH6n+Sljj15kLAge+M2wE7fzFOf+L0MMbssA1mwfJZRyyrhBORQRle10X1Dxpx+UOI4EbDQ==",
+      "signature_hex": "540d7eee179f370bf634a49c1fa9fe4a58e3d7990b0207be336c04edfcc539ff8bd0c31bb2c0359b07c9651cb2ae104e4504657b5d17d43c69c7e50e23811b0d"
+    }
+  ]
+}
