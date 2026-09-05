@@ -1,0 +1,119 @@
+name: Temporary Rust client passphrase lifetime patch
+
+on:
+  push:
+    branches:
+      - fix/rust-client-passphrase-lifetime
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/rust-client-passphrase-lifetime
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply surgical passphrase lifetime patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"{path}: expected {count} matches, found {actual}: {old!r}")
+              p.write_text(text.replace(old, new, count))
+
+          replace_exact(
+              "reference/rust-client/src/payment.rs",
+              """    pub fn submit_payment(\n        &self,\n        prepared: &PreparedPayment,\n        passcode: String,\n    ) -> Result<TransactionSubmission, String> {""",
+              """    pub fn submit_payment(\n        &self,\n        prepared: &PreparedPayment,\n        passcode: &str,\n    ) -> Result<TransactionSubmission, String> {""",
+          )
+          replace_exact(
+              "reference/rust-client/src/trustline.rs",
+              """    pub fn submit_trustline(\n        &self,\n        prepared: &PreparedTrustline,\n        passcode: String,\n    ) -> Result<TransactionSubmission, String> {""",
+              """    pub fn submit_trustline(\n        &self,\n        prepared: &PreparedTrustline,\n        passcode: &str,\n    ) -> Result<TransactionSubmission, String> {""",
+          )
+          replace_exact(
+              "reference/rust-client/src/dex.rs",
+              """    pub fn submit_offer(\n        &self,\n        prepared: &PreparedOffer,\n        passcode: String,\n    ) -> Result<TransactionSubmission, String> {""",
+              """    pub fn submit_offer(\n        &self,\n        prepared: &PreparedOffer,\n        passcode: &str,\n    ) -> Result<TransactionSubmission, String> {""",
+          )
+          replace_exact(
+              "reference/rust-client/src/transaction.rs",
+              """    horizon: &HorizonGateway,\n    passcode: String,\n) -> Result<TransactionSubmission, String> {\n    ensure_transaction_not_expired(envelope)?;\n    let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;\n    sign_with_local_ed25519(storage, &authorization, network, envelope, &passcode)?;""",
+              """    horizon: &HorizonGateway,\n    passcode: &str,\n) -> Result<TransactionSubmission, String> {\n    ensure_transaction_not_expired(envelope)?;\n    let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;\n    sign_with_local_ed25519(storage, &authorization, network, envelope, passcode)?;""",
+          )
+          replace_exact(
+              "reference/rust-client/src/transaction.rs",
+              """pub fn sign_transaction_xdr_with_passcode(\n    record: &WalletRecord,\n    network: &str,\n    transaction_xdr: Vec<u8>,\n    passcode: String,\n) -> Result<Vec<u8>, String> {""",
+              """pub fn sign_transaction_xdr_with_passcode(\n    record: &WalletRecord,\n    network: &str,\n    transaction_xdr: Vec<u8>,\n    passcode: &str,\n) -> Result<Vec<u8>, String> {""",
+          )
+          replace_exact(
+              "reference/rust-client/src/transaction.rs",
+              """        .sign_transaction_xdr_with_passcode(\n            protected_json,\n            passcode,\n            record.address.clone(),""",
+              """        .sign_transaction_xdr_with_passcode(\n            protected_json,\n            passcode.to_owned(),\n            record.address.clone(),""",
+          )
+          replace_exact(
+              "reference/rust-client/src/signing_coordination.rs",
+              """        *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_passcode(\n            record,\n            network,\n            transaction_xdr,\n            passcode.to_owned(),\n        )?)?;""",
+              """        *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_passcode(\n            record,\n            network,\n            transaction_xdr,\n            passcode,\n        )?)?;""",
+          )
+
+          sdk = Path("sdk/rust/src/lib.rs")
+          text = sdk.read_text()
+          marker = "    pub fn sign_transaction_xdr_with_passcode("
+          start = text.index(marker)
+          end = text.index("\n    pub fn ", start + len(marker))
+          section = text[start:end]
+          old = """        let envelope = parse_envelope(&envelope_json)?;\n        let passcode = Zeroizing::new(passcode);\n        let core = self.core();"""
+          new = """        let passcode = Zeroizing::new(passcode);\n        let envelope = parse_envelope(&envelope_json)?;\n        let core = self.core();"""
+          if section.count(old) != 1:
+              raise SystemExit("sdk/rust/src/lib.rs: transaction passcode guard pattern changed")
+          section = section.replace(old, new, 1)
+          sdk.write_text(text[:start] + section + text[end:])
+          PY
+
+          rustfmt --edition 2021 --config skip_children=true \
+            reference/rust-client/src/payment.rs \
+            reference/rust-client/src/trustline.rs \
+            reference/rust-client/src/dex.rs \
+            reference/rust-client/src/transaction.rs \
+            reference/rust-client/src/signing_coordination.rs \
+            sdk/rust/src/lib.rs
+
+          git diff --check
+          bash scripts/validate-rust-sdk-boundary.sh
+          cargo test --manifest-path sdk/rust/Cargo.toml
+          cargo test --manifest-path reference/rust-client/Cargo.toml
+
+          echo 'Remaining transaction passcode ownership sites:'
+          rg -n 'passcode: String|passcode\.to_owned\(\)' reference/rust-client/src/{payment,trustline,dex,transaction,signing_coordination}.rs || true
+
+      - name: Commit validated product patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "fresnica-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            reference/rust-client/src/payment.rs \
+            reference/rust-client/src/trustline.rs \
+            reference/rust-client/src/dex.rs \
+            reference/rust-client/src/transaction.rs \
+            reference/rust-client/src/signing_coordination.rs \
+            sdk/rust/src/lib.rs
+          git diff --cached --quiet && { echo 'No product diff produced'; exit 1; }
+          git commit -m "fix(rust-client): borrow transaction passphrases"
+          git push origin HEAD:fix/rust-client-passphrase-lifetime
