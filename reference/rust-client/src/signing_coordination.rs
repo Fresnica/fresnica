@@ -69,7 +69,7 @@ pub fn sign_needed_local_ed25519(
             record,
             network,
             transaction_xdr,
-            passcode.to_owned(),
+            passcode,
         )?)?;
     }
     Ok(())

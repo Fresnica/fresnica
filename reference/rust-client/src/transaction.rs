@@ -247,11 +247,11 @@ pub fn sign_and_submit(
     network: &str,
     envelope: &mut TransactionEnvelope,
     horizon: &HorizonGateway,
-    passcode: String,
+    passcode: &str,
 ) -> Result<TransactionSubmission, String> {
     ensure_transaction_not_expired(envelope)?;
     let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
-    sign_with_local_ed25519(storage, &authorization, network, envelope, &passcode)?;
+    sign_with_local_ed25519(storage, &authorization, network, envelope, passcode)?;
     let network_passphrase = network_passphrase(network)?;
 
     let tx_hash = transaction_hash(envelope, network_passphrase)
@@ -296,7 +296,7 @@ pub fn sign_transaction_xdr_with_passcode(
     record: &WalletRecord,
     network: &str,
     transaction_xdr: Vec<u8>,
-    passcode: String,
+    passcode: &str,
 ) -> Result<Vec<u8>, String> {
     if record.watch_only() || record.secret.is_none() {
         return Err(format!("wallet \"{}\" is watch-only", record.name));
@@ -310,7 +310,7 @@ pub fn sign_transaction_xdr_with_passcode(
     let signed_xdr = FresnicaSdk::new()
         .sign_transaction_xdr_with_passcode(
             protected_json,
-            passcode,
+            passcode.to_owned(),
             record.address.clone(),
             transaction_xdr,
             network_passphrase(network)?.to_owned(),

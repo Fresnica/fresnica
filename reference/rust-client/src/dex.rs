@@ -466,7 +466,7 @@ impl FresnicaClient {
     pub fn submit_offer(
         &self,
         prepared: &PreparedOffer,
-        passcode: String,
+        passcode: &str,
     ) -> Result<TransactionSubmission, String> {
         let mut envelope = prepared.envelope.clone();
         sign_and_submit(
