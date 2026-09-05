@@ -243,8 +243,8 @@ impl FresnicaSdk {
         transaction_xdr: Vec<u8>,
         network_passphrase: String,
     ) -> Result<Vec<u8>, SdkError> {
-        let envelope = parse_envelope(&envelope_json)?;
         let passcode = Zeroizing::new(passcode);
+        let envelope = parse_envelope(&envelope_json)?;
         let core = self.core();
         let unlock_key = core
             .derive_unlock_key(&envelope, passcode.as_str(), &expected_signer_public_key)
