@@ -4,6 +4,7 @@ mod anchor_http;
 pub mod anchor_protocol;
 mod asset;
 pub mod asset_catalog;
+mod balance_state;
 pub mod contacts;
 pub mod dex;
 pub mod horizon_gateway;
@@ -35,6 +36,7 @@ pub use anchor_protocol::{
     AnchorTransferKind, AnchorWithdrawalPayment,
 };
 pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATALOG_LIMIT};
+pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
