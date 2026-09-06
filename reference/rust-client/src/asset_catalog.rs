@@ -106,10 +106,9 @@ impl AssetCatalog {
             });
         }
 
-        let fresh = match fetch(limit) {
-            Ok(entries) => normalize_provider_entries(entries, limit),
-            Err(_) => Vec::new(),
-        };
+        let fresh = fetch(limit)
+            .map(|entries| normalize_provider_entries(entries, limit))
+            .unwrap_or_default();
         if fresh.len() <= 1 {
             return Ok(AssetCatalogSnapshot {
                 entries: cached,
@@ -251,7 +250,7 @@ fn fetch_stellar_expert(limit: usize) -> Result<Vec<AssetCatalogEntry>, String> 
         .get(STELLAR_EXPERT_ASSETS)
         .query("sort", "rating")
         .query("order", "desc")
-        .query("limit", &limit_text)
+        .query("limit", limit_text)
         .call()
         .map_err(|error| format!("asset catalog refresh failed: {error}"))?;
     let payload: Value = response
