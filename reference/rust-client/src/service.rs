@@ -3,6 +3,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::account_state::AccountState;
+use crate::balance_state::AssetBalance;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::storage::{WalletRecord, WalletStorage};
 
@@ -43,7 +44,7 @@ pub struct AccountSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BalanceSnapshot {
     pub wallet: WalletRecord,
-    pub balances: Vec<Value>,
+    pub balances: Vec<AssetBalance>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,11 +129,14 @@ impl FresnicaClient {
     pub fn balances(&self, name: Option<&str>) -> Result<BalanceSnapshot, String> {
         let wallet = self.resolve_wallet(name)?;
         let account = self.gateway.get_account(&wallet.address)?;
-        let balances = account
+        let raw_balances = account
             .get("balances")
             .and_then(Value::as_array)
-            .cloned()
             .ok_or_else(|| "Horizon returned malformed balance data".to_owned())?;
+        let balances = raw_balances
+            .iter()
+            .map(AssetBalance::from_horizon)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(BalanceSnapshot { wallet, balances })
     }
 
