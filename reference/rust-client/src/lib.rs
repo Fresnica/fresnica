@@ -2,6 +2,7 @@ pub mod anchor;
 mod anchor_http;
 pub mod anchor_protocol;
 mod asset;
+pub mod asset_catalog;
 pub mod contacts;
 pub mod dex;
 pub mod horizon_gateway;
@@ -31,6 +32,7 @@ pub use anchor_protocol::{
     AnchorDiscovery, AnchorProtocol, AnchorSep10Challenge, AnchorSep24InteractiveResult,
     AnchorTransferKind, AnchorWithdrawalPayment,
 };
+pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATALOG_LIMIT};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
