@@ -7,6 +7,7 @@ pub mod asset_catalog;
 mod balance_state;
 pub mod contacts;
 pub mod dex;
+mod history_state;
 pub mod horizon_gateway;
 pub mod ledger_authorization;
 pub mod payment;
@@ -43,6 +44,7 @@ pub use dex::{
     OfferRequest, OfferReview, OfferReviewDetails, OfferSide, OpenOffer, OpenOffersSnapshot,
     OrderBookLevel, OrderBookSnapshot, PairTrade, PairTradesSnapshot, PreparedOffer, TradeCandle,
 };
+pub use history_state::{HistoryAsset, HistoryOperation, HistoryOperationKind, HistoryTrustAsset};
 pub use horizon_gateway::{
     balance_asset_label, operation_summary, HorizonGateway, LedgerParameters, SubmissionError,
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,

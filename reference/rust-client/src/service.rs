@@ -6,6 +6,7 @@ use crate::account_state::AccountState;
 use crate::asset_catalog::AssetCatalog;
 use crate::balance_state::AssetBalance;
 use crate::contacts::ContactStore;
+use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction::PendingTransactionStore;
@@ -53,7 +54,7 @@ pub struct BalanceSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistorySnapshot {
     pub wallet: WalletRecord,
-    pub operations: Vec<Value>,
+    pub operations: Vec<HistoryOperation>,
 }
 
 pub struct FresnicaClient {
@@ -170,7 +171,11 @@ impl FresnicaClient {
             return Err("history limit must be from 1 to 200".to_owned());
         }
         let wallet = self.resolve_wallet(name)?;
-        let operations = self.gateway.get_operations(&wallet.address, limit)?;
+        let raw_operations = self.gateway.get_operations(&wallet.address, limit)?;
+        let operations = raw_operations
+            .iter()
+            .map(HistoryOperation::from_horizon)
+            .collect();
         Ok(HistorySnapshot { wallet, operations })
     }
 }
