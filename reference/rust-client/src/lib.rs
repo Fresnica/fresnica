@@ -57,7 +57,9 @@ pub use payment::{
     PreparedPayment,
 };
 pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
-pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
+pub use service::{
+    AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot, NetworkProfile,
+};
 pub use signing_coordination::{
     review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,
     sign_with_local_ed25519,

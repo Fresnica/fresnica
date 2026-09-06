@@ -5,6 +5,34 @@ use serde_json::Value;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::storage::{WalletRecord, WalletStorage};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetworkProfile {
+    network: String,
+    horizon_url: String,
+}
+
+impl NetworkProfile {
+    pub fn for_network(network: &str) -> Result<Self, String> {
+        Ok(Self {
+            network: network.to_owned(),
+            horizon_url: horizon_url(network)?.to_owned(),
+        })
+    }
+
+    pub fn network(&self) -> &str {
+        &self.network
+    }
+
+    pub fn horizon_url(&self) -> &str {
+        &self.horizon_url
+    }
+
+    pub fn with_horizon_url(mut self, horizon_url: &str) -> Result<Self, String> {
+        self.horizon_url = validate_endpoint_url("Horizon", horizon_url)?;
+        Ok(self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccountSnapshot {
     pub wallet: WalletRecord,
@@ -24,23 +52,31 @@ pub struct HistorySnapshot {
 }
 
 pub struct FresnicaClient {
-    network: String,
+    profile: NetworkProfile,
     storage: WalletStorage,
     gateway: HorizonGateway,
 }
 
 impl FresnicaClient {
     pub fn new(home: &Path, network: &str) -> Result<Self, String> {
-        let gateway = HorizonGateway::new(horizon_url(network)?);
+        Self::from_profile(home, NetworkProfile::for_network(network)?)
+    }
+
+    pub fn from_profile(home: &Path, profile: NetworkProfile) -> Result<Self, String> {
+        let gateway = HorizonGateway::new(profile.horizon_url());
         Ok(Self {
-            network: network.to_owned(),
+            profile,
             storage: WalletStorage::new(home)?,
             gateway,
         })
     }
 
     pub fn network(&self) -> &str {
-        &self.network
+        self.profile.network()
+    }
+
+    pub fn network_profile(&self) -> &NetworkProfile {
+        &self.profile
     }
 
     pub fn storage(&self) -> &WalletStorage {
@@ -56,13 +92,13 @@ impl FresnicaClient {
             .storage
             .list()?
             .into_iter()
-            .filter(|record| record.network == self.network)
+            .filter(|record| record.network.as_str() == self.network())
             .collect())
     }
 
     pub fn resolve_wallet(&self, name: Option<&str>) -> Result<WalletRecord, String> {
         let record = self.storage.resolve(name)?;
-        if record.network != self.network {
+        if record.network.as_str() != self.network() {
             return Err(format!(
                 "wallet \"{}\" is configured for {}; invoke with --network {}",
                 record.name, record.network, record.network
@@ -107,6 +143,17 @@ pub fn horizon_url(network: &str) -> Result<&'static str, String> {
         "testnet" => Ok(TESTNET_HORIZON_URL),
         other => Err(format!("unknown network: {other}")),
     }
+}
+
+fn validate_endpoint_url(label: &str, value: &str) -> Result<String, String> {
+    let value = value.trim().trim_end_matches('/');
+    if value.is_empty() {
+        return Err(format!("{label} URL must not be empty"));
+    }
+    if !(value.starts_with("https://") || value.starts_with("http://")) {
+        return Err(format!("{label} URL must start with http:// or https://"));
+    }
+    Ok(value.to_owned())
 }
 
 #[cfg(test)]
@@ -162,5 +209,28 @@ mod tests {
         let wallets = client.wallets().unwrap();
         assert_eq!(wallets.len(), 1);
         assert_eq!(wallets[0].name, "test");
+    }
+
+    #[test]
+    fn network_profile_separates_network_identity_from_provider_endpoints() {
+        let profile = NetworkProfile::for_network("testnet")
+            .unwrap()
+            .with_horizon_url("https://stellar.example/horizon/")
+            .unwrap();
+
+        assert_eq!(profile.network(), "testnet");
+        assert_eq!(profile.horizon_url(), "https://stellar.example/horizon");
+
+        let client = FresnicaClient::from_profile(&temp_home("profile"), profile.clone()).unwrap();
+        assert_eq!(client.network_profile(), &profile);
+    }
+
+    #[test]
+    fn network_profile_rejects_non_http_provider_endpoints() {
+        let error = NetworkProfile::for_network("mainnet")
+            .unwrap()
+            .with_horizon_url("horizon.internal")
+            .unwrap_err();
+        assert_eq!(error, "Horizon URL must start with http:// or https://");
     }
 }
