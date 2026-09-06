@@ -2,6 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::account_state::AccountState;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::storage::{WalletRecord, WalletStorage};
 
@@ -36,7 +37,7 @@ impl NetworkProfile {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccountSnapshot {
     pub wallet: WalletRecord,
-    pub account: Value,
+    pub account: AccountState,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,12 +114,20 @@ impl FresnicaClient {
 
     pub fn account(&self, name: Option<&str>) -> Result<AccountSnapshot, String> {
         let wallet = self.resolve_wallet(name)?;
-        let account = self.gateway.get_account(&wallet.address)?;
+        let raw_account = self.gateway.get_account(&wallet.address)?;
+        let account = AccountState::from_horizon(&raw_account)?;
+        if account.account_id != wallet.address {
+            return Err(format!(
+                "Horizon returned account {} while loading {}",
+                account.account_id, wallet.address
+            ));
+        }
         Ok(AccountSnapshot { wallet, account })
     }
 
     pub fn balances(&self, name: Option<&str>) -> Result<BalanceSnapshot, String> {
-        let AccountSnapshot { wallet, account } = self.account(name)?;
+        let wallet = self.resolve_wallet(name)?;
+        let account = self.gateway.get_account(&wallet.address)?;
         let balances = account
             .get("balances")
             .and_then(Value::as_array)
