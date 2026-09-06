@@ -52,12 +52,15 @@ fn balance_asset(value: &JsonValue) -> Result<BalanceAsset, String> {
             })
         }
         Some("liquidity_pool_shares") => {
-            let raw = text(value, "liquidity_pool_id")
-                .ok_or_else(|| "Horizon liquidity-pool balance is missing liquidity_pool_id".to_owned())?;
+            let raw = text(value, "liquidity_pool_id").ok_or_else(|| {
+                "Horizon liquidity-pool balance is missing liquidity_pool_id".to_owned()
+            })?;
             let liquidity_pool_id = normalize_pool_id(raw)?;
             Ok(BalanceAsset::LiquidityPoolShare { liquidity_pool_id })
         }
-        Some(other) => Err(format!("Horizon returned unsupported balance asset type: {other}")),
+        Some(other) => Err(format!(
+            "Horizon returned unsupported balance asset type: {other}"
+        )),
         None => Err("Horizon balance is missing asset_type".to_owned()),
     }
 }
