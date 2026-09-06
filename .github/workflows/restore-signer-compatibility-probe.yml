@@ -1,0 +1,117 @@
+name: Restore Signer Compatibility Probe
+
+on:
+  push:
+    branches:
+      - verify/rust-client-restore-signer-compatibility
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply restore signer compatibility transform
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          wallet = Path('reference/rust-client/src/wallet.rs')
+          text = wallet.read_text()
+          marker = '\npub enum RevealedSigningMaterial {'
+          assert marker in text
+          helper = '''
+
+/// Revalidate restored protected signing material before it becomes active.
+///
+/// Backup parsing already validates static record shape. This step proves that
+/// protected material decrypts under the current terminal/reference passphrase
+/// and remains bound to the restored account address.
+pub fn validate_restore_signer_compatibility(
+    record: &WalletRecord,
+    passcode: &str,
+) -> Result<(), String> {
+    if record.watch_only() {
+        return Ok(());
+    }
+    verify_passcode(record, passcode)
+        .map_err(|_| "backup does not use the current Fresnica passphrase".to_owned())
+}
+'''
+          text = text.replace(marker, helper + marker, 1)
+
+          test_marker = '''
+    #[test]
+    fn watch_only_registration_uses_sdk_account_identity() {'''
+          assert test_marker in text
+          test = '''
+    #[test]
+    fn restore_signer_compatibility_revalidates_passphrase_and_identity() {
+        let watch = import_watch_record("observer", "testnet", OTHER_PUBLIC).unwrap();
+        validate_restore_signer_compatibility(&watch, "anything").unwrap();
+
+        let protected = import_secret_record("signing", "testnet", SECRET, PASSPHRASE).unwrap();
+        validate_restore_signer_compatibility(&protected, PASSPHRASE).unwrap();
+        assert_eq!(
+            validate_restore_signer_compatibility(&protected, "different passphrase value")
+                .unwrap_err(),
+            "backup does not use the current Fresnica passphrase"
+        );
+
+        let mut mismatched = protected.clone();
+        mismatched.address = OTHER_PUBLIC.to_owned();
+        assert_eq!(
+            validate_restore_signer_compatibility(&mismatched, PASSPHRASE).unwrap_err(),
+            "backup does not use the current Fresnica passphrase"
+        );
+    }
+
+'''
+          text = text.replace(test_marker, '\n' + test + test_marker.lstrip('\n'), 1)
+          wallet.write_text(text)
+
+          lib = Path('reference/rust-client/src/lib.rs')
+          text = lib.read_text()
+          old = '''    reveal_record, validate_app_passcode, verify_passcode, RevealedSigningMaterial,\n'''
+          new = '''    reveal_record, validate_app_passcode, validate_restore_signer_compatibility, verify_passcode,\n    RevealedSigningMaterial,\n'''
+          assert old in text
+          lib.write_text(text.replace(old, new, 1))
+
+          py = Path('reference/python/tests/test_wallet_backup.py')
+          text = py.read_text()
+          old = 'from fresnica.errors import WalletError\n'
+          new = 'from fresnica.errors import InvalidPasswordError, WalletError\n'
+          assert old in text
+          text = text.replace(old, new, 1)
+          addition = '''\n\ndef test_restore_signing_backup_revalidates_current_app_passcode(tmp_path):\n    shared_passcode = "shared-fresnica-passcode"\n    source = WalletManager(MemoryWalletStorage())\n    original = source.import_secret(\n        "source", Keypair.random().secret, shared_passcode, network="testnet"\n    )\n    matching_path = tmp_path / "matching.json"\n    source.backup("source", matching_path)\n\n    target = WalletManager(MemoryWalletStorage())\n    target.import_secret(\n        "existing", Keypair.random().secret, shared_passcode, network="mainnet"\n    )\n    restored = target.restore_backup(\n        matching_path, name="restored", wallet_password=shared_passcode\n    )\n    assert restored.address == original.address\n\n    foreign = WalletManager(MemoryWalletStorage())\n    foreign.import_secret(\n        "foreign", Keypair.random().secret, "foreign-fresnica-passcode", network="testnet"\n    )\n    foreign_path = tmp_path / "foreign.json"\n    foreign.backup("foreign", foreign_path)\n\n    with pytest.raises(\n        InvalidPasswordError, match="Backup does not use the current Fresnica passcode"\n    ):\n        target.restore_backup(\n            foreign_path, name="rejected", wallet_password=shared_passcode\n        )\n'''
+          assert 'test_restore_signing_backup_revalidates_current_app_passcode' not in text
+          py.write_text(text.rstrip() + addition + '\n')
+          PY
+      - name: Format Rust
+        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml
+      - name: Test Rust capability reference
+        run: cargo test --manifest-path reference/rust-client/Cargo.toml
+      - name: Test Python backup behavior
+        working-directory: reference/python
+        shell: bash
+        run: |
+          python3 -m pip install --disable-pip-version-check -q uv
+          uv sync --locked
+          uv run pytest -q tests/test_wallet_backup.py
+      - name: Commit generated verifier state
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/restore-signer-compatibility-probe.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "verify: materialize restore signer compatibility"
+          git push origin HEAD:verify/rust-client-restore-signer-compatibility
