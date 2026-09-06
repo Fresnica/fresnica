@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde::{Deserialize, Serialize};
 
-use crate::storage::WalletStorage;
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Contact {
     pub name: String,
@@ -129,7 +127,7 @@ impl ContactStore {
 }
 
 pub fn resolve_destination(
-    storage: &WalletStorage,
+    store: &ContactStore,
     destination: &str,
     explicit_memo: Option<&str>,
 ) -> Result<ResolvedDestination, String> {
@@ -144,7 +142,6 @@ pub fn resolve_destination(
         }
     }
 
-    let store = ContactStore::for_home(storage.home());
     let Some(contact) = store.find(destination)? else {
         return Ok(ResolvedDestination {
             address: destination.to_owned(),
@@ -269,27 +266,23 @@ mod tests {
     #[test]
     fn destination_resolution_prefers_explicit_memo() {
         let store = store("resolve");
-        let home = store.path.parent().unwrap().to_path_buf();
         store.add("Alice", ALICE, Some("default-memo")).unwrap();
-        let storage = WalletStorage::new(&home).unwrap();
 
-        let resolved = resolve_destination(&storage, "ALICE", None).unwrap();
+        let resolved = resolve_destination(&store, "ALICE", None).unwrap();
         assert_eq!(resolved.address, ALICE);
         assert_eq!(resolved.memo.as_deref(), Some("default-memo"));
         assert_eq!(resolved.contact_name.as_deref(), Some("Alice"));
 
-        let explicit = resolve_destination(&storage, "alice", Some("explicit")).unwrap();
+        let explicit = resolve_destination(&store, "alice", Some("explicit")).unwrap();
         assert_eq!(explicit.memo.as_deref(), Some("explicit"));
     }
 
     #[test]
     fn destination_resolution_does_not_allow_alias_to_shadow_direct_address() {
         let store = store("direct-address");
-        let home = store.path.parent().unwrap().to_path_buf();
         store.add(ALICE, BOB, Some("shadowed-memo")).unwrap();
-        let storage = WalletStorage::new(&home).unwrap();
 
-        let resolved = resolve_destination(&storage, ALICE, Some("direct-memo")).unwrap();
+        let resolved = resolve_destination(&store, ALICE, Some("direct-memo")).unwrap();
         assert_eq!(resolved.address, ALICE);
         assert_eq!(resolved.memo.as_deref(), Some("direct-memo"));
         assert_eq!(resolved.contact_name, None);

@@ -25,6 +25,8 @@ fresnica-client
 
 Direct `fresnica-core` use is intentionally limited to reviewed low-level gaps while routine identity, protection, Reveal/Export and signing semantics go through `fresnica-sdk`. Repository CI enforces that boundary with `scripts/validate-rust-sdk-boundary.sh`.
 
+Network runtime configuration belongs at this capability/client boundary. `NetworkProfile::for_network(...)` supplies the shared defaults; products may override the current Horizon endpoint before constructing `FresnicaClient`. The selected Stellar network remains the cryptographic identity, while provider URLs are replaceable runtime services. Core and the stateless `fresnica-sdk` do not own those URLs.
+
 ## Product use
 
 The current Rust CLI/TUI still consume this crate while they are being extracted into the independent `fresnica-terminal` product repository. Future terminal releases may pin a specific Fresnica shared-repository revision rather than requiring source co-location.

@@ -5,10 +5,12 @@ use stellar_xdr::{
 };
 
 use crate::asset::AssetId;
+use crate::transaction::prepared_classic_authorization_snapshot;
 use crate::{
     account_sequence, balance_stroops, build_operation_envelope, format_stroops,
     minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
-    TransactionSubmission, WalletRecord, DEFAULT_TRUSTLINE_LIMIT, STROOPS_PER_XLM,
+    LedgerAuthorizationSnapshot, TransactionSubmission, WalletRecord, DEFAULT_TRUSTLINE_LIMIT,
+    STROOPS_PER_XLM,
 };
 
 const INT32_MAX: i64 = i32::MAX as i64;
@@ -130,6 +132,7 @@ pub struct OfferReview {
     pub fee_xlm: String,
     pub network: String,
     pub details: OfferReviewDetails,
+    pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -471,6 +474,7 @@ impl FresnicaClient {
         let mut envelope = prepared.envelope.clone();
         sign_and_submit(
             self.storage(),
+            self.pending_transaction_store(),
             &prepared.wallet,
             self.network(),
             &mut envelope,
@@ -489,8 +493,13 @@ impl FresnicaClient {
         price_text: &str,
         allow_trustline: bool,
     ) -> Result<PreparedOffer, String> {
-        let wallet =
-            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let wallet = resolve_write_wallet(
+            self.storage(),
+            self.pending_transaction_store(),
+            self.gateway(),
+            self.network(),
+            wallet_name,
+        )?;
         let base = AssetId::parse(base_text)?;
         let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
@@ -570,6 +579,12 @@ impl FresnicaClient {
             ledger.base_fee_in_stroops,
             None,
         )?;
+        let ledger_authorization = prepared_classic_authorization_snapshot(
+            self.storage(),
+            self.network(),
+            &envelope,
+            &account,
+        )?;
 
         Ok(PreparedOffer {
             review: OfferReview {
@@ -593,6 +608,7 @@ impl FresnicaClient {
                     trustline_asset: adds_trustline.then(|| buying.display()),
                     trustline_limit: adds_trustline.then(|| DEFAULT_TRUSTLINE_LIMIT.to_owned()),
                 },
+                ledger_authorization,
             },
             wallet,
             envelope,
@@ -609,8 +625,13 @@ impl FresnicaClient {
         price_text: &str,
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
-        let wallet =
-            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let wallet = resolve_write_wallet(
+            self.storage(),
+            self.pending_transaction_store(),
+            self.gateway(),
+            self.network(),
+            wallet_name,
+        )?;
         let base = AssetId::parse(base_text)?;
         let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
@@ -666,6 +687,12 @@ impl FresnicaClient {
             ledger.base_fee_in_stroops,
             None,
         )?;
+        let ledger_authorization = prepared_classic_authorization_snapshot(
+            self.storage(),
+            self.network(),
+            &envelope,
+            &account,
+        )?;
 
         Ok(PreparedOffer {
             review: OfferReview {
@@ -689,6 +716,7 @@ impl FresnicaClient {
                     trustline_asset: None,
                     trustline_limit: None,
                 },
+                ledger_authorization,
             },
             wallet,
             envelope,
@@ -701,8 +729,13 @@ impl FresnicaClient {
         offer_id: i64,
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
-        let wallet =
-            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let wallet = resolve_write_wallet(
+            self.storage(),
+            self.pending_transaction_store(),
+            self.gateway(),
+            self.network(),
+            wallet_name,
+        )?;
         let raw_offer = self.gateway().get_offer(offer_id)?;
         ensure_offer_owner(&raw_offer, &wallet)?;
         let selling = AssetId::from_horizon(
@@ -741,6 +774,12 @@ impl FresnicaClient {
             ledger.base_fee_in_stroops,
             None,
         )?;
+        let ledger_authorization = prepared_classic_authorization_snapshot(
+            self.storage(),
+            self.network(),
+            &envelope,
+            &account,
+        )?;
 
         Ok(PreparedOffer {
             review: OfferReview {
@@ -755,6 +794,7 @@ impl FresnicaClient {
                     selling: selling.display(),
                     buying: buying.display(),
                 },
+                ledger_authorization,
             },
             wallet,
             envelope,
