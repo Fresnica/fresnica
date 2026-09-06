@@ -1,0 +1,33 @@
+name: Network Profile Gateway Probe
+
+on:
+  push:
+    branches: [verify/network-profile-only-gateway]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply gateway boundary transform
+        run: python3 .github/network-profile-gateway-transform.py
+      - name: Format Rust
+        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml -- --check
+      - name: Check Rust capability client
+        run: cargo check --manifest-path reference/rust-client/Cargo.toml
+      - name: Commit generated verifier state
+        shell: bash
+        run: |
+          if git diff --quiet -- reference/rust-client/src/transaction.rs reference/rust-client/src/lib.rs; then
+            echo "Verifier state already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reference/rust-client/src/transaction.rs reference/rust-client/src/lib.rs
+          git commit -m "verify: capture network profile gateway boundary"
+          git push origin HEAD:verify/network-profile-only-gateway
