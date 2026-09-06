@@ -1,3 +1,4 @@
+mod account_state;
 pub mod anchor;
 mod anchor_http;
 pub mod anchor_protocol;
@@ -18,6 +19,7 @@ pub mod wallet;
 
 mod service;
 
+pub use account_state::{AccountState, AccountThresholds};
 pub use anchor::{
     get_anchor_customer, put_anchor_customer, AnchorCustomerField, AnchorCustomerFieldStatus,
     AnchorCustomerFile, AnchorCustomerQuery, AnchorCustomerSnapshot, AnchorCustomerStatus,
