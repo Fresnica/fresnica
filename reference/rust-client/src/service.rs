@@ -231,9 +231,6 @@ mod tests {
             .unwrap()
             .with_horizon_url("horizon.internal")
             .unwrap_err();
-        assert_eq!(
-            error,
-            "Horizon URL must start with http:// or https://"
-        );
+        assert_eq!(error, "Horizon URL must start with http:// or https://");
     }
 }
