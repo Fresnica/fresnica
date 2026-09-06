@@ -1,3 +1,4 @@
+mod account_authorization_xdr;
 pub mod anchor;
 mod anchor_http;
 pub mod anchor_protocol;
