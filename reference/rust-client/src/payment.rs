@@ -144,12 +144,13 @@ impl FresnicaClient {
     pub fn prepare_payment(&self, request: &PaymentRequest) -> Result<PreparedPayment, String> {
         let wallet = resolve_write_wallet(
             self.storage(),
+            self.pending_transaction_store(),
             self.gateway(),
             self.network(),
             request.wallet.as_deref(),
         )?;
         let resolved = resolve_destination(
-            self.storage(),
+            self.contact_store(),
             &request.destination,
             request.memo.as_deref(),
         )?;
@@ -174,6 +175,7 @@ impl FresnicaClient {
     ) -> Result<PreparedPayment, String> {
         let current = resolve_write_wallet(
             self.storage(),
+            self.pending_transaction_store(),
             self.gateway(),
             self.network(),
             Some(&wallet.name),
@@ -292,6 +294,7 @@ impl FresnicaClient {
         let mut envelope = prepared.envelope.clone();
         sign_and_submit(
             self.storage(),
+            self.pending_transaction_store(),
             &prepared.wallet,
             self.network(),
             &mut envelope,

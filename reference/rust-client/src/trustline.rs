@@ -87,6 +87,7 @@ impl FresnicaClient {
     ) -> Result<PreparedTrustline, String> {
         let wallet = resolve_write_wallet(
             self.storage(),
+            self.pending_transaction_store(),
             self.gateway(),
             self.network(),
             request.wallet.as_deref(),
@@ -228,6 +229,7 @@ impl FresnicaClient {
         let mut envelope = prepared.envelope.clone();
         sign_and_submit(
             self.storage(),
+            self.pending_transaction_store(),
             &prepared.wallet,
             self.network(),
             &mut envelope,

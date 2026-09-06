@@ -64,18 +64,15 @@ pub fn has_valid_transaction_signature(
     .map_err(|error| format!("unable to verify transaction signature: {error}"))
 }
 
-pub fn resolve_write_wallet(
+pub(crate) fn resolve_write_wallet(
     storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
     horizon: &HorizonGateway,
     network: &str,
     name: Option<&str>,
 ) -> Result<WalletRecord, String> {
     let record = resolve_network_wallet(storage, network, name)?;
-    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(
-        network,
-        &record.address,
-        horizon,
-    )?;
+    pending_transactions.reconcile_and_ensure_clear(network, &record.address, horizon)?;
     Ok(record)
 }
 
@@ -233,8 +230,9 @@ fn ensure_transaction_not_expired_at(
     Ok(())
 }
 
-pub fn sign_and_submit(
+pub(crate) fn sign_and_submit(
     storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
     record: &WalletRecord,
     network: &str,
     envelope: &mut TransactionEnvelope,
@@ -266,7 +264,7 @@ pub fn sign_and_submit(
             Err(format!("Transaction rejected ({tx_hash_hex}): {message}"))
         }
         Err(SubmissionError::Uncertain(message)) => {
-            let persist_result = PendingTransactionStore::for_home(storage.home()).remember(
+            let persist_result = pending_transactions.remember(
                 network,
                 &record.address,
                 &tx_hash_hex,
