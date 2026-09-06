@@ -72,12 +72,12 @@ current provider endpoint
 
 A product may replace Horizon with RPC or another provider without changing which Stellar network a transaction belongs to. Conversely, a configured provider URL/name is not proof that the endpoint actually serves the intended network. When the provider exposes enough network identity/passphrase information to detect a mismatch, the application must fail closed before signing/protocol actions continue rather than sign for one network and treat submission to another as an ordinary transport error.
 
-### 2. Reference runtime profile ownership
+### 2. Rust reference runtime profile ownership
 
-The Rust capability reference exposes a small `NetworkProfile` at the Application Capability/client boundary. A product may start from a known network profile and override the current Horizon endpoint without changing the network identity. Product surfaces own how overrides are collected or persisted; `fresnica-client` owns turning the resolved profile into provider adapters. Fresnica Core and the platform-neutral cryptographic SDK do not own provider URLs.
+The Rust capability reference exposes a small `NetworkProfile` at the `fresnica-client` boundary. A Rust product using this Client may start from a known network profile and override the current Horizon endpoint without changing network identity. Rust product surfaces own how overrides are collected or persisted; `fresnica-client` owns turning the resolved profile into provider adapters. Fresnica Core and the platform-neutral cryptographic SDK do not own provider URLs.
 
 ```text
-Product settings / CLI / Mobile
+Rust product settings / CLI / TUI / Desktop
         |
         v
    NetworkProfile
@@ -89,7 +89,9 @@ Product settings / CLI / Mobile
         +--> RPC / data-provider adapters (as capabilities adopt them)
 ```
 
-The profile should grow only when a real capability consumes another endpoint family. Do not add inert provider switches or URLs merely to predict future architecture. Provider selection remains an implementation detail below semantic capability methods.
+This `NetworkProfile` is a Rust reference-runtime type, not a requirement that Mobile, Web or another platform route its Application Capabilities through `fresnica-client`. Other platform implementations may own equivalent provider configuration in their native application layer while preserving the same Network / Gateway capability semantics.
+
+The profile should grow only when a real Rust Client capability consumes another endpoint family. Do not add inert provider switches or URLs merely to predict future architecture. Provider selection remains an implementation detail below semantic capability methods.
 
 ### 3. Durable and cached state is network-scoped
 
