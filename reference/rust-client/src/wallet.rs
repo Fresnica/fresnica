@@ -1,5 +1,5 @@
 use fresnica_core::detect_mnemonic_language;
-use fresnica_sdk::{FresnicaSdk, SdkError, SdkErrorCode, SdkSigningMaterialKind};
+use fresnica_sdk::{FresnicaSdk, SdkAccountKind, SdkError, SdkErrorCode, SdkSigningMaterialKind};
 use serde_json::{Map, Number, Value};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -26,6 +26,28 @@ pub enum RevealedSigningMaterial {
         index: usize,
         language: String,
     },
+}
+
+pub fn import_watch_record(
+    name: &str,
+    network: &str,
+    address: &str,
+) -> Result<WalletRecord, String> {
+    validate_name_and_network(name, network)?;
+    let identity = FresnicaSdk::new()
+        .parse_account(address.to_owned())
+        .map_err(|_| "invalid Stellar G address".to_owned())?;
+    if identity.kind != SdkAccountKind::Classic {
+        return Err("watch-only wallet requires a Classic G address".to_owned());
+    }
+    Ok(WalletRecord {
+        name: name.to_owned(),
+        address: identity.address,
+        wallet_type: "watch-only".to_owned(),
+        network: network.to_owned(),
+        secret: None,
+        metadata: Map::new(),
+    })
 }
 
 pub fn import_secret_record(
@@ -299,6 +321,30 @@ mod tests {
         "illness spike retreat truth genius clock brain pass fit cave bargain toe";
     const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
     const PASSPHRASE: &str = "correct horse battery staple";
+
+    #[test]
+    fn watch_only_registration_uses_sdk_account_identity() {
+        let record = import_watch_record("observer", "testnet", PUBLIC).unwrap();
+        assert_eq!(record.name, "observer");
+        assert_eq!(record.address, PUBLIC);
+        assert_eq!(record.wallet_type, "watch-only");
+        assert_eq!(record.network, "testnet");
+        assert!(record.secret.is_none());
+        assert!(record.metadata.is_empty());
+
+        assert_eq!(
+            import_watch_record("observer", "testnet", "not-an-address").unwrap_err(),
+            "invalid Stellar G address"
+        );
+        assert_eq!(
+            import_watch_record("", "testnet", PUBLIC).unwrap_err(),
+            "wallet name cannot be empty"
+        );
+        assert_eq!(
+            import_watch_record("observer", "future-net", PUBLIC).unwrap_err(),
+            "unknown network: future-net"
+        );
+    }
 
     #[test]
     fn new_protection_rejects_pin_length_and_accepts_unicode_phrase() {
