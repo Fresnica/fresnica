@@ -29,8 +29,9 @@ impl AccountState {
             medium_threshold,
             high_threshold,
             signers,
-        } = LedgerAccountAuthorization::from_horizon(account)
-            .map_err(|error| format!("Unable to normalize Horizon account authorization: {error}"))?;
+        } = LedgerAccountAuthorization::from_horizon(account).map_err(|error| {
+            format!("Unable to normalize Horizon account authorization: {error}")
+        })?;
 
         Ok(Self {
             account_id,
