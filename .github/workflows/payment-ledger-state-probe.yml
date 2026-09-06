@@ -1,0 +1,62 @@
+name: Payment Ledger State Probe
+
+on:
+  push:
+    branches:
+      - verify/rust-client-payment-ledger-state
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Apply Payment ledger-state transform
+        run: python3 .github/payment-ledger-state-transform.py
+      - name: Format Rust
+        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml
+      - name: Prove Payment no longer consumes provider account JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -n 'ledger_account_state' reference/rust-client/src/payment.rs reference/rust-client/src/service.rs
+          grep -n 'prepared_classic_authorization_snapshot_from_state' reference/rust-client/src/payment.rs
+          if grep -n -E 'account_sequence\(|balance_stroops\(|minimum_balance_stroops\(|\.get\("balances"\)|Horizon returned' reference/rust-client/src/payment.rs; then
+            echo 'Payment still contains provider-shaped account parsing or provider-specific errors' >&2
+            exit 1
+          fi
+          if grep -n 'pub fn ledger_account' reference/rust-client/src/service.rs; then
+            echo 'high-level raw ledger_account escape remains public' >&2
+            exit 1
+          fi
+      - name: Validate Rust SDK boundary
+        run: bash scripts/validate-rust-sdk-boundary.sh
+      - name: Clippy Rust capability reference against known baseline
+        run: >-
+          cargo clippy --manifest-path reference/rust-client/Cargo.toml --all-targets --
+          -D warnings
+          -A dead_code
+          -A clippy::too_many_arguments
+          -A clippy::manual_is_multiple_of
+          -A clippy::if_same_then_else
+          -A clippy::result_unit_err
+      - name: Test Rust capability reference
+        run: cargo test --manifest-path reference/rust-client/Cargo.toml
+      - name: Commit generated verifier state
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/payment-ledger-state-probe.yml
+          rm .github/payment-ledger-state-transform.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "verify: materialize Payment ledger-state migration"
+          git push origin HEAD:verify/rust-client-payment-ledger-state
