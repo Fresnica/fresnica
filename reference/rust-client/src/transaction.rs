@@ -21,12 +21,12 @@ use stellar_xdr::{
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::ledger_authorization::load_classic_ledger_authorization_plan;
-use crate::signing_coordination::sign_with_local_ed25519;
-use crate::{
-    HorizonGateway, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
-    TESTNET_HORIZON_URL,
+use crate::ledger_authorization::{
+    load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
+    LedgerAccountAuthorization, LedgerAuthorizationSnapshot,
 };
+use crate::signing_coordination::{review_ledger_authorization, sign_with_local_ed25519};
+use crate::{HorizonGateway, SubmissionError, WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
 const TX_TIMEOUT_SECONDS: u64 = 30;
@@ -64,26 +64,15 @@ pub fn has_valid_transaction_signature(
     .map_err(|error| format!("unable to verify transaction signature: {error}"))
 }
 
-pub fn network_gateway(network: &str) -> Result<HorizonGateway, String> {
-    Ok(HorizonGateway::new(match network {
-        "mainnet" => MAINNET_HORIZON_URL,
-        "testnet" => TESTNET_HORIZON_URL,
-        other => return Err(format!("unknown network: {other}")),
-    }))
-}
-
-pub fn resolve_write_wallet(
+pub(crate) fn resolve_write_wallet(
     storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
     horizon: &HorizonGateway,
     network: &str,
     name: Option<&str>,
 ) -> Result<WalletRecord, String> {
     let record = resolve_network_wallet(storage, network, name)?;
-    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(
-        network,
-        &record.address,
-        horizon,
-    )?;
+    pending_transactions.reconcile_and_ensure_clear(network, &record.address, horizon)?;
     Ok(record)
 }
 
@@ -241,8 +230,9 @@ fn ensure_transaction_not_expired_at(
     Ok(())
 }
 
-pub fn sign_and_submit(
+pub(crate) fn sign_and_submit(
     storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
     record: &WalletRecord,
     network: &str,
     envelope: &mut TransactionEnvelope,
@@ -274,7 +264,7 @@ pub fn sign_and_submit(
             Err(format!("Transaction rejected ({tx_hash_hex}): {message}"))
         }
         Err(SubmissionError::Uncertain(message)) => {
-            let persist_result = PendingTransactionStore::for_home(storage.home()).remember(
+            let persist_result = pending_transactions.remember(
                 network,
                 &record.address,
                 &tx_hash_hex,
@@ -290,6 +280,19 @@ pub fn sign_and_submit(
             }
         }
     }
+}
+
+pub(crate) fn prepared_classic_authorization_snapshot(
+    storage: &WalletStorage,
+    network: &str,
+    envelope: &TransactionEnvelope,
+    source_account: &Value,
+) -> Result<LedgerAuthorizationSnapshot, String> {
+    let account = LedgerAccountAuthorization::from_horizon(source_account).map_err(|error| {
+        format!("Unable to interpret prepared transaction authorization: {error}")
+    })?;
+    let plan = plan_classic_ledger_authorization(envelope, &[account])?;
+    review_ledger_authorization(storage, &plan, network, envelope)
 }
 
 pub fn sign_transaction_xdr_with_passcode(

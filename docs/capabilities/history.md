@@ -6,7 +6,7 @@ Maturity: **Defined**
 
 History / Activity is the shared capability name for account-scoped wallet activity and transaction/operation history.
 
-It is currently **Defined**, not Normative, because Fresnica does not yet have one stable cross-platform normalized activity DTO. The Rust engineering client still exposes Horizon-shaped operation records, while the Python reference has a richer cache, grouping and presentation model.
+It is currently **Defined**, not Normative, because Fresnica does not yet have one stable cross-platform normalized activity DTO. The Rust engineering client now normalizes its current operation list into provider-neutral `HistoryOperation` records, while the Python reference has a richer cache, grouping and presentation model. That Rust DTO is implementation evidence, not a frozen cross-platform Activity contract.
 
 `Defined` does not mean that existing behavior is discarded. Mature implementation experience is recorded below as **Reference Semantics** so that Mobile, Web, Desktop and later Rust implementations can reuse it, challenge it with concrete evidence, and eventually promote stable parts into the Normative contract.
 

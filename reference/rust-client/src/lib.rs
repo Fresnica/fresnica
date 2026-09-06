@@ -1,10 +1,13 @@
+mod account_state;
 pub mod anchor;
 mod anchor_http;
 pub mod anchor_protocol;
 mod asset;
 pub mod asset_catalog;
+mod balance_state;
 pub mod contacts;
 pub mod dex;
+mod history_state;
 pub mod horizon_gateway;
 pub mod ledger_authorization;
 pub mod payment;
@@ -18,6 +21,7 @@ pub mod wallet;
 
 mod service;
 
+pub use account_state::{AccountState, AccountThresholds};
 pub use anchor::{
     get_anchor_customer, put_anchor_customer, AnchorCustomerField, AnchorCustomerFieldStatus,
     AnchorCustomerFile, AnchorCustomerQuery, AnchorCustomerSnapshot, AnchorCustomerStatus,
@@ -33,31 +37,38 @@ pub use anchor_protocol::{
     AnchorTransferKind, AnchorWithdrawalPayment,
 };
 pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATALOG_LIMIT};
+pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
     OfferRequest, OfferReview, OfferReviewDetails, OfferSide, OpenOffer, OpenOffersSnapshot,
     OrderBookLevel, OrderBookSnapshot, PairTrade, PairTradesSnapshot, PreparedOffer, TradeCandle,
 };
+pub use history_state::{HistoryAsset, HistoryOperation, HistoryOperationKind, HistoryTrustAsset};
 pub use horizon_gateway::{
     balance_asset_label, operation_summary, HorizonGateway, LedgerParameters, SubmissionError,
     MAINNET_HORIZON_URL, TESTNET_HORIZON_URL,
 };
 pub use ledger_authorization::{
     load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
-    satisfied_ed25519_conditions, satisfied_transaction_conditions,
-    AccountAuthorizationRequirement, AuthorizationScope, AuthorizationThreshold, AuthorizationUse,
-    ClassicOperationKind, LedgerAccountAuthorization, LedgerAuthorizationPlan,
-    LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    satisfied_ed25519_conditions, satisfied_transaction_conditions, summarize_ledger_authorization,
+    AccountAuthorizationRequirement, AccountAuthorizationSnapshot, AuthorizationScope,
+    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, ExtraSignerSnapshot,
+    LedgerAccountAuthorization, LedgerAuthorizationPlan, LedgerAuthorizationSnapshot,
+    LedgerSignerAvailability, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    WeightedLedgerSignerSnapshot,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
     PreparedPayment,
 };
 pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
-pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
+pub use service::{
+    AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot, NetworkProfile,
+};
 pub use signing_coordination::{
-    select_local_ed25519_signers, sign_needed_local_ed25519, sign_with_local_ed25519,
+    review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,
+    sign_with_local_ed25519,
 };
 pub use soroban::{
     authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
@@ -67,16 +78,18 @@ pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, B
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
-    minimum_balance_stroops, network_gateway, network_passphrase, parse_positive_stroops,
-    parse_stroops, parse_transaction_xdr, resolve_write_wallet, sign_and_submit,
-    sign_transaction_xdr_with_passcode, TransactionSubmission, STROOPS_PER_XLM,
+    minimum_balance_stroops, network_passphrase, parse_positive_stroops, parse_stroops,
+    parse_transaction_xdr, sign_transaction_xdr_with_passcode, TransactionSubmission,
+    STROOPS_PER_XLM,
 };
+pub(crate) use transaction::{resolve_write_wallet, sign_and_submit};
 pub use trustline::{
     PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,
     TrustlineRequest, TrustlineReview, DEFAULT_TRUSTLINE_LIMIT,
 };
 pub use wallet::{
     attach_mnemonic_record, attach_secret_record, create_mnemonic_record, detach_signer_record,
-    import_mnemonic_record, import_secret_record, reveal_record, verify_passcode,
+    has_app_passcode, import_mnemonic_record, import_secret_record, import_watch_record,
+    reveal_record, validate_app_passcode, validate_restore_signer_compatibility, verify_passcode,
     RevealedSigningMaterial,
 };
