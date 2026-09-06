@@ -3,7 +3,7 @@ use fresnica_sdk::{FresnicaSdk, SdkAccountKind, SdkError, SdkErrorCode, SdkSigni
 use serde_json::{Map, Number, Value};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::storage::WalletRecord;
+use crate::storage::{WalletRecord, WalletStorage};
 
 const MIN_FRESNICA_PASSPHRASE_CHARS: usize = 15;
 
@@ -12,6 +12,28 @@ pub fn validate_new_passphrase(passphrase: &str) -> Result<(), String> {
         return Err(format!(
             "Fresnica passphrase must contain at least {MIN_FRESNICA_PASSPHRASE_CHARS} characters"
         ));
+    }
+    Ok(())
+}
+
+/// Terminal/reference policy helper. This does not define a cross-platform wallet contract.
+pub fn has_app_passcode(storage: &WalletStorage) -> Result<bool, String> {
+    Ok(storage
+        .list()?
+        .iter()
+        .any(|record| !record.watch_only() && record.secret.is_some()))
+}
+
+/// Require one Fresnica passphrase for every local protected software signer.
+///
+/// This preserves the current terminal/reference product policy without moving
+/// protected-envelope semantics out of SDK/Core.
+pub fn validate_app_passcode(storage: &WalletStorage, passcode: &str) -> Result<(), String> {
+    for record in storage.list()? {
+        if record.watch_only() || record.secret.is_none() {
+            continue;
+        }
+        verify_passcode(&record, passcode)?;
     }
     Ok(())
 }
@@ -312,6 +334,8 @@ fn mnemonic_metadata(index: usize, language: &str) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
 
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
@@ -321,6 +345,45 @@ mod tests {
         "illness spike retreat truth genius clock brain pass fit cave bargain toe";
     const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
     const PASSPHRASE: &str = "correct horse battery staple";
+
+    fn temp_storage(label: &str) -> (std::path::PathBuf, WalletStorage) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "fresnica-wallet-policy-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let storage = WalletStorage::new(&home).unwrap();
+        (home, storage)
+    }
+
+    #[test]
+    fn app_passcode_policy_covers_every_local_signing_record() {
+        let (home, storage) = temp_storage("app-passcode");
+        let watch = import_watch_record("observer", "testnet", OTHER_PUBLIC).unwrap();
+        storage.save(&watch, false).unwrap();
+
+        assert!(!has_app_passcode(&storage).unwrap());
+        validate_app_passcode(&storage, "anything").unwrap();
+
+        let secret = import_secret_record("secret", "testnet", SECRET, PASSPHRASE).unwrap();
+        storage.save(&secret, false).unwrap();
+        let mnemonic =
+            import_mnemonic_record("mnemonic", "testnet", MNEMONIC, "", 0, None, PASSPHRASE)
+                .unwrap();
+        storage.save(&mnemonic, false).unwrap();
+
+        assert!(has_app_passcode(&storage).unwrap());
+        validate_app_passcode(&storage, PASSPHRASE).unwrap();
+        assert_eq!(
+            validate_app_passcode(&storage, "different passphrase value").unwrap_err(),
+            "invalid Fresnica passphrase"
+        );
+
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn watch_only_registration_uses_sdk_account_identity() {
