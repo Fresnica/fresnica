@@ -16,7 +16,7 @@ jobs:
       - name: Apply gateway boundary transform
         run: python3 .github/network-profile-gateway-transform.py
       - name: Format Rust
-        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml -- --check
+        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml
       - name: Check Rust capability client
         run: cargo check --manifest-path reference/rust-client/Cargo.toml
       - name: Commit generated verifier state
