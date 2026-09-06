@@ -49,7 +49,7 @@ jobs:
           lib_path.write_text(text.replace(old, new, 1))
           PY
       - name: Format Rust
-        run: cargo fmt --all
+        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml
       - name: Test Rust capability client
         run: cargo test --manifest-path reference/rust-client/Cargo.toml
       - name: Check Rust capability client
