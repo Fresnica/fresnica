@@ -61,7 +61,7 @@ struct AssetCatalogCache {
     entries: Vec<AssetCatalogEntry>,
 }
 
-struct AssetCatalog {
+pub(crate) struct AssetCatalog {
     network: String,
     path: PathBuf,
 }
@@ -72,12 +72,12 @@ impl FresnicaClient {
         limit: usize,
         refresh: bool,
     ) -> Result<AssetCatalogSnapshot, String> {
-        AssetCatalog::new(self.storage().home(), self.network()).load(limit, refresh)
+        self.asset_catalog_store().load(limit, refresh)
     }
 }
 
 impl AssetCatalog {
-    fn new(home: &Path, network: &str) -> Self {
+    pub(crate) fn new(home: &Path, network: &str) -> Self {
         Self {
             network: network.to_owned(),
             path: home.join(format!("asset-catalog-{network}.json")),

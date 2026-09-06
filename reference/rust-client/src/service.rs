@@ -3,9 +3,12 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::account_state::AccountState;
+use crate::asset_catalog::AssetCatalog;
 use crate::balance_state::AssetBalance;
+use crate::contacts::ContactStore;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::storage::{WalletRecord, WalletStorage};
+use crate::transaction::PendingTransactionStore;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkProfile {
@@ -56,6 +59,9 @@ pub struct HistorySnapshot {
 pub struct FresnicaClient {
     profile: NetworkProfile,
     storage: WalletStorage,
+    contacts: ContactStore,
+    pending_transactions: PendingTransactionStore,
+    asset_catalog: AssetCatalog,
     gateway: HorizonGateway,
 }
 
@@ -66,9 +72,16 @@ impl FresnicaClient {
 
     pub fn from_profile(home: &Path, profile: NetworkProfile) -> Result<Self, String> {
         let gateway = HorizonGateway::new(profile.horizon_url());
+        let storage = WalletStorage::new(home)?;
+        let contacts = ContactStore::for_home(home);
+        let pending_transactions = PendingTransactionStore::for_home(home);
+        let asset_catalog = AssetCatalog::new(home, profile.network());
         Ok(Self {
             profile,
-            storage: WalletStorage::new(home)?,
+            storage,
+            contacts,
+            pending_transactions,
+            asset_catalog,
             gateway,
         })
     }
@@ -87,6 +100,18 @@ impl FresnicaClient {
 
     pub(crate) fn gateway(&self) -> &HorizonGateway {
         &self.gateway
+    }
+
+    pub(crate) fn contact_store(&self) -> &ContactStore {
+        &self.contacts
+    }
+
+    pub(crate) fn pending_transaction_store(&self) -> &PendingTransactionStore {
+        &self.pending_transactions
+    }
+
+    pub(crate) fn asset_catalog_store(&self) -> &AssetCatalog {
+        &self.asset_catalog
     }
 
     pub fn wallets(&self) -> Result<Vec<WalletRecord>, String> {

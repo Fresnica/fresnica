@@ -474,6 +474,7 @@ impl FresnicaClient {
         let mut envelope = prepared.envelope.clone();
         sign_and_submit(
             self.storage(),
+            self.pending_transaction_store(),
             &prepared.wallet,
             self.network(),
             &mut envelope,
@@ -492,8 +493,13 @@ impl FresnicaClient {
         price_text: &str,
         allow_trustline: bool,
     ) -> Result<PreparedOffer, String> {
-        let wallet =
-            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let wallet = resolve_write_wallet(
+            self.storage(),
+            self.pending_transaction_store(),
+            self.gateway(),
+            self.network(),
+            wallet_name,
+        )?;
         let base = AssetId::parse(base_text)?;
         let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
@@ -619,8 +625,13 @@ impl FresnicaClient {
         price_text: &str,
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
-        let wallet =
-            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let wallet = resolve_write_wallet(
+            self.storage(),
+            self.pending_transaction_store(),
+            self.gateway(),
+            self.network(),
+            wallet_name,
+        )?;
         let base = AssetId::parse(base_text)?;
         let counter = AssetId::parse(counter_text)?;
         ensure_pair(&base, &counter)?;
@@ -718,8 +729,13 @@ impl FresnicaClient {
         offer_id: i64,
     ) -> Result<PreparedOffer, String> {
         validate_offer_id(offer_id)?;
-        let wallet =
-            resolve_write_wallet(self.storage(), self.gateway(), self.network(), wallet_name)?;
+        let wallet = resolve_write_wallet(
+            self.storage(),
+            self.pending_transaction_store(),
+            self.gateway(),
+            self.network(),
+            wallet_name,
+        )?;
         let raw_offer = self.gateway().get_offer(offer_id)?;
         ensure_offer_owner(&raw_offer, &wallet)?;
         let selling = AssetId::from_horizon(
