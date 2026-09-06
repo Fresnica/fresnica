@@ -15,6 +15,7 @@ pub mod rpc_gateway;
 pub mod signing_coordination;
 pub mod soroban;
 pub mod storage;
+pub mod testnet;
 pub mod transaction;
 pub mod trustline;
 pub mod wallet;
@@ -75,6 +76,7 @@ pub use soroban::{
     submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
 };
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
+pub use testnet::{fund_testnet_wallet, TestnetFunding};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
