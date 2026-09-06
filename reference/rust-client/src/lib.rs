@@ -88,5 +88,6 @@ pub use trustline::{
 pub use wallet::{
     attach_mnemonic_record, attach_secret_record, create_mnemonic_record, detach_signer_record,
     has_app_passcode, import_mnemonic_record, import_secret_record, import_watch_record,
-    reveal_record, validate_app_passcode, verify_passcode, RevealedSigningMaterial,
+    reveal_record, validate_app_passcode, validate_restore_signer_compatibility, verify_passcode,
+    RevealedSigningMaterial,
 };

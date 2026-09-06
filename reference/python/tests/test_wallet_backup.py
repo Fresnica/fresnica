@@ -5,7 +5,7 @@ import stat
 import pytest
 from stellar_sdk import Keypair
 
-from fresnica.errors import WalletError
+from fresnica.errors import InvalidPasswordError, WalletError
 from fresnica.manager import WalletManager
 from fresnica.storage import MemoryWalletStorage
 from fresnica.wallet_backup import BACKUP_FORMAT, BACKUP_VERSION, read_wallet_backup
@@ -154,3 +154,35 @@ def test_restore_rejects_watch_only_record_with_secret_envelope(tmp_path):
 
     with pytest.raises(WalletError, match="watch-only wallet contains signing material"):
         read_wallet_backup(path)
+
+def test_restore_signing_backup_revalidates_current_app_passcode(tmp_path):
+    shared_passcode = "shared-fresnica-passcode"
+    source = WalletManager(MemoryWalletStorage())
+    original = source.import_secret(
+        "source", Keypair.random().secret, shared_passcode, network="testnet"
+    )
+    matching_path = tmp_path / "matching.json"
+    source.backup("source", matching_path)
+
+    target = WalletManager(MemoryWalletStorage())
+    target.import_secret(
+        "existing", Keypair.random().secret, shared_passcode, network="mainnet"
+    )
+    restored = target.restore_backup(
+        matching_path, name="restored", wallet_password=shared_passcode
+    )
+    assert restored.address == original.address
+
+    foreign = WalletManager(MemoryWalletStorage())
+    foreign.import_secret(
+        "foreign", Keypair.random().secret, "foreign-fresnica-passcode", network="testnet"
+    )
+    foreign_path = tmp_path / "foreign.json"
+    foreign.backup("foreign", foreign_path)
+
+    with pytest.raises(
+        InvalidPasswordError, match="Backup does not use the current Fresnica passcode"
+    ):
+        target.restore_backup(
+            foreign_path, name="rejected", wallet_password=shared_passcode
+        )
