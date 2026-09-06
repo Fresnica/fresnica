@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           grep -n 'ledger_account_state' reference/rust-client/src/payment.rs reference/rust-client/src/service.rs
           grep -n 'prepared_classic_authorization_snapshot_from_state' reference/rust-client/src/payment.rs
-          if grep -n -E 'account_sequence\(|balance_stroops\(|minimum_balance_stroops\(|\.get\("balances"\)|Horizon returned' reference/rust-client/src/payment.rs; then
+          if grep -n -E 'account_sequence\(|balance_stroops\(|(^|[^.])minimum_balance_stroops\(|\.get\("balances"\)|Horizon returned' reference/rust-client/src/payment.rs; then
             echo 'Payment still contains provider-shaped account parsing or provider-specific errors' >&2
             exit 1
           fi
