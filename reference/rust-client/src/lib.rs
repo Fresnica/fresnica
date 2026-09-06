@@ -1,5 +1,6 @@
 mod account_state;
 pub mod anchor;
+mod anchor_auth;
 mod anchor_http;
 pub mod anchor_protocol;
 mod asset;
