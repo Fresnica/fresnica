@@ -1,0 +1,60 @@
+name: History Read Model Probe
+
+on:
+  push:
+    branches:
+      - verify/rust-client-history-read-model
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Align implementation status documentation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('docs/capabilities/history.md')
+          text = path.read_text()
+          old = 'It is currently **Defined**, not Normative, because Fresnica does not yet have one stable cross-platform normalized activity DTO. The Rust engineering client still exposes Horizon-shaped operation records, while the Python reference has a richer cache, grouping and presentation model.'
+          new = 'It is currently **Defined**, not Normative, because Fresnica does not yet have one stable cross-platform normalized activity DTO. The Rust engineering client now normalizes its current operation list into provider-neutral `HistoryOperation` records, while the Python reference has a richer cache, grouping and presentation model. That Rust DTO is implementation evidence, not a frozen cross-platform Activity contract.'
+          assert old in text
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Format Rust
+        run: cargo fmt --manifest-path reference/rust-client/Cargo.toml
+      - name: Prove provider-shaped history does not cross Client boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -n 'operations: Vec<HistoryOperation>' reference/rust-client/src/service.rs
+          if grep -n 'operations: Vec<Value>' reference/rust-client/src/service.rs; then
+            echo 'provider-shaped history still crosses FresnicaClient boundary' >&2
+            exit 1
+          fi
+          grep -n 'map(HistoryOperation::from_horizon)' reference/rust-client/src/service.rs
+      - name: Validate Rust SDK boundary
+        run: bash scripts/validate-rust-sdk-boundary.sh
+      - name: Clippy Rust capability reference
+        run: cargo clippy --manifest-path reference/rust-client/Cargo.toml --all-targets -- -D warnings
+      - name: Test Rust capability reference
+        run: cargo test --manifest-path reference/rust-client/Cargo.toml
+      - name: Commit generated verifier state
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/history-read-model-probe.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "verify: materialize typed history read model"
+          git push origin HEAD:verify/rust-client-history-read-model
