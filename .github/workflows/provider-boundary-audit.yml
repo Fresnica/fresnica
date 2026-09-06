@@ -25,3 +25,8 @@ jobs:
           grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' -E 'pub (struct|enum|fn|type|[a-zA-Z_]+:).*(serde_json::Value|JsonValue|Value)|pub [a-zA-Z_]+: (serde_json::Value|JsonValue|Value)' reference/rust-client/src || true
           echo '=== gateway method consumers ==='
           grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' -E '\.gateway\(\)|HorizonGateway' reference/rust-client/src || true
+          echo '=== legacy raw helper consumers ==='
+          for symbol in balance_asset_label operation_summary account_sequence minimum_balance_stroops balance_stroops anchor_transaction_text 'LedgerAccountAuthorization::from_horizon'; do
+            echo "--- ${symbol} ---"
+            grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' -F "${symbol}" reference/rust-client docs || true
+          done
