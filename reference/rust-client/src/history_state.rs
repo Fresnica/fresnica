@@ -123,15 +123,13 @@ impl HistoryOperation {
         let operation_type = text(value, "type").unwrap_or("unknown");
         let kind = match operation_type {
             "payment" => HistoryOperationKind::Payment {
-                from: text_owned(value, "from")
-                    .or_else(|| text_owned(value, "source_account")),
+                from: text_owned(value, "from").or_else(|| text_owned(value, "source_account")),
                 to: text_owned(value, "to"),
                 amount: scalar_owned(value, "amount"),
                 asset: history_asset(value, ""),
             },
             "create_account" => HistoryOperationKind::CreateAccount {
-                funder: text_owned(value, "funder")
-                    .or_else(|| text_owned(value, "source_account")),
+                funder: text_owned(value, "funder").or_else(|| text_owned(value, "source_account")),
                 account: text_owned(value, "account"),
                 starting_balance: scalar_owned(value, "starting_balance"),
             },
@@ -292,10 +290,7 @@ mod tests {
             panic!("expected manage-buy offer");
         };
         assert_eq!(buying_asset.unwrap().identity(), "XLM");
-        assert_eq!(
-            selling_asset.unwrap().identity(),
-            format!("EURT:{ISSUER}")
-        );
+        assert_eq!(selling_asset.unwrap().identity(), format!("EURT:{ISSUER}"));
     }
 
     #[test]
