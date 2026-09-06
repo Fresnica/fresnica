@@ -72,21 +72,40 @@ current provider endpoint
 
 A product may replace Horizon with RPC or another provider without changing which Stellar network a transaction belongs to. Conversely, a configured provider URL/name is not proof that the endpoint actually serves the intended network. When the provider exposes enough network identity/passphrase information to detect a mismatch, the application must fail closed before signing/protocol actions continue rather than sign for one network and treat submission to another as an ordinary transport error.
 
-### 2. Durable and cached state is network-scoped
+### 2. Reference runtime profile ownership
+
+The Rust capability reference exposes a small `NetworkProfile` at the Application Capability/client boundary. A product may start from a known network profile and override the current Horizon endpoint without changing the network identity. Product surfaces own how overrides are collected or persisted; `fresnica-client` owns turning the resolved profile into provider adapters. Fresnica Core and the platform-neutral cryptographic SDK do not own provider URLs.
+
+```text
+Product settings / CLI / Mobile
+        |
+        v
+   NetworkProfile
+        |
+        v
+  FresnicaClient
+        |
+        +--> Horizon adapter (current Classic families)
+        +--> RPC / data-provider adapters (as capabilities adopt them)
+```
+
+The profile should grow only when a real capability consumes another endpoint family. Do not add inert provider switches or URLs merely to predict future architecture. Provider selection remains an implementation detail below semantic capability methods.
+
+### 3. Durable and cached state is network-scoped
 
 Reference tests deliberately reject wallet/network mismatches and keep caches separated by network. This is already a strong cross-capability invariant and should remain true regardless of provider implementation.
 
-### 3. Network context is checked at security-sensitive protocol boundaries
+### 4. Network context is checked at security-sensitive protocol boundaries
 
 The Rust Anchor SEP-10 implementation verifies that server-declared network context, when present, matches the local network configuration before accepting the challenge flow. Transaction hashing/signing likewise uses the selected network passphrase.
 
 This reinforces that network choice is not merely a display setting.
 
-### 4. Submission transport does not decide final transaction truth by timeout alone
+### 5. Submission transport does not decide final transaction truth by timeout alone
 
 A timeout or connection failure after submission may leave final chain outcome uncertain. The Transaction Capability owns the semantic distinction between deterministic rejection and uncertain submission; Network/Gateway must preserve enough information for reconciliation rather than collapsing both into one generic failure.
 
-### 5. Provider families may migrate independently
+### 6. Provider families may migrate independently
 
 The Rust Soroban reference proves that one endpoint family can move to RPC without forcing an all-at-once Classic migration. `RpcGateway` verifies the RPC network passphrase and owns Soroban simulation/submission/status transport, while final Classic account signer/threshold authorization still consumes the established Horizon-backed semantic plan. This hybrid is a staged implementation boundary, not a new shared requirement that products use both providers.
 
