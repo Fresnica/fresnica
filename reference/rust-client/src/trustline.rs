@@ -2,10 +2,11 @@ use serde_json::Value;
 use stellar_xdr::{ChangeTrustOp, OperationBody, TransactionEnvelope};
 
 use crate::asset::AssetId;
+use crate::transaction::prepared_classic_authorization_snapshot;
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
     minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
-    HorizonGateway, TransactionSubmission, WalletRecord,
+    HorizonGateway, LedgerAuthorizationSnapshot, TransactionSubmission, WalletRecord,
 };
 
 pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -69,6 +70,7 @@ pub struct TrustlineReview {
     pub clawback_enabled: Option<bool>,
     pub fee_xlm: String,
     pub network: String,
+    pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +195,12 @@ impl FresnicaClient {
             ledger.base_fee_in_stroops,
             None,
         )?;
+        let ledger_authorization = prepared_classic_authorization_snapshot(
+            self.storage(),
+            self.network(),
+            &envelope,
+            &account,
+        )?;
         let review = TrustlineReview {
             operation,
             wallet_name: wallet.name.clone(),
@@ -203,6 +211,7 @@ impl FresnicaClient {
             clawback_enabled,
             fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
             network: wallet.network.clone(),
+            ledger_authorization,
         };
         Ok(PreparedTrustline {
             review,

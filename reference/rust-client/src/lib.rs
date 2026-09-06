@@ -45,10 +45,12 @@ pub use horizon_gateway::{
 };
 pub use ledger_authorization::{
     load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
-    satisfied_ed25519_conditions, satisfied_transaction_conditions,
-    AccountAuthorizationRequirement, AuthorizationScope, AuthorizationThreshold, AuthorizationUse,
-    ClassicOperationKind, LedgerAccountAuthorization, LedgerAuthorizationPlan,
-    LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    satisfied_ed25519_conditions, satisfied_transaction_conditions, summarize_ledger_authorization,
+    AccountAuthorizationRequirement, AccountAuthorizationSnapshot, AuthorizationScope,
+    AuthorizationThreshold, AuthorizationUse, ClassicOperationKind, ExtraSignerSnapshot,
+    LedgerAccountAuthorization, LedgerAuthorizationPlan, LedgerAuthorizationSnapshot,
+    LedgerSignerAvailability, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
+    WeightedLedgerSignerSnapshot,
 };
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
@@ -57,7 +59,8 @@ pub use payment::{
 pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
 pub use service::{AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot};
 pub use signing_coordination::{
-    select_local_ed25519_signers, sign_needed_local_ed25519, sign_with_local_ed25519,
+    review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,
+    sign_with_local_ed25519,
 };
 pub use soroban::{
     authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,

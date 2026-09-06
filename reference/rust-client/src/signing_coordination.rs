@@ -3,14 +3,33 @@ use std::collections::{BTreeMap, BTreeSet};
 use stellar_xdr::TransactionEnvelope;
 
 use crate::ledger_authorization::{
-    satisfied_transaction_conditions, LedgerAuthorizationPlan, LedgerSignerCondition,
-    LedgerSignerKind, WeightedLedgerSigner,
+    satisfied_transaction_conditions, summarize_ledger_authorization, LedgerAuthorizationPlan,
+    LedgerAuthorizationSnapshot, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction::{
     network_passphrase, parse_transaction_xdr, sign_transaction_xdr_with_passcode,
-    transaction_xdr_bytes,
+    transaction_hash_bytes, transaction_xdr_bytes,
 };
+
+pub fn review_ledger_authorization(
+    storage: &WalletStorage,
+    plan: &LedgerAuthorizationPlan,
+    network: &str,
+    envelope: &TransactionEnvelope,
+) -> Result<LedgerAuthorizationSnapshot, String> {
+    let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase(network)?)?;
+    let local_ed25519_keys = local_signing_records(storage, network)?
+        .into_keys()
+        .collect::<BTreeSet<_>>();
+    let transaction_hash = hex(&transaction_hash_bytes(envelope, network)?);
+    Ok(summarize_ledger_authorization(
+        plan,
+        &satisfied,
+        &local_ed25519_keys,
+        transaction_hash,
+    ))
+}
 
 pub fn sign_with_local_ed25519(
     storage: &WalletStorage,
@@ -163,6 +182,15 @@ fn best_local_signer<'a>(
                 && !current.contains(&signer.condition)
         })
         .max_by_key(|signer| signer.weight)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(&mut output, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    output
 }
 
 #[cfg(test)]
