@@ -26,10 +26,7 @@ use crate::ledger_authorization::{
     LedgerAccountAuthorization, LedgerAuthorizationSnapshot,
 };
 use crate::signing_coordination::{review_ledger_authorization, sign_with_local_ed25519};
-use crate::{
-    HorizonGateway, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
-    TESTNET_HORIZON_URL,
-};
+use crate::{HorizonGateway, SubmissionError, WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
 const TX_TIMEOUT_SECONDS: u64 = 30;
@@ -65,14 +62,6 @@ pub fn has_valid_transaction_signature(
         signer_public_key,
     )
     .map_err(|error| format!("unable to verify transaction signature: {error}"))
-}
-
-pub fn network_gateway(network: &str) -> Result<HorizonGateway, String> {
-    Ok(HorizonGateway::new(match network {
-        "mainnet" => MAINNET_HORIZON_URL,
-        "testnet" => TESTNET_HORIZON_URL,
-        other => return Err(format!("unknown network: {other}")),
-    }))
 }
 
 pub fn resolve_write_wallet(
