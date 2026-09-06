@@ -38,6 +38,21 @@ pub fn validate_app_passcode(storage: &WalletStorage, passcode: &str) -> Result<
     Ok(())
 }
 
+/// Revalidate restored protected signing material before it becomes active.
+///
+/// Backup parsing already validates static record shape. This step proves that
+/// protected material decrypts under the current terminal/reference passphrase
+/// and remains bound to the restored account address.
+pub fn validate_restore_signer_compatibility(
+    record: &WalletRecord,
+    passcode: &str,
+) -> Result<(), String> {
+    if record.watch_only() {
+        return Ok(());
+    }
+    verify_passcode(record, passcode)
+        .map_err(|_| "backup does not use the current Fresnica passphrase".to_owned())
+}
 pub enum RevealedSigningMaterial {
     Secret {
         secret: Zeroizing<String>,
@@ -383,6 +398,27 @@ mod tests {
         );
 
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn restore_signer_compatibility_revalidates_passphrase_and_identity() {
+        let watch = import_watch_record("observer", "testnet", OTHER_PUBLIC).unwrap();
+        validate_restore_signer_compatibility(&watch, "anything").unwrap();
+
+        let protected = import_secret_record("signing", "testnet", SECRET, PASSPHRASE).unwrap();
+        validate_restore_signer_compatibility(&protected, PASSPHRASE).unwrap();
+        assert_eq!(
+            validate_restore_signer_compatibility(&protected, "different passphrase value")
+                .unwrap_err(),
+            "backup does not use the current Fresnica passphrase"
+        );
+
+        let mut mismatched = protected.clone();
+        mismatched.address = OTHER_PUBLIC.to_owned();
+        assert_eq!(
+            validate_restore_signer_compatibility(&mismatched, PASSPHRASE).unwrap_err(),
+            "backup does not use the current Fresnica passphrase"
+        );
     }
 
     #[test]
