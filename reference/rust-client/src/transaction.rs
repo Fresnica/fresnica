@@ -21,8 +21,11 @@ use stellar_xdr::{
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::ledger_authorization::load_classic_ledger_authorization_plan;
-use crate::signing_coordination::sign_with_local_ed25519;
+use crate::ledger_authorization::{
+    load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
+    LedgerAccountAuthorization, LedgerAuthorizationSnapshot,
+};
+use crate::signing_coordination::{review_ledger_authorization, sign_with_local_ed25519};
 use crate::{
     HorizonGateway, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
     TESTNET_HORIZON_URL,
@@ -290,6 +293,19 @@ pub fn sign_and_submit(
             }
         }
     }
+}
+
+pub(crate) fn prepared_classic_authorization_snapshot(
+    storage: &WalletStorage,
+    network: &str,
+    envelope: &TransactionEnvelope,
+    source_account: &Value,
+) -> Result<LedgerAuthorizationSnapshot, String> {
+    let account = LedgerAccountAuthorization::from_horizon(source_account).map_err(|error| {
+        format!("Unable to interpret prepared transaction authorization: {error}")
+    })?;
+    let plan = plan_classic_ledger_authorization(envelope, &[account])?;
+    review_ledger_authorization(storage, &plan, network, envelope)
 }
 
 pub fn sign_transaction_xdr_with_passcode(

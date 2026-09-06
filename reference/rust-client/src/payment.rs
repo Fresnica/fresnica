@@ -8,10 +8,12 @@ use stellar_xdr::{
 };
 
 use crate::asset::AssetId;
+use crate::transaction::prepared_classic_authorization_snapshot;
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope_with_memo, format_stroops,
     minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_write_wallet,
-    sign_and_submit, FresnicaClient, LedgerParameters, TransactionSubmission, WalletRecord,
+    sign_and_submit, FresnicaClient, LedgerAuthorizationSnapshot, LedgerParameters,
+    TransactionSubmission, WalletRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +130,7 @@ pub struct PaymentReview {
     pub fee_xlm: String,
     pub network: String,
     pub memo: Option<PaymentMemoReview>,
+    pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +254,12 @@ impl FresnicaClient {
             ledger.base_fee_in_stroops,
             memo_xdr,
         )?;
+        let ledger_authorization = prepared_classic_authorization_snapshot(
+            self.storage(),
+            self.network(),
+            &envelope,
+            &account,
+        )?;
         let review = PaymentReview {
             operation: if create_destination {
                 PaymentOperation::CreateAccount
@@ -266,6 +275,7 @@ impl FresnicaClient {
             fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
             network: current.network.clone(),
             memo: memo.review(),
+            ledger_authorization,
         };
         Ok(PreparedPayment {
             review,
