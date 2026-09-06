@@ -1,0 +1,65 @@
+name: Watch-only Registration Probe
+
+on:
+  push:
+    branches:
+      - verify/watch-only-registration
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Apply watch-only registration transform
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          wallet_path = Path('reference/rust-client/src/wallet.rs')
+          text = wallet_path.read_text()
+          old = 'use fresnica_sdk::{FresnicaSdk, SdkError, SdkErrorCode, SdkSigningMaterialKind};'
+          new = 'use fresnica_sdk::{\n    FresnicaSdk, SdkAccountKind, SdkError, SdkErrorCode, SdkSigningMaterialKind,\n};'
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          marker = '''pub fn import_secret_record(\n'''
+          addition = '''pub fn import_watch_record(\n    name: &str,\n    network: &str,\n    address: &str,\n) -> Result<WalletRecord, String> {\n    validate_name_and_network(name, network)?;\n    let identity = FresnicaSdk::new()\n        .parse_account(address.to_owned())\n        .map_err(|_| "invalid Stellar G address".to_owned())?;\n    if identity.kind != SdkAccountKind::Classic {\n        return Err("watch-only wallet requires a Classic G address".to_owned());\n    }\n    Ok(WalletRecord {\n        name: name.to_owned(),\n        address: identity.address,\n        wallet_type: "watch-only".to_owned(),\n        network: network.to_owned(),\n        secret: None,\n        metadata: Map::new(),\n    })\n}\n\n'''
+          assert marker in text
+          text = text.replace(marker, addition + marker, 1)
+
+          test_marker = '''    #[test]\n    fn new_protection_rejects_pin_length_and_accepts_unicode_phrase() {\n'''
+          test = '''    #[test]\n    fn watch_only_registration_uses_sdk_account_identity() {\n        let record = import_watch_record("observer", "testnet", PUBLIC).unwrap();\n        assert_eq!(record.name, "observer");\n        assert_eq!(record.address, PUBLIC);\n        assert_eq!(record.wallet_type, "watch-only");\n        assert_eq!(record.network, "testnet");\n        assert!(record.secret.is_none());\n        assert!(record.metadata.is_empty());\n\n        assert_eq!(\n            import_watch_record("observer", "testnet", "not-an-address").unwrap_err(),\n            "invalid Stellar G address"\n        );\n        assert_eq!(\n            import_watch_record("", "testnet", PUBLIC).unwrap_err(),\n            "wallet name cannot be empty"\n        );\n        assert_eq!(\n            import_watch_record("observer", "future-net", PUBLIC).unwrap_err(),\n            "unknown network: future-net"\n        );\n    }\n\n'''
+          assert test_marker in text
+          text = text.replace(test_marker, test + test_marker, 1)
+          wallet_path.write_text(text)
+
+          lib_path = Path('reference/rust-client/src/lib.rs')
+          text = lib_path.read_text()
+          old = '''    attach_mnemonic_record, attach_secret_record, create_mnemonic_record, detach_signer_record,\n    import_mnemonic_record, import_secret_record, reveal_record, verify_passcode,\n'''
+          new = '''    attach_mnemonic_record, attach_secret_record, create_mnemonic_record, detach_signer_record,\n    import_mnemonic_record, import_secret_record, import_watch_record, reveal_record, verify_passcode,\n'''
+          assert old in text
+          lib_path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Format Rust
+        run: cargo fmt --all
+      - name: Test Rust capability client
+        run: cargo test --manifest-path reference/rust-client/Cargo.toml
+      - name: Check Rust capability client
+        run: cargo check --manifest-path reference/rust-client/Cargo.toml
+      - name: Commit generated verifier state
+        shell: bash
+        run: |
+          rm .github/workflows/watch-only-registration-probe.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "verify: materialize watch-only registration ownership"
+          git push origin HEAD:verify/watch-only-registration
