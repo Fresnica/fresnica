@@ -1,0 +1,27 @@
+name: Rust Client Provider Boundary Audit
+
+on:
+  push:
+    branches:
+      - verify/rust-client-provider-boundary-audit
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show raw/provider references
+        shell: bash
+        run: |
+          set -eu
+          echo '=== ledger_account ==='
+          grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' 'ledger_account' reference/rust-client || true
+          echo '=== public Horizon/provider surface ==='
+          grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' -E 'pub (mod horizon_gateway|use horizon_gateway|fn horizon_url|fn ledger_account)|pub struct HorizonGateway|pub fn (operation_summary|balance_asset_label)' reference/rust-client || true
+          echo '=== serde_json Value in public declarations ==='
+          grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' -E 'pub (struct|enum|fn|type|[a-zA-Z_]+:).*(serde_json::Value|JsonValue|Value)|pub [a-zA-Z_]+: (serde_json::Value|JsonValue|Value)' reference/rust-client/src || true
+          echo '=== gateway method consumers ==='
+          grep -R -n --exclude-dir=target --exclude='provider-boundary-audit.yml' -E '\.gateway\(\)|HorizonGateway' reference/rust-client/src || true
