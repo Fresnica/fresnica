@@ -2,48 +2,44 @@
 
 ## Status
 
-This document defines what Fresnica platforms may implement independently and what they must keep semantically compatible.
-
-It is intentionally implementation-neutral.
+This document defines the default runtime ownership for first-party Fresnica products and the semantic compatibility rule for platforms that require an independent implementation.
 
 ## 1. Principle
 
-> **Unify semantics, not source code. Unify contracts, not UI.**
+> **Share first-party native Application Client behavior; keep Capability contracts authoritative; keep UI and platform mechanisms local.**
 
-A conforming Fresnica product may implement Application Capabilities using the libraries and runtime architecture appropriate to that platform.
+Fresnica originally standardized semantics while allowing every platform to implement Application Capabilities independently. That remains a valid fallback for runtimes that cannot reasonably consume the shared Client, but it is no longer the default for first-party native products.
 
-Examples:
+The target is:
 
 ```text
-Rust terminal product (`fresnica-terminal`)
+Rust terminal product
   Application Flows
-      -> `fresnica-client` Capability implementation
-      -> `fresnica-sdk` / Rust Core
+      -> shared Fresnica Application Client
+      -> SDK / Core + DataProvider / Repository ports
 
 Mobile
   Feature-first Application Flows
-      -> Mobile Capability implementations
-      -> Stellar JS SDK / Mobile gateways / repositories
-      -> Fresnica Native SDK for Core-owned security operations
-
-Web
-  Web Flows
-      -> JavaScript/WASM Capability implementations
-      -> browser/network infrastructure
-      -> Fresnica WASM/Core security surface where applicable
+      -> Application Binding / FFI
+      -> shared Fresnica Application Client
+      -> SDK / Core + DataProvider / Repository ports
 
 Desktop
-  Desktop Flows
-      -> Rust/Swift/Kotlin/other reviewed implementation
-      -> platform secure storage and network mechanisms
-      -> Fresnica SDK/Core security surface
+  Product Flows
+      -> shared Fresnica Application Client directly or through a native binding
+
+Web / unsupported runtime
+  Product Flows
+      -> conforming Capability implementation
+      -> browser/runtime infrastructure
+      -> Fresnica security surface where applicable
 ```
 
-No product is required to link the Rust `fresnica-client` crate merely to be Fresnica-compatible.
+See [Shared Application Client Boundary](decisions/shared-application-client.md).
 
-## 2. What a conforming Capability implementation must preserve
+## 2. Semantic authority
 
-For every `Normative` Capability it implements, a platform **must** preserve the shared contract's:
+For every `Normative` Capability it implements, a product must preserve the shared contract's:
 
 - capability identity/name;
 - domain identities and canonical forms;
@@ -56,30 +52,44 @@ For every `Normative` Capability it implements, a platform **must** preserve the
 - cross-capability relationships;
 - conformance fixtures/examples where available.
 
-Equivalent semantic requests must have equivalent wallet meaning even when the internal SDK calls are different. For a `Defined` Capability, implementations must preserve its agreed boundary/security invariants while remaining free to challenge or refine its Reference Semantics.
+The shared Rust Client is an implementation of these contracts, not a replacement for them. A Rust-internal class/module/type is not automatically normative simply because multiple native products reuse it.
 
-## 3. What platforms may choose independently
+## 3. First-party native default
 
-A platform may independently choose:
+CLI/TUI, Mobile and future native Desktop products should reuse a suitable shared Client capability rather than maintaining a second implementation of the same chain/application semantics.
+
+A first-party native product may diverge only for a concrete platform reason, such as:
+
+- the Client cannot run in the target runtime;
+- a platform API requires a materially different mechanism;
+- the shared capability is not yet mature enough for that product;
+- the independent implementation is being used deliberately as conformance/evidence work.
+
+Such divergence should be explicit and conformance-tested rather than becoming an accidental permanent fork.
+
+## 4. What products still choose independently
+
+The shared Client does not standardize:
 
 - UI framework and navigation;
 - Flow/Feature directory structure;
-- Stellar Rust SDK vs Stellar JS SDK vs another suitable SDK;
-- Horizon/RPC/Portfolio transport library;
-- HTTP stack;
-- persistence engine and cache layout;
-- dependency injection mechanism;
-- state library;
-- secure-storage implementation;
-- biometric/system-auth mechanism;
-- browser/deep-link/WalletConnect/provider transport;
-- language-specific class/function names.
+- screen state management;
+- system-auth UI and OS lifecycle;
+- secure-storage implementation mechanics;
+- notifications and deep links;
+- browser/WalletConnect/provider transport that belongs to a product Flow;
+- packaging and application update mechanisms.
 
-These choices are mechanisms, not shared wallet semantics.
+Below the Client, concrete infrastructure adapters may also differ while satisfying the same semantic port:
 
-## 4. Fresnica SDK/Core dependency rule
+- filesystem vs SQLite/Realm/native repository;
+- Horizon vs RPC vs future data/index provider for a capability family;
+- HTTP/runtime implementation;
+- retry/backoff policy when it does not change shared transaction truth semantics.
 
-When an operation is security/cryptography-authoritative in Fresnica Core, a platform must call the appropriate SDK/Core operation rather than recreating it in application code.
+## 5. SDK/Core dependency rule
+
+When an operation is security/cryptography-authoritative in Fresnica Core, the Client or product must call the appropriate SDK/Core operation rather than recreate it in application code.
 
 Examples include:
 
@@ -90,73 +100,124 @@ Examples include:
 - signature verification;
 - other operations explicitly assigned to Core by the security contract.
 
-A platform Stellar SDK may still build transactions, query network state or implement protocol transport where the Capability contract permits it. SDK convenience types/functions must not silently rewrite shared domain identity: for example, issued-asset code case must round-trip exactly when protocol-valid. If the SDK normalizes such input, the platform adapter must use a lower-level exact path or reject explicitly.
+The Application Client may depend on SDK/Core. SDK/Core must not depend on the Application Client, DataProvider endpoints or repositories.
 
-## 5. Rust reference implementation
+The existing Native SDK binding remains a security binding over `fresnica-sdk`; it is not the Mobile Application Client binding.
 
-`reference/rust-client` is the current reference implementation for many Application Capabilities used by CLI/TUI.
+## 6. Rust Application Client
 
-Its roles are:
+`reference/rust-client` is the current reusable Rust implementation for many Application Capabilities used by CLI/TUI. Its Cargo package is already `fresnica-client`, but its source placement still reflects its origin as a reference implementation.
 
-1. reusable Rust application behavior;
+Its target roles are:
+
+1. shared first-party native Application Capability implementation;
 2. executable reference for capability semantics;
-3. source of regression/conformance cases where useful.
+3. owner of provider-neutral application DTOs and orchestration;
+4. source of regression/conformance cases where useful.
 
-Its internal Rust APIs, class/module names and storage/network implementation are not automatically part of the cross-platform contract.
+Before promoting it as a Mobile runtime dependency, remove current implementation accidents from its public construction boundary:
 
-Do not copy implementation accidents into the specification solely because the Rust reference currently does them that way.
+- filesystem `WalletStorage(home)` must become a concrete repository adapter rather than the universal persistence contract;
+- provider/runtime ownership must support the proven asynchronous RPC path without internal `block_on`;
+- raw provider response shapes must terminate below public Client APIs;
+- endpoint configuration must remain separate from cryptographic network identity.
 
-## 6. Mobile implementation
+Account and Balance typed read models are the first provider-normalization slices. History/Activity is intentionally not treated as a simple follow-on because it requires stable index/history semantics.
 
-Mobile may implement a normative Capability in TypeScript/JavaScript using the Stellar JS SDK plus Mobile-owned repositories/gateways, while delegating Core-owned security operations to the Fresnica Native SDK.
+## 7. Mobile target
 
-For example:
+Mobile should not copy the Rust module tree into React Native/TypeScript. It should consume a separate versioned **Application Binding / FFI** whose DTOs and operations expose suitable Client capabilities.
 
 ```text
-Mobile Send Feature
-      |
-      v
-Send Flow
-      |
-      +--> Mobile Payment Capability implementation
-      |      -> Stellar JS SDK / Stellar Gateway
-      |
-      +--> Mobile Signing Coordination
-             -> platform System Auth policy
-             -> Fresnica Native SDK / Core
+Mobile Feature / Flow
+        |
+        v
+Application Binding / FFI
+        |
+        v
+Fresnica Application Client
+   |                  |
+   v                  v
+SDK / Core       DataProvider / Repository
 ```
 
-This is conforming if Payment/Transaction/Signer semantics match the shared contracts.
+The existing `FresnicaSdkApi` / Native SDK package retains its security role:
 
-Mobile must not be forced to mirror Rust module structure merely for visual symmetry.
+```text
+Mobile platform security helper
+        |
+        v
+Native SDK binding -> SDK -> Core
+```
 
-## 7. Defined capabilities and platform innovation
+Application FFI and Native SDK security FFI may ship in the same product distribution, but they require separate authority and versioning. Do not add Account/Balance/network/persistence APIs to `FresnicaSdkApi` merely because that binding already exists.
 
-A `Defined` Capability deliberately leaves detailed implementation open.
+Mobile remains authoritative for:
 
-Example: `Dapp Interaction` currently standardizes the name, purpose and security boundary, not one universal transport API.
+- screens/navigation and Feature orchestration;
+- dapp peer/origin/session policy not defined by the protocol;
+- system-auth UI and platform lifecycle;
+- platform secure-storage mechanics;
+- collection of user configuration such as custom provider endpoints.
 
-Therefore Mobile may implement WalletConnect/deep-link/in-app-browser behavior while Web uses an extension/browser bridge and Desktop uses another mechanism.
+The Client remains authoritative for reusable application semantics exposed through the Application Binding.
 
-Once real implementations reveal stable common semantics, any platform may propose promotion or extension of the shared contract.
+## 8. DataProvider rule
 
-## 8. Capability evolution
+Data providers are Client infrastructure, not product business APIs.
 
-A platform is allowed to implement a `Defined` capability before the common contract is mature. Once the implementation produces useful evidence, it should feed that evidence back into the shared documentation rather than silently creating a permanent platform-only semantic fork.
+```text
+Application Capability
+       |
+       v
+provider-neutral Client model
+       |
+       v
+DataProvider adapter
+   +--> Horizon
+   +--> RPC
+   +--> future data/index provider
+```
 
-The implementation may live in a separate repository. For example, `fresnica-mobile` can submit an evidence/contract PR here while keeping its product source in its own repository.
+Provider families may migrate independently. A product should not choose one global `provider=horizon|rpc` mode.
 
-The single governing contribution/evidence/versioning rules live in [`application-capabilities.md` §9](application-capabilities.md#9-capability-evolution); do not maintain a second checklist here.
+A provider endpoint is not a Stellar network identity. The selected network/passphrase remains security-significant even when a custom Horizon/RPC endpoint is supplied.
 
-The acceptance rule remains:
+## 9. Repository rule
 
-> **Promote stable semantics into the specification; keep platform mechanisms local.**
+Application persistence must be expressed independently from Terminal's current filesystem layout before Mobile uses the shared Client.
 
-A mature platform implementation can therefore lead the common specification rather than waiting for the Rust/Python references to invent every capability first. A useful PR may add Reference Semantics without immediately promoting the capability to Normative.
+The semantic repository boundary should preserve wallet/application invariants while allowing concrete native persistence appropriate to the product. Database/atomicity/encryption mechanisms remain adapter concerns unless a shared contract explicitly assigns semantic meaning to them.
 
-## 9. Conformance
+## 10. Async/runtime rule
 
-Conformance should be semantic, not byte-for-byte implementation identity.
+The proven RPC/Soroban path is asynchronous while current Classic `FresnicaClient` methods are synchronous.
+
+The shared Client migration must resolve this at the application boundary. It must not:
+
+- hide an async provider behind an internal `block_on`;
+- make Terminal/Mobile consume `RpcGateway` directly;
+- create a speculative universal provider ORM merely to make all transports look identical.
+
+## 11. Independent implementations
+
+A runtime that cannot reasonably consume the shared Client may implement the same Capability independently using an appropriate Stellar SDK/runtime.
+
+This remains especially relevant to Web/browser environments. Such implementations must preserve the same semantic/security contracts and should use conformance fixtures from the shared Capability work.
+
+Independent implementation is therefore a supported portability mechanism, not the default reason for first-party native products to duplicate application logic.
+
+## 12. Capability evolution
+
+A `Defined` Capability may still be implemented before the common contract is mature. Real product evidence should feed back into the shared specification.
+
+The acceptance rule is:
+
+> **Promote proven semantic behavior into Capability contracts and the shared Client where appropriate; keep mechanisms local.**
+
+A product-specific Flow or transport does not automatically belong in the Client.
+
+## 13. Conformance
 
 Useful tests include:
 
@@ -165,23 +226,24 @@ Useful tests include:
 - identity and amount/price edge cases;
 - transaction review/signing binding;
 - watch-only/signer lifecycle cases;
-- protocol security fixtures;
-- platform adapter tests proving secret material does not cross prohibited boundaries.
+- provider-normalization parity tests;
+- platform adapter tests proving secret material does not cross prohibited boundaries;
+- cross-product tests proving Application FFI preserves Client DTO/semantic meaning.
 
-Core cryptographic vectors remain Core/SDK-owned. Application behavior vectors belong to the relevant Capability contract/reference implementation.
+Core cryptographic vectors remain Core/SDK-owned. Application behavior vectors belong to the relevant Capability contract/shared Client.
 
-## 10. Product capability matrix
+## 14. Product capability matrix
 
 A product does not need to implement every Capability.
 
-A platform should explicitly record which capabilities it supports and their implementation/conformance status, for example:
+A platform should explicitly record both support and runtime ownership, for example:
 
 ```text
-Payment             implemented / normative-conformant
-SDEX                implemented / normative-conformant
-Anchor              partial
-Dapp Interaction    implemented / defined capability
+Payment             shared Client / normative-conformant
+SDEX                shared Client / normative-conformant
+Anchor              shared Client / partial
+Dapp Interaction    product Flow + shared security capabilities
 External Signer     not implemented
 ```
 
-Absence is acceptable. Semantic divergence under the same capability name should be treated as a compatibility issue.
+Absence is acceptable. Semantic divergence under the same Capability name is a compatibility issue whether the implementation is shared or independent.
