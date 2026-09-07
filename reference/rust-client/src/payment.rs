@@ -212,18 +212,13 @@ impl FresnicaClient {
         let memo_xdr = memo.to_xdr()?;
 
         let account = self.gateway().get_account(&current.address)?;
-        let destination_exists = self.gateway().account_exists(destination_address)?;
-        if !destination_exists && !asset.is_native() {
+        let destination_account = self.gateway().get_account_optional(destination_address)?;
+        if destination_account.is_none() && !asset.is_native() {
             return Err(
                 "Destination account does not exist. Only XLM can create a new Stellar account; issued assets require an existing account and trustline."
                     .to_owned(),
             );
         }
-        let destination_account = if destination_exists {
-            Some(self.gateway().get_account(destination_address)?)
-        } else {
-            None
-        };
         let ledger = self.gateway().get_ledger_parameters()?;
         validate_transfer(&account, &current.address, &asset, amount, ledger)?;
         if let Some(destination_account) = destination_account.as_ref() {
@@ -234,7 +229,7 @@ impl FresnicaClient {
                 ));
             }
         }
-        if !destination_exists {
+        if destination_account.is_none() {
             let minimum = 2_i64
                 .checked_mul(ledger.base_reserve_in_stroops)
                 .ok_or_else(|| "base reserve overflow".to_owned())?;
@@ -247,7 +242,7 @@ impl FresnicaClient {
             }
         }
 
-        let create_destination = !destination_exists;
+        let create_destination = destination_account.is_none();
         let body = payment_body(destination, &asset, amount, create_destination)?;
         let envelope = build_single_operation_envelope_with_memo(
             &current.address,
