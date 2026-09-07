@@ -6,6 +6,7 @@ mod asset;
 pub mod asset_catalog;
 mod balance_state;
 pub mod contacts;
+mod contract;
 pub mod dex;
 mod history_state;
 pub mod horizon_gateway;
@@ -39,6 +40,11 @@ pub use anchor_protocol::{
 pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATALOG_LIMIT};
 pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
+pub use contract::{
+    ContractArgumentInput, ContractArgumentReview, ContractFunction, ContractInterface,
+    ContractInvokeRequest, ContractInvokeReview, ContractParameter, ContractParameterType,
+    PreparedContractInvoke, DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+};
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
     OfferRequest, OfferReview, OfferReviewDetails, OfferSide, OpenOffer, OpenOffersSnapshot,

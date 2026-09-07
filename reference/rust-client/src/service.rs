@@ -6,22 +6,35 @@ use crate::account_state::AccountState;
 use crate::asset_catalog::AssetCatalog;
 use crate::balance_state::AssetBalance;
 use crate::contacts::ContactStore;
+use crate::contract::{
+    authorize_contract_invoke, contract_interface, prepare_contract_invoke, sign_contract_invoke,
+    submit_contract_invoke, ContractInterface, ContractInvokeRequest, PreparedContractInvoke,
+};
 use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
+use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
 use crate::storage::{WalletRecord, WalletStorage};
-use crate::transaction::PendingTransactionStore;
+use crate::transaction::{PendingTransactionStore, TransactionSubmission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkProfile {
     network: String,
     horizon_url: String,
+    rpc_url: Option<String>,
 }
 
 impl NetworkProfile {
     pub fn for_network(network: &str) -> Result<Self, String> {
+        let horizon_url = horizon_url(network)?.to_owned();
+        let rpc_url = match network {
+            "testnet" => Some(TESTNET_RPC_URL.to_owned()),
+            "mainnet" => None,
+            _ => unreachable!("horizon_url validated the network"),
+        };
         Ok(Self {
             network: network.to_owned(),
-            horizon_url: horizon_url(network)?.to_owned(),
+            horizon_url,
+            rpc_url,
         })
     }
 
@@ -33,8 +46,17 @@ impl NetworkProfile {
         &self.horizon_url
     }
 
+    pub fn rpc_url(&self) -> Option<&str> {
+        self.rpc_url.as_deref()
+    }
+
     pub fn with_horizon_url(mut self, horizon_url: &str) -> Result<Self, String> {
         self.horizon_url = validate_endpoint_url("Horizon", horizon_url)?;
+        Ok(self)
+    }
+
+    pub fn with_rpc_url(mut self, rpc_url: &str) -> Result<Self, String> {
+        self.rpc_url = Some(validate_endpoint_url("Stellar RPC", rpc_url)?);
         Ok(self)
     }
 }
@@ -64,6 +86,7 @@ pub struct FresnicaClient {
     pending_transactions: PendingTransactionStore,
     asset_catalog: AssetCatalog,
     gateway: HorizonGateway,
+    rpc: Option<RpcGateway>,
 }
 
 impl FresnicaClient {
@@ -73,6 +96,10 @@ impl FresnicaClient {
 
     pub fn from_profile(home: &Path, profile: NetworkProfile) -> Result<Self, String> {
         let gateway = HorizonGateway::new(profile.horizon_url());
+        let rpc = profile
+            .rpc_url()
+            .map(|rpc_url| RpcGateway::new(profile.network(), rpc_url))
+            .transpose()?;
         let storage = WalletStorage::new(home)?;
         let contacts = ContactStore::for_home(home);
         let pending_transactions = PendingTransactionStore::for_home(home);
@@ -84,6 +111,7 @@ impl FresnicaClient {
             pending_transactions,
             asset_catalog,
             gateway,
+            rpc,
         })
     }
 
@@ -113,6 +141,15 @@ impl FresnicaClient {
 
     pub(crate) fn asset_catalog_store(&self) -> &AssetCatalog {
         &self.asset_catalog
+    }
+
+    fn rpc_gateway(&self) -> Result<&RpcGateway, String> {
+        self.rpc.as_ref().ok_or_else(|| {
+            format!(
+                "No Stellar RPC endpoint configured for {}; configure one before using contract invoke",
+                self.network()
+            )
+        })
     }
 
     pub fn wallets(&self) -> Result<Vec<WalletRecord>, String> {
@@ -178,6 +215,40 @@ impl FresnicaClient {
             .collect();
         Ok(HistorySnapshot { wallet, operations })
     }
+
+    pub async fn contract_interface(&self, contract_id: &str) -> Result<ContractInterface, String> {
+        contract_interface(self.rpc_gateway()?, contract_id).await
+    }
+
+    pub async fn prepare_contract_invoke(
+        &self,
+        request: ContractInvokeRequest,
+    ) -> Result<PreparedContractInvoke, String> {
+        prepare_contract_invoke(&self.storage, self.rpc_gateway()?, request).await
+    }
+
+    pub fn authorize_contract_invoke(
+        &self,
+        prepared: &mut PreparedContractInvoke,
+        passcode: &str,
+    ) -> Result<(), String> {
+        authorize_contract_invoke(&self.storage, prepared, passcode)
+    }
+
+    pub fn sign_contract_invoke(
+        &self,
+        prepared: &mut PreparedContractInvoke,
+        passcode: &str,
+    ) -> Result<(), String> {
+        sign_contract_invoke(&self.storage, prepared, &self.gateway, passcode)
+    }
+
+    pub async fn submit_contract_invoke(
+        &self,
+        prepared: &PreparedContractInvoke,
+    ) -> Result<TransactionSubmission, String> {
+        submit_contract_invoke(&self.storage, self.rpc_gateway()?, prepared).await
+    }
 }
 
 pub fn horizon_url(network: &str) -> Result<&'static str, String> {
@@ -221,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_network_before_any_horizon_request() {
+    fn validates_network_before_any_provider_request() {
         let error = FresnicaClient::new(&temp_home("network"), "future-net")
             .err()
             .expect("invalid network should fail");
@@ -259,21 +330,55 @@ mod tests {
         let profile = NetworkProfile::for_network("testnet")
             .unwrap()
             .with_horizon_url("https://stellar.example/horizon/")
+            .unwrap()
+            .with_rpc_url("https://stellar.example/rpc/")
             .unwrap();
 
         assert_eq!(profile.network(), "testnet");
         assert_eq!(profile.horizon_url(), "https://stellar.example/horizon");
+        assert_eq!(profile.rpc_url(), Some("https://stellar.example/rpc"));
 
         let client = FresnicaClient::from_profile(&temp_home("profile"), profile.clone()).unwrap();
         assert_eq!(client.network_profile(), &profile);
     }
 
     #[test]
+    fn network_profile_supplies_only_a_known_testnet_rpc_default() {
+        let testnet = NetworkProfile::for_network("testnet").unwrap();
+        let mainnet = NetworkProfile::for_network("mainnet").unwrap();
+
+        assert_eq!(testnet.rpc_url(), Some(TESTNET_RPC_URL));
+        assert_eq!(mainnet.rpc_url(), None);
+    }
+
+    #[test]
     fn network_profile_rejects_non_http_provider_endpoints() {
-        let error = NetworkProfile::for_network("mainnet")
+        let horizon_error = NetworkProfile::for_network("mainnet")
             .unwrap()
             .with_horizon_url("horizon.internal")
             .unwrap_err();
-        assert_eq!(error, "Horizon URL must start with http:// or https://");
+        assert_eq!(
+            horizon_error,
+            "Horizon URL must start with http:// or https://"
+        );
+
+        let rpc_error = NetworkProfile::for_network("mainnet")
+            .unwrap()
+            .with_rpc_url("rpc.internal")
+            .unwrap_err();
+        assert_eq!(
+            rpc_error,
+            "Stellar RPC URL must start with http:// or https://"
+        );
+    }
+
+    #[test]
+    fn contract_invoke_requires_rpc_when_profile_has_no_default() {
+        let client = FresnicaClient::new(&temp_home("mainnet-no-rpc"), "mainnet").unwrap();
+        let error = client.rpc_gateway().unwrap_err();
+        assert_eq!(
+            error,
+            "No Stellar RPC endpoint configured for mainnet; configure one before using contract invoke"
+        );
     }
 }
