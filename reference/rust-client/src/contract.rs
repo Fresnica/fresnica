@@ -2,13 +2,18 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use soroban_spec_tools::{sanitize, Spec};
-use stellar_xdr::{ScSpecEntry, ScSpecFunctionV0, ScSpecTypeDef, ScVal};
+use stellar_rpc_client::SimulateTransactionResponse;
+use stellar_xdr::{
+    ContractEvent, ContractEventType, DiagnosticEvent, ScSpecEntry, ScSpecFunctionV0,
+    ScSpecTypeDef, ScVal,
+};
 
 use crate::horizon_gateway::HorizonGateway;
 use crate::rpc_gateway::RpcGateway;
 use crate::soroban::{
     authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
-    submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
+    simulate_soroban_invoke, submit_prepared_soroban, validate_soroban_simulation,
+    PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
 };
 use crate::storage::WalletStorage;
 use crate::transaction::TransactionSubmission;
@@ -334,6 +339,22 @@ impl ContractInvokeReview {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContractReadResult {
+    pub contract_id: String,
+    pub function_name: String,
+    pub arguments: Vec<ContractArgumentReview>,
+    pub output: Option<Value>,
+    pub simulation_ledger: u32,
+    pub network: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum ContractInvokePreparation {
+    ReadOnly(ContractReadResult),
+    Transaction(PreparedContractInvoke),
+}
+
 #[derive(Clone, Debug)]
 pub struct PreparedContractInvoke {
     pub review: ContractInvokeReview,
@@ -364,6 +385,79 @@ pub(crate) async fn prepare_contract_invoke(
     let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
     let review = ContractInvokeReview::from_soroban(&prepared.review, arguments);
     Ok(PreparedContractInvoke { review, prepared })
+}
+
+pub(crate) async fn prepare_contract_invoke_outcome(
+    storage: &WalletStorage,
+    rpc: &RpcGateway,
+    request: ContractInvokeRequest,
+) -> Result<ContractInvokePreparation, String> {
+    let spec_entries = rpc.contract_spec_entries(&request.contract_id).await?;
+    let (low_level_request, arguments) = request.resolve(&spec_entries)?;
+    let simulation = simulate_soroban_invoke(rpc, &low_level_request).await?;
+    validate_soroban_simulation(&simulation)?;
+
+    if simulation_requires_send(&simulation)? {
+        let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
+        let review = ContractInvokeReview::from_soroban(&prepared.review, arguments);
+        return Ok(ContractInvokePreparation::Transaction(
+            PreparedContractInvoke { review, prepared },
+        ));
+    }
+
+    let output = decode_simulation_output(&spec_entries, &request.function_name, &simulation)?;
+    Ok(ContractInvokePreparation::ReadOnly(ContractReadResult {
+        contract_id: request.contract_id,
+        function_name: request.function_name,
+        arguments,
+        output,
+        simulation_ledger: simulation.latest_ledger,
+        network: rpc.network().to_owned(),
+    }))
+}
+
+fn simulation_requires_send(simulation: &SimulateTransactionResponse) -> Result<bool, String> {
+    let transaction_data = simulation
+        .transaction_data()
+        .map_err(|error| format!("Stellar RPC returned invalid transaction data: {error}"))?;
+    let has_write = !transaction_data.resources.footprint.read_write.is_empty();
+    let has_published_event = simulation
+        .events()
+        .map_err(|error| format!("Stellar RPC returned invalid simulation events: {error}"))?
+        .iter()
+        .any(
+            |DiagnosticEvent {
+                 event: ContractEvent { type_, .. },
+                 ..
+             }| matches!(type_, ContractEventType::Contract),
+        );
+    let has_auth = simulation
+        .results()
+        .map_err(|error| format!("Stellar RPC returned invalid simulation result: {error}"))?
+        .iter()
+        .any(|result| !result.auth.is_empty());
+    Ok(has_write || has_published_event || has_auth)
+}
+
+fn decode_simulation_output(
+    spec_entries: &[ScSpecEntry],
+    function_name: &str,
+    simulation: &SimulateTransactionResponse,
+) -> Result<Option<Value>, String> {
+    let spec = Spec::new(spec_entries);
+    let function = find_function(&spec, function_name)?;
+    let Some(output_type) = function.outputs.first() else {
+        return Ok(None);
+    };
+    let results = simulation
+        .results()
+        .map_err(|error| format!("Stellar RPC returned invalid simulation result: {error}"))?;
+    let result = results
+        .first()
+        .ok_or_else(|| "Soroban simulation did not return a contract result".to_owned())?;
+    spec.xdr_to_json(&result.xdr, output_type)
+        .map(Some)
+        .map_err(|error| format!("unable to decode contract return value: {error}"))
 }
 
 pub(crate) fn authorize_contract_invoke(
