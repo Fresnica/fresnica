@@ -1,0 +1,45 @@
+name: Temporary Activity transaction verifier
+
+on:
+  push:
+    branches:
+      - verify/activity-compile-20260907
+    paths:
+      - .github/workflows/tmp-activity-compile.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: verify/activity-compile-20260907
+      - name: Apply locally formatted Activity patches
+        run: |
+          git apply .validation/activity-1.patch
+          git apply .validation/activity-2.patch
+          git apply .validation/activity-3.patch
+      - name: Verify exact portable-rustfmt blobs
+        run: |
+          test "$(git hash-object reference/rust-client/src/activity_state.rs)" = "49133b413ff17ea4b3ac8196181346a8461ea86a"
+          test "$(git hash-object reference/rust-client/src/history_state.rs)" = "d6b347d416a51cac72108867b86e262a8ef4ad5d"
+          test "$(git hash-object reference/rust-client/src/horizon_gateway.rs)" = "d71a947aa64f6b568ca8a6b00efcc543faf89f0d"
+          test "$(git hash-object reference/rust-client/src/service.rs)" = "3fe7df9e1f16b88595e57cf0be7f4abeb64349ff"
+          test "$(git hash-object reference/rust-client/src/lib.rs)" = "52e2911f908a0e15c3c9d24f7046667f264a7646"
+          git diff --check
+      - name: Test Rust client
+        run: cargo test --manifest-path reference/rust-client/Cargo.toml
+      - name: Commit verified product blobs
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add reference/rust-client/src/activity_state.rs \
+                  reference/rust-client/src/history_state.rs \
+                  reference/rust-client/src/horizon_gateway.rs \
+                  reference/rust-client/src/service.rs \
+                  reference/rust-client/src/lib.rs
+          git commit -m "feat(rust-client): group account activity by transaction"
+          git push origin HEAD:verify/activity-compile-20260907
