@@ -221,25 +221,33 @@ impl HorizonGateway {
 
     pub fn submit_transaction(&self, transaction_xdr: &str) -> Result<Value, SubmissionError> {
         let url = format!("{}/transactions", self.base_url);
-        let mut response = match ureq::post(&url).send_form([("tx", transaction_xdr)]) {
-            Ok(response) => response,
-            Err(ureq::Error::StatusCode(code)) if code < 500 => {
-                return Err(SubmissionError::Rejected(format!(
-                    "Horizon rejected the transaction with HTTP {code}"
-                )))
-            }
-            Err(ureq::Error::StatusCode(code)) => {
-                return Err(SubmissionError::Uncertain(format!(
-                    "Horizon returned HTTP {code} while submitting"
-                )))
-            }
-            Err(error) => {
-                return Err(SubmissionError::Uncertain(format!(
+        let mut response = ureq::post(&url)
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .send_form([("tx", transaction_xdr)])
+            .map_err(|error| {
+                SubmissionError::Uncertain(format!(
                     "Unable to contact Horizon while submitting: {error}"
-                )))
-            }
-        };
-        response.body_mut().read_json::<Value>().map_err(|error| {
+                ))
+            })?;
+        let status = response.status().as_u16();
+        let body = response.body_mut().read_to_string().map_err(|error| {
+            SubmissionError::Uncertain(format!(
+                "Unable to read Horizon submission response: {error}"
+            ))
+        })?;
+        if status >= 500 {
+            return Err(SubmissionError::Uncertain(format!(
+                "Horizon returned HTTP {status} while submitting"
+            )));
+        }
+        if status >= 400 {
+            return Err(SubmissionError::Rejected(
+                horizon_submission_rejection_message(status, &body),
+            ));
+        }
+        serde_json::from_str::<Value>(&body).map_err(|error| {
             SubmissionError::Uncertain(format!("Horizon returned invalid submission JSON: {error}"))
         })
     }
@@ -259,6 +267,46 @@ impl HorizonGateway {
             .read_json::<Value>()
             .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
     }
+}
+
+fn horizon_submission_rejection_message(status: u16, body: &str) -> String {
+    let mut details = Vec::new();
+    if let Ok(response) = serde_json::from_str::<Value>(body) {
+        let result_codes = response
+            .get("extras")
+            .and_then(|value| value.get("result_codes"));
+        if let Some(transaction) = result_codes
+            .and_then(|value| value.get("transaction"))
+            .and_then(Value::as_str)
+        {
+            details.push(format!("transaction={transaction}"));
+        }
+        if let Some(operations) = result_codes
+            .and_then(|value| value.get("operations"))
+            .and_then(Value::as_array)
+        {
+            let operations = operations
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            if !operations.is_empty() {
+                details.push(format!("operations=[{}]", operations.join(", ")));
+            }
+        }
+        if details.is_empty() {
+            if let Some(detail) = response.get("detail").and_then(Value::as_str) {
+                details.push(detail.to_owned());
+            } else if let Some(title) = response.get("title").and_then(Value::as_str) {
+                details.push(title.to_owned());
+            }
+        }
+    }
+    let mut message = format!("Horizon rejected the transaction with HTTP {status}");
+    if !details.is_empty() {
+        message.push_str(": ");
+        message.push_str(&details.join("; "));
+    }
+    message
 }
 
 fn records(value: Value, label: &str) -> Result<Vec<Value>, String> {
@@ -704,5 +752,19 @@ mod tests {
             .submit_transaction("AAAA")
             .unwrap();
         assert_eq!(result["hash"], "abc");
+    }
+
+    #[test]
+    fn submission_rejection_preserves_horizon_result_codes() {
+        let body = r#"{"title":"Transaction Failed","status":400,"extras":{"result_codes":{"transaction":"tx_failed","operations":["op_no_destination"]}}}"#;
+        let base = mock_server("POST", "/transactions", 400, body);
+        assert_eq!(
+            HorizonGateway::new(&base)
+                .submit_transaction("AAAA")
+                .unwrap_err(),
+            SubmissionError::Rejected(
+                "Horizon rejected the transaction with HTTP 400: transaction=tx_failed; operations=[op_no_destination]".to_owned(),
+            )
+        );
     }
 }

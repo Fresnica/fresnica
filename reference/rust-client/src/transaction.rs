@@ -25,11 +25,14 @@ use crate::ledger_authorization::{
     load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
     LedgerAccountAuthorization, LedgerAuthorizationSnapshot,
 };
-use crate::signing_coordination::{review_ledger_authorization, sign_with_local_ed25519};
+use crate::signing_coordination::{
+    review_ledger_authorization, sign_with_ed25519_providers, sign_with_local_ed25519,
+    ExternalEd25519SigningProvider,
+};
 use crate::{HorizonGateway, SubmissionError, WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
-const TX_TIMEOUT_SECONDS: u64 = 30;
+const TX_TIMEOUT_SECONDS: u64 = 5 * 60;
 const PENDING_TTL_SECONDS: i64 = 210;
 const MAINNET_PASSPHRASE: &str = "Public Global Stellar Network ; September 2015";
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
@@ -223,8 +226,7 @@ fn ensure_transaction_not_expired_at(
     };
     if max_time != 0 && now_unix > max_time {
         return Err(
-            "Prepared transaction has expired; prepare and review the transaction again before signing"
-                .to_owned(),
+            "Prepared transaction has expired; prepare and review the transaction again".to_owned(),
         );
     }
     Ok(())
@@ -242,6 +244,40 @@ pub(crate) fn sign_and_submit(
     ensure_transaction_not_expired(envelope)?;
     let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
     sign_with_local_ed25519(storage, &authorization, network, envelope, passcode)?;
+    submit_signed_transaction(pending_transactions, record, network, envelope, horizon)
+}
+
+pub(crate) fn sign_and_submit_with_providers(
+    storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
+    record: &WalletRecord,
+    network: &str,
+    envelope: &mut TransactionEnvelope,
+    horizon: &HorizonGateway,
+    passcode: Option<&str>,
+    external_providers: &[ExternalEd25519SigningProvider],
+) -> Result<TransactionSubmission, String> {
+    ensure_transaction_not_expired(envelope)?;
+    let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
+    sign_with_ed25519_providers(
+        storage,
+        &authorization,
+        network,
+        envelope,
+        passcode,
+        external_providers,
+    )?;
+    submit_signed_transaction(pending_transactions, record, network, envelope, horizon)
+}
+
+fn submit_signed_transaction(
+    pending_transactions: &PendingTransactionStore,
+    record: &WalletRecord,
+    network: &str,
+    envelope: &TransactionEnvelope,
+    horizon: &HorizonGateway,
+) -> Result<TransactionSubmission, String> {
+    ensure_transaction_not_expired(envelope)?;
     let network_passphrase = network_passphrase(network)?;
 
     let tx_hash = transaction_hash(envelope, network_passphrase)
@@ -748,8 +784,13 @@ mod tests {
         assert!(ensure_transaction_not_expired_at(&envelope, 100).is_ok());
         assert_eq!(
             ensure_transaction_not_expired_at(&envelope, 101).unwrap_err(),
-            "Prepared transaction has expired; prepare and review the transaction again before signing"
+            "Prepared transaction has expired; prepare and review the transaction again"
         );
+    }
+
+    #[test]
+    fn classic_transaction_timeout_allows_interactive_signing_window() {
+        assert_eq!(TX_TIMEOUT_SECONDS, 5 * 60);
     }
 
     #[test]

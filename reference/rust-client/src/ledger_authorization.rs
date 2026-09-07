@@ -508,11 +508,14 @@ fn add_requirement(
     let account = accounts.get(account_id).copied().ok_or_else(|| {
         format!("missing ledger authorization state for source account {account_id}")
     })?;
-    let required_weight = account.required_weight(threshold);
+    let threshold_weight = account.required_weight(threshold);
+    // stellar-core still requires a matching signer when a threshold is zero;
+    // keep the raw threshold for review, but model the effective requirement.
+    let required_weight = threshold_weight.max(1);
     let authorization_use = AuthorizationUse {
         scope,
         threshold,
-        required_weight,
+        required_weight: threshold_weight,
     };
 
     if let Some(requirement) = requirements
@@ -943,6 +946,34 @@ mod tests {
             plan_classic_ledger_authorization(&envelope, &[account]).unwrap_err(),
             "PreconditionsV2.extraSigners contains a duplicate signer"
         );
+    }
+
+    #[test]
+    fn zero_threshold_still_requires_one_valid_signer() {
+        let account = horizon_account(ACCOUNT_A, 0, 0, 0, &[(ACCOUNT_A, 1, "ed25519_public_key")]);
+        let envelope = build_operation_envelope(
+            ACCOUNT_A,
+            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+                data_name: String64::try_from(b"zero-threshold".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+
+        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
+        assert_eq!(plan.requirements.len(), 1);
+        let requirement = &plan.requirements[0];
+        assert_eq!(requirement.required_weight, 1);
+        assert_eq!(requirement.uses.len(), 2);
+        assert!(requirement
+            .uses
+            .iter()
+            .all(|authorization_use| authorization_use.required_weight == 0));
+        assert!(!plan.is_satisfiable_by(&BTreeSet::new()));
+        assert!(plan.is_satisfiable_by(&BTreeSet::from([ed25519(ACCOUNT_A)])));
     }
 
     #[test]

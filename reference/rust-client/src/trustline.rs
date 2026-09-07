@@ -5,8 +5,9 @@ use crate::asset::AssetId;
 use crate::transaction::prepared_classic_authorization_snapshot;
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
-    minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit, FresnicaClient,
-    HorizonGateway, LedgerAuthorizationSnapshot, TransactionSubmission, WalletRecord,
+    minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit,
+    sign_and_submit_with_providers, ExternalEd25519SigningProvider, FresnicaClient, HorizonGateway,
+    LedgerAuthorizationSnapshot, TransactionSubmission, WalletRecord,
 };
 
 pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -235,6 +236,25 @@ impl FresnicaClient {
             &mut envelope,
             self.gateway(),
             passcode,
+        )
+    }
+
+    pub fn submit_trustline_with_providers(
+        &self,
+        prepared: &PreparedTrustline,
+        passcode: Option<&str>,
+        external_providers: &[ExternalEd25519SigningProvider],
+    ) -> Result<TransactionSubmission, String> {
+        let mut envelope = prepared.envelope.clone();
+        sign_and_submit_with_providers(
+            self.storage(),
+            self.pending_transaction_store(),
+            &prepared.wallet,
+            self.network(),
+            &mut envelope,
+            self.gateway(),
+            passcode,
+            external_providers,
         )
     }
 }
