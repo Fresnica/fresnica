@@ -1,0 +1,25 @@
+name: Temporary Activity source export
+
+on:
+  push:
+    branches:
+      - verify/activity-source-20260907
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: activity-source
+          if-no-files-found: error
+          path: |
+            reference/rust-client/Cargo.toml
+            reference/rust-client/src/horizon_gateway.rs
+            reference/rust-client/src/history_state.rs
+            reference/rust-client/src/service.rs
+            reference/rust-client/src/lib.rs
