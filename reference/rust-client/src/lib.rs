@@ -1,4 +1,5 @@
 mod account_state;
+mod activity_state;
 pub mod anchor;
 mod anchor_http;
 pub mod anchor_protocol;
@@ -23,6 +24,7 @@ pub mod wallet;
 mod service;
 
 pub use account_state::{AccountState, AccountThresholds};
+pub use activity_state::{ActivityMemo, ActivityTransaction, MAX_ACTIVITY_TRANSACTIONS};
 pub use anchor::{
     get_anchor_customer, put_anchor_customer, AnchorCustomerField, AnchorCustomerFieldStatus,
     AnchorCustomerFile, AnchorCustomerQuery, AnchorCustomerSnapshot, AnchorCustomerStatus,
@@ -71,7 +73,8 @@ pub use payment::{
 };
 pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
 pub use service::{
-    AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot, NetworkProfile,
+    AccountSnapshot, ActivitySnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot,
+    NetworkProfile,
 };
 pub use signing_coordination::{
     review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,

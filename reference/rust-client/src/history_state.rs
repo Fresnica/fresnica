@@ -123,13 +123,15 @@ impl HistoryOperation {
         let operation_type = text(value, "type").unwrap_or("unknown");
         let kind = match operation_type {
             "payment" => HistoryOperationKind::Payment {
-                from: text_owned(value, "from").or_else(|| text_owned(value, "source_account")),
-                to: text_owned(value, "to"),
+                from: preferred_address(value, "from_muxed", "from")
+                    .or_else(|| preferred_address(value, "source_account_muxed", "source_account")),
+                to: preferred_address(value, "to_muxed", "to"),
                 amount: scalar_owned(value, "amount"),
                 asset: history_asset(value, ""),
             },
             "create_account" => HistoryOperationKind::CreateAccount {
-                funder: text_owned(value, "funder").or_else(|| text_owned(value, "source_account")),
+                funder: preferred_address(value, "funder_muxed", "funder")
+                    .or_else(|| preferred_address(value, "source_account_muxed", "source_account")),
                 account: text_owned(value, "account"),
                 starting_balance: scalar_owned(value, "starting_balance"),
             },
@@ -162,7 +164,8 @@ impl HistoryOperation {
             "liquidity_pool_deposit" => HistoryOperationKind::LiquidityPoolDeposit,
             "liquidity_pool_withdraw" => HistoryOperationKind::LiquidityPoolWithdraw,
             "account_merge" => HistoryOperationKind::AccountMerge {
-                into: text_owned(value, "into").or_else(|| text_owned(value, "account")),
+                into: preferred_address(value, "into_muxed", "into")
+                    .or_else(|| text_owned(value, "account")),
             },
             "manage_data" => HistoryOperationKind::ManageData {
                 name: text_owned(value, "name"),
@@ -181,7 +184,7 @@ impl HistoryOperation {
             paging_token: scalar_owned(value, "paging_token"),
             transaction_hash: text_owned(value, "transaction_hash"),
             created_at: text_owned(value, "created_at"),
-            source_account: text_owned(value, "source_account"),
+            source_account: preferred_address(value, "source_account_muxed", "source_account"),
             kind,
         }
     }
@@ -212,6 +215,13 @@ fn history_trust_asset(value: &JsonValue) -> HistoryTrustAsset {
     history_asset(value, "")
         .map(HistoryTrustAsset::Classic)
         .unwrap_or(HistoryTrustAsset::Unknown)
+}
+
+fn preferred_address(value: &JsonValue, muxed_key: &str, classic_key: &str) -> Option<String> {
+    text(value, muxed_key)
+        .filter(|address| !address.is_empty())
+        .or_else(|| text(value, classic_key).filter(|address| !address.is_empty()))
+        .map(str::to_owned)
 }
 
 fn text<'a>(value: &'a JsonValue, key: &str) -> Option<&'a str> {
@@ -263,6 +273,34 @@ mod tests {
                 from: Some("GSOURCE".to_owned()),
                 to: Some("GDESTINATION".to_owned()),
                 amount: Some("1.2500000".to_owned()),
+                asset: Some(HistoryAsset::Native),
+            }
+        );
+    }
+
+    #[test]
+    fn payment_and_operation_source_preserve_muxed_identity() {
+        let operation = HistoryOperation::from_horizon(&json!({
+            "id": "102",
+            "transaction_hash": "muxed-tx",
+            "source_account": "GSOURCE",
+            "source_account_muxed": "MSOURCE",
+            "type": "payment",
+            "from": "GSOURCE",
+            "from_muxed": "MSOURCE",
+            "to": "GDESTINATION",
+            "to_muxed": "MDESTINATION",
+            "amount": "2.0000000",
+            "asset_type": "native"
+        }));
+
+        assert_eq!(operation.source_account.as_deref(), Some("MSOURCE"));
+        assert_eq!(
+            operation.kind,
+            HistoryOperationKind::Payment {
+                from: Some("MSOURCE".to_owned()),
+                to: Some("MDESTINATION".to_owned()),
+                amount: Some("2.0000000".to_owned()),
                 asset: Some(HistoryAsset::Native),
             }
         );
