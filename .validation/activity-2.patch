@@ -1,0 +1,188 @@
+diff --git a/reference/rust-client/src/history_state.rs b/reference/rust-client/src/history_state.rs
+index b32e5ba..d6b347d 100644
+--- a/reference/rust-client/src/history_state.rs
++++ b/reference/rust-client/src/history_state.rs
+@@ -123,13 +123,15 @@ impl HistoryOperation {
+         let operation_type = text(value, "type").unwrap_or("unknown");
+         let kind = match operation_type {
+             "payment" => HistoryOperationKind::Payment {
+-                from: text_owned(value, "from").or_else(|| text_owned(value, "source_account")),
+-                to: text_owned(value, "to"),
++                from: preferred_address(value, "from_muxed", "from")
++                    .or_else(|| preferred_address(value, "source_account_muxed", "source_account")),
++                to: preferred_address(value, "to_muxed", "to"),
+                 amount: scalar_owned(value, "amount"),
+                 asset: history_asset(value, ""),
+             },
+             "create_account" => HistoryOperationKind::CreateAccount {
+-                funder: text_owned(value, "funder").or_else(|| text_owned(value, "source_account")),
++                funder: preferred_address(value, "funder_muxed", "funder")
++                    .or_else(|| preferred_address(value, "source_account_muxed", "source_account")),
+                 account: text_owned(value, "account"),
+                 starting_balance: scalar_owned(value, "starting_balance"),
+             },
+@@ -162,7 +164,8 @@ impl HistoryOperation {
+             "liquidity_pool_deposit" => HistoryOperationKind::LiquidityPoolDeposit,
+             "liquidity_pool_withdraw" => HistoryOperationKind::LiquidityPoolWithdraw,
+             "account_merge" => HistoryOperationKind::AccountMerge {
+-                into: text_owned(value, "into").or_else(|| text_owned(value, "account")),
++                into: preferred_address(value, "into_muxed", "into")
++                    .or_else(|| text_owned(value, "account")),
+             },
+             "manage_data" => HistoryOperationKind::ManageData {
+                 name: text_owned(value, "name"),
+@@ -181,7 +184,7 @@ impl HistoryOperation {
+             paging_token: scalar_owned(value, "paging_token"),
+             transaction_hash: text_owned(value, "transaction_hash"),
+             created_at: text_owned(value, "created_at"),
+-            source_account: text_owned(value, "source_account"),
++            source_account: preferred_address(value, "source_account_muxed", "source_account"),
+             kind,
+         }
+     }
+@@ -214,6 +217,13 @@ fn history_trust_asset(value: &JsonValue) -> HistoryTrustAsset {
+         .unwrap_or(HistoryTrustAsset::Unknown)
+ }
+ 
++fn preferred_address(value: &JsonValue, muxed_key: &str, classic_key: &str) -> Option<String> {
++    text(value, muxed_key)
++        .filter(|address| !address.is_empty())
++        .or_else(|| text(value, classic_key).filter(|address| !address.is_empty()))
++        .map(str::to_owned)
++}
++
+ fn text<'a>(value: &'a JsonValue, key: &str) -> Option<&'a str> {
+     value.get(key).and_then(JsonValue::as_str)
+ }
+@@ -268,6 +278,34 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn payment_and_operation_source_preserve_muxed_identity() {
++        let operation = HistoryOperation::from_horizon(&json!({
++            "id": "102",
++            "transaction_hash": "muxed-tx",
++            "source_account": "GSOURCE",
++            "source_account_muxed": "MSOURCE",
++            "type": "payment",
++            "from": "GSOURCE",
++            "from_muxed": "MSOURCE",
++            "to": "GDESTINATION",
++            "to_muxed": "MDESTINATION",
++            "amount": "2.0000000",
++            "asset_type": "native"
++        }));
++
++        assert_eq!(operation.source_account.as_deref(), Some("MSOURCE"));
++        assert_eq!(
++            operation.kind,
++            HistoryOperationKind::Payment {
++                from: Some("MSOURCE".to_owned()),
++                to: Some("MDESTINATION".to_owned()),
++                amount: Some("2.0000000".to_owned()),
++                asset: Some(HistoryAsset::Native),
++            }
++        );
++    }
++
+     #[test]
+     fn offer_assets_keep_full_code_and_issuer_identity() {
+         let operation = HistoryOperation::from_horizon(&json!({
+diff --git a/reference/rust-client/src/horizon_gateway.rs b/reference/rust-client/src/horizon_gateway.rs
+index 2964d25..d71a947 100644
+--- a/reference/rust-client/src/horizon_gateway.rs
++++ b/reference/rust-client/src/horizon_gateway.rs
+@@ -182,10 +182,37 @@ impl HorizonGateway {
+     }
+ 
+     pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
+-        let response = self.get_json(
+-            &format!("/accounts/{address}/operations?order=desc&limit={limit}"),
+-            &format!("Stellar account not found: {address}"),
+-        )?;
++        self.get_operations_page(address, limit, None, false)
++    }
++
++    pub fn get_operations_with_transactions(
++        &self,
++        address: &str,
++        limit: usize,
++        cursor: Option<&str>,
++    ) -> Result<Vec<Value>, String> {
++        self.get_operations_page(address, limit, cursor, true)
++    }
++
++    fn get_operations_page(
++        &self,
++        address: &str,
++        limit: usize,
++        cursor: Option<&str>,
++        join_transactions: bool,
++    ) -> Result<Vec<Value>, String> {
++        if !(1..=200).contains(&limit) {
++            return Err("operations limit must be from 1 to 200".to_owned());
++        }
++        let mut path = format!("/accounts/{address}/operations?order=desc&limit={limit}");
++        if join_transactions {
++            path.push_str("&join=transactions");
++        }
++        if let Some(cursor) = cursor {
++            path.push_str("&cursor=");
++            path.push_str(cursor);
++        }
++        let response = self.get_json(&path, &format!("Stellar account not found: {address}"))?;
+         response
+             .get("_embedded")
+             .and_then(|value| value.get("records"))
+@@ -537,6 +564,22 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn activity_operations_request_joined_transactions_and_cursor() {
++        let body = r#"{"_embedded":{"records":[{"id":"11","paging_token":"11","transaction":{"hash":"tx-a"}}]}}"#;
++        let base = mock_server(
++            "GET",
++            "/accounts/GACCOUNT/operations?order=desc&limit=200&join=transactions&cursor=12",
++            200,
++            body,
++        );
++        let operations = HorizonGateway::new(&base)
++            .get_operations_with_transactions("GACCOUNT", 200, Some("12"))
++            .unwrap();
++        assert_eq!(operations.len(), 1);
++        assert_eq!(operations[0]["transaction"]["hash"], "tx-a");
++    }
++
+     #[test]
+     fn offer_lookup_uses_offer_endpoint_and_404_message() {
+         let body = r#"{"id":"42","seller":"GSELLER"}"#;
+diff --git a/reference/rust-client/src/lib.rs b/reference/rust-client/src/lib.rs
+index ed895e8..52e2911 100644
+--- a/reference/rust-client/src/lib.rs
++++ b/reference/rust-client/src/lib.rs
+@@ -1,4 +1,5 @@
+ mod account_state;
++mod activity_state;
+ pub mod anchor;
+ mod anchor_http;
+ pub mod anchor_protocol;
+@@ -23,6 +24,7 @@ pub mod wallet;
+ mod service;
+ 
+ pub use account_state::{AccountState, AccountThresholds};
++pub use activity_state::{ActivityMemo, ActivityTransaction, MAX_ACTIVITY_TRANSACTIONS};
+ pub use anchor::{
+     get_anchor_customer, put_anchor_customer, AnchorCustomerField, AnchorCustomerFieldStatus,
+     AnchorCustomerFile, AnchorCustomerQuery, AnchorCustomerSnapshot, AnchorCustomerStatus,
+@@ -71,7 +73,8 @@ pub use payment::{
+ };
+ pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
+ pub use service::{
+-    AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot, NetworkProfile,
++    AccountSnapshot, ActivitySnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot,
++    NetworkProfile,
+ };
+ pub use signing_coordination::{
+     review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,
