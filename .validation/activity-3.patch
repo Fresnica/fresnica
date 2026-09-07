@@ -1,0 +1,211 @@
+diff --git a/reference/rust-client/src/service.rs b/reference/rust-client/src/service.rs
+index af553a3..3fe7df9 100644
+--- a/reference/rust-client/src/service.rs
++++ b/reference/rust-client/src/service.rs
+@@ -3,6 +3,9 @@ use std::path::Path;
+ use serde_json::Value;
+ 
+ use crate::account_state::AccountState;
++use crate::activity_state::{
++    horizon_operation_cursor, ActivityTransaction, MAX_ACTIVITY_TRANSACTIONS,
++};
+ use crate::asset_catalog::AssetCatalog;
+ use crate::balance_state::AssetBalance;
+ use crate::contacts::ContactStore;
+@@ -80,6 +83,12 @@ pub struct HistorySnapshot {
+     pub operations: Vec<HistoryOperation>,
+ }
+ 
++#[derive(Clone, Debug, PartialEq)]
++pub struct ActivitySnapshot {
++    pub wallet: WalletRecord,
++    pub transactions: Vec<ActivityTransaction>,
++}
++
+ pub struct FresnicaClient {
+     profile: NetworkProfile,
+     storage: WalletStorage,
+@@ -217,6 +226,23 @@ impl FresnicaClient {
+         Ok(HistorySnapshot { wallet, operations })
+     }
+ 
++    pub fn activity(&self, name: Option<&str>, limit: usize) -> Result<ActivitySnapshot, String> {
++        if !(1..=MAX_ACTIVITY_TRANSACTIONS).contains(&limit) {
++            return Err(format!(
++                "activity limit must be from 1 to {MAX_ACTIVITY_TRANSACTIONS}"
++            ));
++        }
++        let wallet = self.resolve_wallet(name)?;
++        let transactions = collect_activity_transactions(limit, 200, |cursor| {
++            self.gateway
++                .get_operations_with_transactions(&wallet.address, 200, cursor)
++        })?;
++        Ok(ActivitySnapshot {
++            wallet,
++            transactions,
++        })
++    }
++
+     pub async fn contract_interface(&self, contract_id: &str) -> Result<ContractInterface, String> {
+         contract_interface(self.rpc_gateway()?, contract_id).await
+     }
+@@ -259,6 +285,81 @@ impl FresnicaClient {
+     }
+ }
+ 
++const MAX_ACTIVITY_PAGES: usize = 128;
++
++fn collect_activity_transactions<F>(
++    limit: usize,
++    page_limit: usize,
++    mut fetch_page: F,
++) -> Result<Vec<ActivityTransaction>, String>
++where
++    F: FnMut(Option<&str>) -> Result<Vec<Value>, String>,
++{
++    if limit == 0 {
++        return Err("activity transaction limit must be positive".to_owned());
++    }
++    if page_limit == 0 {
++        return Err("activity page limit must be positive".to_owned());
++    }
++    let mut transactions = Vec::with_capacity(limit);
++    let mut current: Option<ActivityTransaction> = None;
++    let mut cursor: Option<String> = None;
++    let mut pages_loaded = 0usize;
++
++    loop {
++        pages_loaded += 1;
++        if pages_loaded > MAX_ACTIVITY_PAGES {
++            return Err("Horizon activity pagination exceeded the safety bound".to_owned());
++        }
++        let page = fetch_page(cursor.as_deref())?;
++        if page.is_empty() {
++            if let Some(transaction) = current.take() {
++                transactions.push(transaction.finish_descending_group());
++            }
++            transactions.truncate(limit);
++            return Ok(transactions);
++        }
++
++        for raw in &page {
++            let next = ActivityTransaction::from_horizon_joined_operation(raw)?;
++            match current.as_mut() {
++                Some(group) if group.transaction_hash == next.transaction_hash => {
++                    group.merge_same_transaction(next)?;
++                }
++                Some(_) => {
++                    let completed = current
++                        .take()
++                        .ok_or_else(|| "activity grouping lost its current transaction".to_owned())?
++                        .finish_descending_group();
++                    transactions.push(completed);
++                    if transactions.len() == limit {
++                        return Ok(transactions);
++                    }
++                    current = Some(next);
++                }
++                None => current = Some(next),
++            }
++        }
++
++        if page.len() < page_limit {
++            if let Some(transaction) = current.take() {
++                transactions.push(transaction.finish_descending_group());
++            }
++            transactions.truncate(limit);
++            return Ok(transactions);
++        }
++
++        let final_operation = page
++            .last()
++            .ok_or_else(|| "activity page unexpectedly became empty".to_owned())?;
++        let next_cursor = horizon_operation_cursor(final_operation)?;
++        if cursor.as_deref() == Some(next_cursor.as_str()) {
++            return Err("Horizon activity cursor did not advance".to_owned());
++        }
++        cursor = Some(next_cursor);
++    }
++}
++
+ pub fn horizon_url(network: &str) -> Result<&'static str, String> {
+     match network {
+         "mainnet" => Ok(MAINNET_HORIZON_URL),
+@@ -380,6 +481,77 @@ mod tests {
+         );
+     }
+ 
++    fn joined_activity_operation(operation_id: &str, tx_hash: &str) -> Value {
++        serde_json::json!({
++            "id": operation_id,
++            "paging_token": operation_id,
++            "transaction_hash": tx_hash,
++            "type": "set_options",
++            "transaction": {
++                "hash": tx_hash,
++                "ledger": 1234,
++                "created_at": "2026-09-07T12:00:00Z",
++                "source_account": ADDRESS,
++                "fee_account": ADDRESS,
++                "fee_charged": "100",
++                "max_fee": "100",
++                "operation_count": 3,
++                "memo_type": "none"
++            }
++        })
++    }
++
++    #[test]
++    fn activity_grouping_merges_transaction_split_across_pages() {
++        let pages = std::cell::RefCell::new(std::collections::VecDeque::from([
++            vec![
++                joined_activity_operation("103", "tx-a"),
++                joined_activity_operation("102", "tx-a"),
++            ],
++            vec![
++                joined_activity_operation("101", "tx-a"),
++                joined_activity_operation("100", "tx-b"),
++            ],
++        ]));
++        let cursors = std::cell::RefCell::new(Vec::new());
++        let transactions = collect_activity_transactions(1, 2, |cursor| {
++            cursors.borrow_mut().push(cursor.map(str::to_owned));
++            Ok(pages.borrow_mut().pop_front().unwrap_or_default())
++        })
++        .unwrap();
++
++        assert_eq!(cursors.into_inner(), vec![None, Some("102".to_owned())]);
++        assert_eq!(transactions.len(), 1);
++        assert_eq!(transactions[0].transaction_hash, "tx-a");
++        assert_eq!(transactions[0].account_operations.len(), 3);
++        assert_eq!(
++            transactions[0].account_operations[0]
++                .operation_id
++                .as_deref(),
++            Some("101")
++        );
++        assert_eq!(
++            transactions[0].account_operations[2]
++                .operation_id
++                .as_deref(),
++            Some("103")
++        );
++    }
++
++    #[test]
++    fn activity_grouping_confirms_final_group_at_end_of_stream() {
++        let pages = std::cell::RefCell::new(std::collections::VecDeque::from([vec![
++            joined_activity_operation("201", "tx-only"),
++        ]]));
++        let transactions = collect_activity_transactions(1, 2, |_| {
++            Ok(pages.borrow_mut().pop_front().unwrap_or_default())
++        })
++        .unwrap();
++
++        assert_eq!(transactions.len(), 1);
++        assert_eq!(transactions[0].transaction_hash, "tx-only");
++    }
++
+     #[test]
+     fn contract_invoke_requires_rpc_when_profile_has_no_default() {
+         let client = FresnicaClient::new(&temp_home("mainnet-no-rpc"), "mainnet").unwrap();
