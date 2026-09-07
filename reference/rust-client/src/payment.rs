@@ -12,8 +12,9 @@ use crate::transaction::prepared_classic_authorization_snapshot;
 use crate::{
     account_sequence, balance_stroops, build_single_operation_envelope_with_memo, format_stroops,
     minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_write_wallet,
-    sign_and_submit, FresnicaClient, LedgerAuthorizationSnapshot, LedgerParameters,
-    TransactionSubmission, WalletRecord,
+    sign_and_submit, sign_and_submit_with_providers, ExternalEd25519SigningProvider,
+    FresnicaClient, LedgerAuthorizationSnapshot, LedgerParameters, TransactionSubmission,
+    WalletRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,6 +309,25 @@ impl FresnicaClient {
             &mut envelope,
             self.gateway(),
             passcode,
+        )
+    }
+
+    pub fn submit_payment_with_providers(
+        &self,
+        prepared: &PreparedPayment,
+        passcode: Option<&str>,
+        external_providers: &[ExternalEd25519SigningProvider],
+    ) -> Result<TransactionSubmission, String> {
+        let mut envelope = prepared.envelope.clone();
+        sign_and_submit_with_providers(
+            self.storage(),
+            self.pending_transaction_store(),
+            &prepared.wallet,
+            self.network(),
+            &mut envelope,
+            self.gateway(),
+            passcode,
+            external_providers,
         )
     }
 }

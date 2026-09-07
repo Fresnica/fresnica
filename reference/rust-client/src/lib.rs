@@ -74,8 +74,9 @@ pub use service::{
     AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot, NetworkProfile,
 };
 pub use signing_coordination::{
-    review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,
-    sign_with_local_ed25519,
+    review_ledger_authorization, select_ed25519_signers, select_local_ed25519_signers,
+    sign_needed_local_ed25519, sign_with_ed25519_providers, sign_with_local_ed25519,
+    ExternalEd25519SigningProvider,
 };
 pub use soroban::{
     authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
@@ -89,7 +90,9 @@ pub use transaction::{
     parse_transaction_xdr, sign_transaction_xdr_with_passcode, TransactionSubmission,
     STROOPS_PER_XLM,
 };
-pub(crate) use transaction::{resolve_write_wallet, sign_and_submit};
+pub(crate) use transaction::{
+    resolve_write_wallet, sign_and_submit, sign_and_submit_with_providers,
+};
 pub use trustline::{
     PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,
     TrustlineRequest, TrustlineReview, DEFAULT_TRUSTLINE_LIMIT,
