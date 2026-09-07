@@ -23,6 +23,8 @@ use crate::transaction::{
 use crate::{HorizonGateway, TransactionSubmission, WalletRecord, WalletStorage};
 
 const DEFAULT_AUTHORIZATION_LIFETIME_LEDGERS: u32 = 100;
+const READ_ONLY_SIMULATION_ACCOUNT: &str =
+    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 const SUBMISSION_POLL_ATTEMPTS: usize = 30;
 const SUBMISSION_POLL_DELAY: Duration = Duration::from_secs(1);
 const XDR_DEPTH_LIMIT: u32 = 500;
@@ -149,9 +151,38 @@ pub async fn prepare_soroban_invoke(
         Some(_) => return Err("Soroban inclusion fee must be at least 100 stroops".to_owned()),
         None => rpc.default_soroban_inclusion_fee().await?,
     };
-    let candidate = build_candidate(&wallet, &request, sequence, inclusion_fee)?;
+    let candidate = build_candidate_for_source(&wallet.address, &request, sequence, inclusion_fee)?;
     let simulation = rpc.simulate_transaction(&candidate).await?;
     assemble_reviewed_transaction(wallet.name, rpc.network(), &request, candidate, simulation)
+}
+
+pub(crate) async fn simulate_soroban_invoke(
+    rpc: &RpcGateway,
+    request: &SorobanInvokeRequest,
+) -> Result<SimulateTransactionResponse, String> {
+    rpc.verify_network().await?;
+    let candidate = build_candidate_for_source(READ_ONLY_SIMULATION_ACCOUNT, request, 0, 100)?;
+    rpc.simulate_transaction(&candidate).await
+}
+
+pub(crate) fn validate_soroban_simulation(
+    simulation: &SimulateTransactionResponse,
+) -> Result<(), String> {
+    if let Some(error) = simulation.error.as_deref() {
+        return Err(format!("Soroban transaction simulation failed: {error}"));
+    }
+    if simulation.restore_preamble.is_some() {
+        return Err(
+            "Soroban transaction requires an explicit footprint restore before review".to_owned(),
+        );
+    }
+    if simulation.results.len() != 1 {
+        return Err(format!(
+            "Soroban simulation returned {} host-function results; expected one",
+            simulation.results.len()
+        ));
+    }
+    Ok(())
 }
 
 pub fn authorize_prepared_soroban(
@@ -335,8 +366,8 @@ fn remember_uncertain(
     }
 }
 
-fn build_candidate(
-    wallet: &WalletRecord,
+fn build_candidate_for_source(
+    source_account: &str,
     request: &SorobanInvokeRequest,
     current_sequence: i64,
     inclusion_fee_stroops: u32,
@@ -356,7 +387,7 @@ fn build_candidate(
         args,
     });
     build_single_operation_envelope(
-        &wallet.address,
+        source_account,
         OperationBody::InvokeHostFunction(InvokeHostFunctionOp {
             host_function,
             auth: VecM::default(),
@@ -374,20 +405,7 @@ fn assemble_reviewed_transaction(
     candidate: TransactionEnvelope,
     simulation: SimulateTransactionResponse,
 ) -> Result<PreparedSorobanTransaction, String> {
-    if let Some(error) = simulation.error.as_deref() {
-        return Err(format!("Soroban transaction simulation failed: {error}"));
-    }
-    if simulation.restore_preamble.is_some() {
-        return Err(
-            "Soroban transaction requires an explicit footprint restore before review".to_owned(),
-        );
-    }
-    if simulation.results.len() != 1 {
-        return Err(format!(
-            "Soroban simulation returned {} host-function results; expected one",
-            simulation.results.len()
-        ));
-    }
+    validate_soroban_simulation(&simulation)?;
 
     let TransactionEnvelope::Tx(mut envelope) = candidate else {
         return Err("Soroban v1 requires a TransactionEnvelope v1".to_owned());
@@ -821,7 +839,7 @@ mod tests {
             secret: None,
             metadata: Default::default(),
         };
-        build_candidate(&record, request, 7, 100).unwrap()
+        build_candidate_for_source(&record.address, request, 7, 100).unwrap()
     }
 
     #[test]
