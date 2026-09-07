@@ -110,10 +110,10 @@ impl FresnicaClient {
                         asset.display()
                     ));
                 }
-                if !self.gateway().account_exists(&issuer)? {
-                    return Err(format!("Asset issuer account does not exist: {}", issuer));
-                }
-                let issuer = self.gateway().get_account(&issuer)?;
+                let issuer = self
+                    .gateway()
+                    .get_account_optional(&issuer)?
+                    .ok_or_else(|| format!("Asset issuer account does not exist: {issuer}"))?;
                 let (authorization, clawback_enabled) = initial_trustline_state(&issuer)?;
                 ensure_native_capacity(
                     &account,
