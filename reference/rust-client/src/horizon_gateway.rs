@@ -182,10 +182,37 @@ impl HorizonGateway {
     }
 
     pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
-        let response = self.get_json(
-            &format!("/accounts/{address}/operations?order=desc&limit={limit}"),
-            &format!("Stellar account not found: {address}"),
-        )?;
+        self.get_operations_page(address, limit, None, false)
+    }
+
+    pub fn get_operations_with_transactions(
+        &self,
+        address: &str,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<Vec<Value>, String> {
+        self.get_operations_page(address, limit, cursor, true)
+    }
+
+    fn get_operations_page(
+        &self,
+        address: &str,
+        limit: usize,
+        cursor: Option<&str>,
+        join_transactions: bool,
+    ) -> Result<Vec<Value>, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("operations limit must be from 1 to 200".to_owned());
+        }
+        let mut path = format!("/accounts/{address}/operations?order=desc&limit={limit}");
+        if join_transactions {
+            path.push_str("&join=transactions");
+        }
+        if let Some(cursor) = cursor {
+            path.push_str("&cursor=");
+            path.push_str(cursor);
+        }
+        let response = self.get_json(&path, &format!("Stellar account not found: {address}"))?;
         response
             .get("_embedded")
             .and_then(|value| value.get("records"))
@@ -535,6 +562,22 @@ mod tests {
             operation_summary(&operations[0], "GACCOUNT"),
             "Received 1 XLM from GSOURCE"
         );
+    }
+
+    #[test]
+    fn activity_operations_request_joined_transactions_and_cursor() {
+        let body = r#"{"_embedded":{"records":[{"id":"11","paging_token":"11","transaction":{"hash":"tx-a"}}]}}"#;
+        let base = mock_server(
+            "GET",
+            "/accounts/GACCOUNT/operations?order=desc&limit=200&join=transactions&cursor=12",
+            200,
+            body,
+        );
+        let operations = HorizonGateway::new(&base)
+            .get_operations_with_transactions("GACCOUNT", 200, Some("12"))
+            .unwrap();
+        assert_eq!(operations.len(), 1);
+        assert_eq!(operations[0]["transaction"]["hash"], "tx-a");
     }
 
     #[test]
