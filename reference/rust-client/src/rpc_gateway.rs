@@ -6,12 +6,18 @@ use stellar_rpc_client::{
     Client as StellarRpcClient, GetTransactionResponse, SendTransactionResponse,
     SimulateTransactionResponse,
 };
-use stellar_xdr::{Hash, TransactionEnvelope};
+use stellar_strkey::Contract as StrkeyContract;
+use stellar_xdr::{
+    ContractDataDurability, ContractExecutable, ContractExecutableExternalRef, Hash,
+    LedgerEntryData, LedgerKey, LedgerKeyContractCode, LedgerKeyContractData, Limits, ReadXdr,
+    ScSpecEntry, ScVal, TransactionEnvelope,
+};
 
 use crate::network_passphrase;
 use crate::transaction::transaction_xdr_bytes;
 
 pub const TESTNET_RPC_URL: &str = "https://soroban-testnet.stellar.org:443";
+const XDR_DEPTH_LIMIT: u32 = 500;
 
 #[derive(Clone, Debug)]
 pub struct RpcGateway {
@@ -95,6 +101,96 @@ impl RpcGateway {
             .parse::<u32>()
             .map_err(|_| "Stellar RPC returned an invalid Soroban inclusion fee".to_owned())?;
         Ok(fee.max(100))
+    }
+
+    pub(crate) async fn contract_spec_entries(
+        &self,
+        contract_id: &str,
+    ) -> Result<Vec<ScSpecEntry>, String> {
+        let contract = StrkeyContract::from_str(contract_id)
+            .map_err(|_| format!("Invalid Stellar contract address: {contract_id}"))?;
+        let instance = self
+            .client
+            .get_contract_instance(&contract.0)
+            .await
+            .map_err(|error| format!("Unable to load contract {contract_id}: {error}"))?;
+
+        match instance.executable {
+            ContractExecutable::StellarAsset => {
+                soroban_spec::read::parse_raw(stellar_asset_spec::xdr())
+                    .map_err(|error| format!("Unable to read Stellar Asset Contract spec: {error}"))
+            }
+            ContractExecutable::Wasm(hash) => self.contract_spec_for_wasm(hash).await,
+            ContractExecutable::ExternalRef(reference) => {
+                let hash = self.resolve_external_ref_wasm_hash(&reference).await?;
+                self.contract_spec_for_wasm(hash).await
+            }
+        }
+    }
+
+    async fn contract_spec_for_wasm(&self, hash: Hash) -> Result<Vec<ScSpecEntry>, String> {
+        let wasm = self.contract_wasm(hash).await?;
+        soroban_spec::read::from_wasm(&wasm)
+            .map_err(|error| format!("Unable to parse contract interface: {error}"))
+    }
+
+    async fn contract_wasm(&self, hash: Hash) -> Result<Vec<u8>, String> {
+        let key = LedgerKey::ContractCode(LedgerKeyContractCode { hash });
+        let response = self
+            .client
+            .get_ledger_entries(&[key])
+            .await
+            .map_err(|error| format!("Unable to load contract Wasm from Stellar RPC: {error}"))?;
+        let entry = response
+            .entries
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Contract Wasm was not found".to_owned())?;
+        match LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::depth(XDR_DEPTH_LIMIT))
+            .map_err(|error| format!("Unable to decode contract Wasm ledger entry: {error}"))?
+        {
+            LedgerEntryData::ContractCode(entry) => Ok(entry.code.into()),
+            _ => Err("Contract Wasm lookup returned the wrong ledger-entry type".to_owned()),
+        }
+    }
+
+    async fn resolve_external_ref_wasm_hash(
+        &self,
+        reference: &ContractExecutableExternalRef,
+    ) -> Result<Hash, String> {
+        let key = LedgerKey::ContractData(LedgerKeyContractData {
+            contract: reference.executable_owner.clone(),
+            key: ScVal::ExecutableTag(reference.tag.clone()),
+            durability: ContractDataDurability::Persistent,
+        });
+        let response = self
+            .client
+            .get_ledger_entries(&[key])
+            .await
+            .map_err(|error| format!("Unable to load contract executable reference: {error}"))?;
+        let entry = response
+            .entries
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Contract executable reference was not found".to_owned())?;
+        match LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::depth(XDR_DEPTH_LIMIT))
+            .map_err(|error| format!("Unable to decode contract executable reference: {error}"))?
+        {
+            LedgerEntryData::ContractData(data) => match data.val {
+                ScVal::Bytes(bytes) => {
+                    let hash: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                        "Contract executable reference is not a 32-byte Wasm hash".to_owned()
+                    })?;
+                    Ok(Hash(hash))
+                }
+                _ => Err("Contract executable reference is not a Wasm hash".to_owned()),
+            },
+            _ => {
+                Err("Contract executable reference returned the wrong ledger-entry type".to_owned())
+            }
+        }
     }
 
     pub async fn simulate_transaction(
