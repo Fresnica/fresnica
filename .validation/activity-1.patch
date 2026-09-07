@@ -1,0 +1,388 @@
+diff --git a/reference/rust-client/src/activity_state.rs b/reference/rust-client/src/activity_state.rs
+new file mode 100644
+index 0000000..49133b4
+--- /dev/null
++++ b/reference/rust-client/src/activity_state.rs
+@@ -0,0 +1,382 @@
++use base64::{engine::general_purpose::STANDARD, Engine as _};
++use serde_json::Value as JsonValue;
++
++use crate::history_state::HistoryOperation;
++
++/// Product/client safety bound for one Activity read. This is intentionally independent of
++/// Horizon's per-page operation limit because Activity is transaction-grouped.
++pub const MAX_ACTIVITY_TRANSACTIONS: usize = 50;
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum ActivityMemo {
++    Text(String),
++    Id(u64),
++    Hash([u8; 32]),
++    ReturnHash([u8; 32]),
++    Other {
++        memo_type: String,
++        value: Option<String>,
++    },
++}
++
++/// One transaction touching the selected account.
++///
++/// `operation_count` is the total operation count for the Stellar transaction. `account_operations`
++/// contains only operations returned by the account-scoped Horizon operation stream, in execution
++/// order. A transaction can therefore have `operation_count > account_operations.len()` when it
++/// also contains operations unrelated to the selected account.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ActivityTransaction {
++    pub transaction_hash: String,
++    pub ledger: u32,
++    pub created_at: String,
++    pub source_account: String,
++    pub fee_account: String,
++    pub fee_charged_stroops: i64,
++    pub max_fee_stroops: i64,
++    pub operation_count: u32,
++    pub memo: Option<ActivityMemo>,
++    pub account_operations: Vec<HistoryOperation>,
++}
++
++impl ActivityTransaction {
++    pub(crate) fn from_horizon_joined_operation(value: &JsonValue) -> Result<Self, String> {
++        let transaction = value
++            .get("transaction")
++            .filter(|value| value.is_object())
++            .ok_or_else(|| {
++                "Horizon activity response omitted the joined transaction; expected join=transactions"
++                    .to_owned()
++            })?;
++        let transaction_hash = required_nonempty_text(transaction, "hash", "transaction hash")?;
++        let operation_hash =
++            required_nonempty_text(value, "transaction_hash", "operation transaction hash")?;
++        if operation_hash != transaction_hash {
++            return Err(format!(
++                "Horizon activity response mismatched operation transaction {operation_hash} and joined transaction {transaction_hash}"
++            ));
++        }
++
++        Ok(Self {
++            transaction_hash,
++            ledger: required_u32(transaction, "ledger", "transaction ledger")?,
++            created_at: required_nonempty_text(
++                transaction,
++                "created_at",
++                "transaction created_at",
++            )?,
++            source_account: required_preferred_address(
++                transaction,
++                "account_muxed",
++                "source_account",
++                "transaction source account",
++            )?,
++            fee_account: required_preferred_address(
++                transaction,
++                "fee_account_muxed",
++                "fee_account",
++                "transaction fee account",
++            )?,
++            fee_charged_stroops: required_nonnegative_i64(
++                transaction,
++                "fee_charged",
++                "transaction fee charged",
++            )?,
++            max_fee_stroops: required_nonnegative_i64(
++                transaction,
++                "max_fee",
++                "transaction max fee",
++            )?,
++            operation_count: required_u32(
++                transaction,
++                "operation_count",
++                "transaction operation count",
++            )?,
++            memo: activity_memo(transaction)?,
++            account_operations: vec![HistoryOperation::from_horizon(value)],
++        })
++    }
++
++    pub(crate) fn merge_same_transaction(&mut self, mut next: Self) -> Result<(), String> {
++        if self.transaction_hash != next.transaction_hash {
++            return Err("cannot merge different activity transactions".to_owned());
++        }
++        if !self.same_metadata(&next) {
++            return Err(format!(
++                "Horizon activity response changed joined transaction metadata within {}",
++                self.transaction_hash
++            ));
++        }
++        self.account_operations.append(&mut next.account_operations);
++        Ok(())
++    }
++
++    pub(crate) fn finish_descending_group(mut self) -> Self {
++        self.account_operations.reverse();
++        self
++    }
++
++    fn same_metadata(&self, other: &Self) -> bool {
++        self.ledger == other.ledger
++            && self.created_at == other.created_at
++            && self.source_account == other.source_account
++            && self.fee_account == other.fee_account
++            && self.fee_charged_stroops == other.fee_charged_stroops
++            && self.max_fee_stroops == other.max_fee_stroops
++            && self.operation_count == other.operation_count
++            && self.memo == other.memo
++    }
++}
++
++pub(crate) fn horizon_operation_cursor(value: &JsonValue) -> Result<String, String> {
++    scalar(value, "paging_token")
++        .ok_or_else(|| "Horizon activity response omitted operation paging_token".to_owned())
++}
++
++fn activity_memo(transaction: &JsonValue) -> Result<Option<ActivityMemo>, String> {
++    let memo_type = required_text(transaction, "memo_type", "transaction memo type")?;
++    match memo_type.as_str() {
++        "none" => Ok(None),
++        "text" => Ok(Some(ActivityMemo::Text(required_text(
++            transaction,
++            "memo",
++            "text memo",
++        )?))),
++        "id" => Ok(Some(ActivityMemo::Id(required_u64(
++            transaction,
++            "memo",
++            "id memo",
++        )?))),
++        "hash" => Ok(Some(ActivityMemo::Hash(required_hash(
++            transaction,
++            "memo",
++            "hash memo",
++        )?))),
++        "return" => Ok(Some(ActivityMemo::ReturnHash(required_hash(
++            transaction,
++            "memo",
++            "return memo",
++        )?))),
++        other => Ok(Some(ActivityMemo::Other {
++            memo_type: other.to_owned(),
++            value: scalar(transaction, "memo"),
++        })),
++    }
++}
++
++fn required_preferred_address(
++    value: &JsonValue,
++    muxed_key: &str,
++    classic_key: &str,
++    label: &str,
++) -> Result<String, String> {
++    text(value, muxed_key)
++        .filter(|address| !address.is_empty())
++        .or_else(|| text(value, classic_key).filter(|address| !address.is_empty()))
++        .map(str::to_owned)
++        .ok_or_else(|| format!("Horizon returned invalid {label}"))
++}
++
++fn required_u32(value: &JsonValue, key: &str, label: &str) -> Result<u32, String> {
++    required_u64(value, key, label).and_then(|value| {
++        u32::try_from(value).map_err(|_| format!("Horizon returned invalid {label}"))
++    })
++}
++
++fn required_u64(value: &JsonValue, key: &str, label: &str) -> Result<u64, String> {
++    let parsed = match value.get(key) {
++        Some(JsonValue::Number(number)) => number.as_u64(),
++        Some(JsonValue::String(text)) => text.parse::<u64>().ok(),
++        _ => None,
++    };
++    parsed.ok_or_else(|| format!("Horizon returned invalid {label}"))
++}
++
++fn required_nonnegative_i64(value: &JsonValue, key: &str, label: &str) -> Result<i64, String> {
++    let parsed = match value.get(key) {
++        Some(JsonValue::Number(number)) => number.as_i64(),
++        Some(JsonValue::String(text)) => text.parse::<i64>().ok(),
++        _ => None,
++    };
++    parsed
++        .filter(|value| *value >= 0)
++        .ok_or_else(|| format!("Horizon returned invalid {label}"))
++}
++
++fn required_hash(value: &JsonValue, key: &str, label: &str) -> Result<[u8; 32], String> {
++    let encoded = required_text(value, key, label)?;
++    let decoded = STANDARD
++        .decode(encoded)
++        .map_err(|_| format!("Horizon returned invalid {label}"))?;
++    decoded
++        .try_into()
++        .map_err(|_| format!("Horizon returned invalid {label}"))
++}
++
++fn required_nonempty_text(value: &JsonValue, key: &str, label: &str) -> Result<String, String> {
++    text(value, key)
++        .filter(|text| !text.is_empty())
++        .map(str::to_owned)
++        .ok_or_else(|| format!("Horizon returned invalid {label}"))
++}
++
++fn required_text(value: &JsonValue, key: &str, label: &str) -> Result<String, String> {
++    text_owned(value, key).ok_or_else(|| format!("Horizon returned invalid {label}"))
++}
++
++fn text<'a>(value: &'a JsonValue, key: &str) -> Option<&'a str> {
++    value.get(key).and_then(JsonValue::as_str)
++}
++
++fn text_owned(value: &JsonValue, key: &str) -> Option<String> {
++    text(value, key).map(str::to_owned)
++}
++
++fn scalar(value: &JsonValue, key: &str) -> Option<String> {
++    match value.get(key)? {
++        JsonValue::String(value) => Some(value.clone()),
++        JsonValue::Number(value) => Some(value.to_string()),
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use serde_json::json;
++
++    use super::*;
++
++    fn joined_operation(
++        operation_id: &str,
++        transaction_hash: &str,
++        operation_type: &str,
++    ) -> JsonValue {
++        json!({
++            "id": operation_id,
++            "paging_token": operation_id,
++            "transaction_hash": transaction_hash,
++            "created_at": "2026-09-07T12:00:00Z",
++            "source_account": "GOPERATION",
++            "type": operation_type,
++            "transaction": {
++                "hash": transaction_hash,
++                "ledger": 1234,
++                "created_at": "2026-09-07T12:00:00Z",
++                "source_account": "GBASESOURCE",
++                "account_muxed": "MBASESOURCE",
++                "fee_account": "GBASEFEE",
++                "fee_account_muxed": "MBASEFEE",
++                "fee_charged": "200",
++                "max_fee": 300,
++                "operation_count": 3,
++                "memo_type": "text",
++                "memo": "invoice-7"
++            }
++        })
++    }
++
++    #[test]
++    fn joined_transaction_preserves_semantic_metadata_and_muxed_addresses() {
++        let transaction = ActivityTransaction::from_horizon_joined_operation(&joined_operation(
++            "1003",
++            "tx-a",
++            "set_options",
++        ))
++        .unwrap();
++
++        assert_eq!(transaction.transaction_hash, "tx-a");
++        assert_eq!(transaction.ledger, 1234);
++        assert_eq!(transaction.source_account, "MBASESOURCE");
++        assert_eq!(transaction.fee_account, "MBASEFEE");
++        assert_eq!(transaction.fee_charged_stroops, 200);
++        assert_eq!(transaction.max_fee_stroops, 300);
++        assert_eq!(transaction.operation_count, 3);
++        assert_eq!(
++            transaction.memo,
++            Some(ActivityMemo::Text("invoice-7".to_owned()))
++        );
++        assert_eq!(transaction.account_operations.len(), 1);
++    }
++
++    #[test]
++    fn memo_types_keep_hash_and_return_hash_distinct() {
++        let mut hash = joined_operation("1002", "tx-hash", "set_options");
++        hash["transaction"]["memo_type"] = json!("hash");
++        hash["transaction"]["memo"] = json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
++        assert_eq!(
++            ActivityTransaction::from_horizon_joined_operation(&hash)
++                .unwrap()
++                .memo,
++            Some(ActivityMemo::Hash([0; 32]))
++        );
++
++        let mut returned = joined_operation("1001", "tx-return", "set_options");
++        returned["transaction"]["memo_type"] = json!("return");
++        returned["transaction"]["memo"] = json!("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=");
++        assert_eq!(
++            ActivityTransaction::from_horizon_joined_operation(&returned)
++                .unwrap()
++                .memo,
++            Some(ActivityMemo::ReturnHash([1; 32]))
++        );
++    }
++
++    #[test]
++    fn merging_group_restores_transaction_execution_order() {
++        let mut group = ActivityTransaction::from_horizon_joined_operation(&joined_operation(
++            "1003",
++            "tx-a",
++            "set_options",
++        ))
++        .unwrap();
++        let next = ActivityTransaction::from_horizon_joined_operation(&joined_operation(
++            "1002",
++            "tx-a",
++            "manage_data",
++        ))
++        .unwrap();
++        group.merge_same_transaction(next).unwrap();
++        let group = group.finish_descending_group();
++        assert_eq!(
++            group.account_operations[0].operation_id.as_deref(),
++            Some("1002")
++        );
++        assert_eq!(
++            group.account_operations[1].operation_id.as_deref(),
++            Some("1003")
++        );
++    }
++
++    #[test]
++    fn merged_transaction_rejects_inconsistent_joined_metadata() {
++        let mut group = ActivityTransaction::from_horizon_joined_operation(&joined_operation(
++            "1003",
++            "tx-a",
++            "set_options",
++        ))
++        .unwrap();
++        let mut changed = joined_operation("1002", "tx-a", "manage_data");
++        changed["transaction"]["fee_charged"] = json!(201);
++        let changed = ActivityTransaction::from_horizon_joined_operation(&changed).unwrap();
++        assert!(group.merge_same_transaction(changed).is_err());
++    }
++
++    #[test]
++    fn hash_memo_requires_exact_32_byte_payload() {
++        let mut hash = joined_operation("1002", "tx-hash", "set_options");
++        hash["transaction"]["memo_type"] = json!("hash");
++        hash["transaction"]["memo"] = json!("YWJjZA==");
++        assert!(ActivityTransaction::from_horizon_joined_operation(&hash).is_err());
++    }
++
++    #[test]
++    fn joined_transaction_is_required_and_hash_mismatch_fails_closed() {
++        let mut missing = joined_operation("1001", "tx-a", "set_options");
++        missing.as_object_mut().unwrap().remove("transaction");
++        assert!(ActivityTransaction::from_horizon_joined_operation(&missing).is_err());
++
++        let mut mismatch = joined_operation("1001", "tx-a", "set_options");
++        mismatch["transaction"]["hash"] = json!("tx-b");
++        assert!(ActivityTransaction::from_horizon_joined_operation(&mismatch).is_err());
++    }
++}
