@@ -16,6 +16,7 @@ use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZO
 use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::transaction::{PendingTransactionStore, TransactionSubmission};
+use crate::transaction_history::{HistoryTransaction, MAX_TRANSACTION_HISTORY_LIMIT};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkProfile {
@@ -78,6 +79,13 @@ pub struct BalanceSnapshot {
 pub struct HistorySnapshot {
     pub wallet: WalletRecord,
     pub operations: Vec<HistoryOperation>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransactionHistorySnapshot {
+    pub wallet: WalletRecord,
+    pub transactions: Vec<HistoryTransaction>,
+    pub next_cursor: Option<String>,
 }
 
 pub struct FresnicaClient {
@@ -215,6 +223,47 @@ impl FresnicaClient {
             .map(HistoryOperation::from_horizon)
             .collect();
         Ok(HistorySnapshot { wallet, operations })
+    }
+
+    pub fn transaction_history(
+        &self,
+        name: Option<&str>,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<TransactionHistorySnapshot, String> {
+        if !(1..=MAX_TRANSACTION_HISTORY_LIMIT).contains(&limit) {
+            return Err(format!(
+                "transaction history limit must be from 1 to {MAX_TRANSACTION_HISTORY_LIMIT}"
+            ));
+        }
+        let wallet = self.resolve_wallet(name)?;
+        let raw_transactions =
+            self.gateway
+                .get_account_transactions(&wallet.address, limit, cursor)?;
+        let mut transactions = Vec::with_capacity(raw_transactions.len());
+        for transaction in &raw_transactions {
+            let transaction_hash = transaction
+                .get("hash")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Horizon returned a transaction without hash".to_owned())?;
+            let raw_operations = self.gateway.get_transaction_operations(transaction_hash)?;
+            transactions.push(HistoryTransaction::from_horizon(
+                transaction,
+                &raw_operations,
+            )?);
+        }
+        let next_cursor = (raw_transactions.len() == limit)
+            .then(|| {
+                transactions
+                    .last()
+                    .map(|transaction| transaction.paging_token.clone())
+            })
+            .flatten();
+        Ok(TransactionHistorySnapshot {
+            wallet,
+            transactions,
+            next_cursor,
+        })
     }
 
     pub async fn contract_interface(&self, contract_id: &str) -> Result<ContractInterface, String> {

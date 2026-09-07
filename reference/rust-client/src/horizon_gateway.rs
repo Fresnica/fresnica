@@ -181,6 +181,30 @@ impl HorizonGateway {
             .map_err(|error| format!("Horizon returned invalid JSON for {url}: {error}"))
     }
 
+    pub fn get_account_transactions(
+        &self,
+        address: &str,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<Vec<Value>, String> {
+        if !(1..=200).contains(&limit) {
+            return Err("account transaction limit must be from 1 to 200".to_owned());
+        }
+        let response = self.get_json(
+            &account_transactions_path(address, limit, cursor),
+            &format!("Stellar account not found: {address}"),
+        )?;
+        records(response, "account transaction")
+    }
+
+    pub fn get_transaction_operations(&self, transaction_hash: &str) -> Result<Vec<Value>, String> {
+        let response = self.get_json(
+            &format!("/transactions/{transaction_hash}/operations?order=asc&limit=200"),
+            &format!("Stellar transaction not found: {transaction_hash}"),
+        )?;
+        records(response, "transaction operation")
+    }
+
     pub fn get_operations(&self, address: &str, limit: usize) -> Result<Vec<Value>, String> {
         let response = self.get_json(
             &format!("/accounts/{address}/operations?order=desc&limit={limit}"),
@@ -261,6 +285,16 @@ impl HorizonGateway {
     }
 }
 
+fn account_transactions_path(address: &str, limit: usize, cursor: Option<&str>) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    query.append_pair("order", "desc");
+    query.append_pair("limit", &limit.to_string());
+    if let Some(cursor) = cursor {
+        query.append_pair("cursor", cursor);
+    }
+    format!("/accounts/{address}/transactions?{}", query.finish())
+}
+
 fn records(value: Value, label: &str) -> Result<Vec<Value>, String> {
     value
         .get("_embedded")
@@ -268,6 +302,19 @@ fn records(value: Value, label: &str) -> Result<Vec<Value>, String> {
         .and_then(Value::as_array)
         .cloned()
         .ok_or_else(|| format!("Horizon returned malformed {label} data"))
+}
+
+#[cfg(test)]
+mod transaction_history_tests {
+    use super::*;
+
+    #[test]
+    fn account_transaction_cursor_is_query_encoded() {
+        assert_eq!(
+            account_transactions_path("GACCOUNT", 20, Some("123/abc?")),
+            "/accounts/GACCOUNT/transactions?order=desc&limit=20&cursor=123%2Fabc%3F"
+        );
+    }
 }
 
 pub fn balance_asset_label(balance: &Value) -> String {

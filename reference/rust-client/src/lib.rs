@@ -17,6 +17,7 @@ pub mod signing_coordination;
 pub mod soroban;
 pub mod storage;
 pub mod transaction;
+mod transaction_history;
 pub mod trustline;
 pub mod wallet;
 
@@ -72,6 +73,7 @@ pub use payment::{
 pub use rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus, TESTNET_RPC_URL};
 pub use service::{
     AccountSnapshot, BalanceSnapshot, FresnicaClient, HistorySnapshot, NetworkProfile,
+    TransactionHistorySnapshot,
 };
 pub use signing_coordination::{
     review_ledger_authorization, select_local_ed25519_signers, sign_needed_local_ed25519,
@@ -90,6 +92,7 @@ pub use transaction::{
     STROOPS_PER_XLM,
 };
 pub(crate) use transaction::{resolve_write_wallet, sign_and_submit};
+pub use transaction_history::{HistoryTransaction, MAX_TRANSACTION_HISTORY_LIMIT};
 pub use trustline::{
     PreparedTrustline, TrustlineAction, TrustlineAuthorization, TrustlineOperation,
     TrustlineRequest, TrustlineReview, DEFAULT_TRUSTLINE_LIMIT,
