@@ -11,6 +11,7 @@ pub mod dex;
 mod history_state;
 pub mod horizon_gateway;
 pub mod ledger_authorization;
+mod message;
 pub mod payment;
 pub mod rpc_gateway;
 pub mod signing_coordination;
@@ -65,6 +66,7 @@ pub use ledger_authorization::{
     LedgerSignerAvailability, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
     WeightedLedgerSignerSnapshot,
 };
+pub use message::{sign_sep53_message, verify_sep53_message, Sep53MessageSignature};
 pub use payment::{
     PaymentMemo, PaymentMemoReview, PaymentOperation, PaymentRequest, PaymentReview,
     PreparedPayment,
