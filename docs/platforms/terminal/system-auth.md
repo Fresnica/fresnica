@@ -39,8 +39,10 @@ When a backend is available:
 5. Later unlock requests first ask the backend to perform its local authorization and release the key.
 6. The released key opens the same canonical password envelope.
 7. If no exact enrollment exists or no System Auth backend is available, the client may use the fresh Passphrase path.
-8. Once an enrolled System Auth provider is invoked, cancellation, provider failure, stale enrollment, or an invalid released key fails the current attempt; it must not silently downgrade to a Passphrase prompt.
-9. If the first signing plan instead reports that selected local software signers have no System Auth source, a fresh Passphrase retry covers all selected software signers and does not also invoke System Auth.
+8. Biometric retries and biometric-to-device-credential fallback belong inside the OS/provider authentication operation, not in Fresnica CLI state.
+9. If the OS/provider exhausts or cannot offer local authentication, it may explicitly return `PassphraseRequired`; Fresnica then asks for a fresh Passphrase and drops System Auth providers for that retry.
+10. User cancellation aborts the current operation and does not surprise the user with a Passphrase prompt.
+11. Stale enrollment, signer/envelope mismatch, malformed unlock material, protected-data corruption, or provider integrity failure fail closed and must not downgrade.
 
 System unlock does not authorize signing-material Reveal / Export.
 
@@ -53,7 +55,7 @@ A backend implements:
 - `available()` — whether the client can provide the facility;
 - `has(slot)` — whether the exact wallet/envelope has an enrollment, without asking Core to interpret OS state;
 - `enroll(slot, unlock_key)` — protect the 32-byte key under local OS policy;
-- `release(slot)` — perform required OS authorization and return the 32-byte key;
+- `release(slot)` — perform the complete OS authorization attempt and return one final outcome: the 32-byte key, explicit Passphrase fallback, user cancellation, or a fail-closed provider/integrity error;
 - `delete(slot)` — remove the enrollment.
 
 `SystemUnlockSlot` binds enrollment to the Stellar wallet address and a SHA-256 fingerprint of the exact canonical encrypted envelope. Re-keying or replacing the envelope therefore cannot silently reuse an old unlock key.
@@ -66,7 +68,9 @@ A production macOS backend should use an OS facility that cryptographically gate
 
 macOS has both the legacy file-based keychain and the data-protection keychain. Apple's data-protection `SecAccessControl` model is designed around app-like code-signing/access-group entitlements, which makes a pure unsigned command-line process materially different from a normal macOS app.
 
-Therefore the preferred macOS implementation is the existing signed native Keychain/LocalAuthentication helper pattern (or equivalent app-style host) that returns only the wallet unlock key after successful user presence. The existing Apple `FresnicaWalletUnlockKeyStore` API already matches the backend lifecycle. A Terminal backend can use `SystemAuthSlot::storage_id()` (`public-key:envelope-fingerprint`) as its signer identifier so Passphrase re-protection cannot reuse a stale enrollment. Rust Core remains unchanged.
+The validated direction is therefore a first-party high-trust companion/provider in an app-like signed wrapper, not Keychain code inside the bare CLI executable. Terminal locates the provider beside its own executable at a reserved app-bundle path; it is never PATH auto-discovered as a normal plugin. Enrollment sends only the verified 32-byte `WalletUnlockKey` over stdin and release returns only that key over a private stdout pipe. The provider never receives a Fresnica Passphrase, mnemonic, S-key, XDR signing authority, or generic host RPC.
+
+The Apple `FresnicaWalletUnlockKeyStore` now uses `deviceOwnerAuthentication` / `userPresence`, allowing the OS to handle biometric retries and device-passcode fallback. `SystemAuthSlot::storage_id()` (`public-key:envelope-fingerprint`) is the per-signer storage identity, so re-protection cannot reuse stale enrollment. The provider entrypoint is `FresnicaSystemAuthProviderMain.swift`. Data Protection Keychain access still requires the helper to be distributed with the appropriate code signing, provisioning profile and app-like wrapper; an unsigned compile artifact is not a production System Auth backend. Rust Core remains unchanged.
 
 A shell call to `/usr/bin/security` is not an acceptable substitute for per-use user-presence protection.
 
@@ -92,4 +96,4 @@ The Rust client/Terminal architecture slice is tested with an injected fake back
 - enrollment is bound to the exact encrypted envelope;
 - unavailable backends leave the existing passcode flow intact.
 
-Platform backends require platform-specific integration tests in addition to these contract tests.
+The same System Auth source now covers Classic Payment/Trustline/SDEX/SEP-10, detached Classic G-address Soroban authorization, and final Soroban transaction-envelope signing. Platform backends require platform-specific integration tests in addition to these contract tests.

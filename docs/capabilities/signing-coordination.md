@@ -43,7 +43,7 @@ A conforming implementation must:
 
 A product may support passcode signing, system-auth-assisted signing or both. The user-facing choice is platform policy, but successful authorization must produce a signing operation that remains scoped to the intended signer and current protected envelope/version.
 
-Stale system-auth registrations/unlock keys must fail safely after re-protection or passcode rotation.
+Stale system-auth registrations/unlock keys must fail safely after re-protection or passcode rotation. Platform providers own biometric retry/device-credential behavior; Signing Coordination consumes only the final authorization outcome. Explicit authentication exhaustion may request a fresh Passphrase fallback, user cancellation aborts, and integrity/provider failures remain fail-closed.
 
 ## Current Rust reference
 
@@ -51,7 +51,7 @@ The Rust reference coordinates the Ed25519 signatures still required by a Ledger
 
 A source Account may be watch-only while separate same-network signer records supply authority. Normal transaction submission also recognizes already-valid Ed25519, matching preauthorized-transaction, Hash-X and signed-payload conditions before selecting more signers. Released System Auth unlock material is passed into the existing SDK unlock-key signing API; stale/wrong keys are rejected by SDK/Core protected-envelope authentication.
 
-Classic SEP-10 reuses the same coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Fresnica still does not collect Hash-X, signed-payload or other unsupported authorization material itself.
+Classic SEP-10 reuses the same coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Soroban uses the same protected-software authorization source for detached Classic G-address authorization entries and for the final Classic transaction envelope; the SDK's existing unlock-key Soroban signing API remains the cryptographic boundary. Fresnica still does not collect Hash-X, signed-payload or other unsupported authorization material itself.
 
 ## External signer authorization
 
