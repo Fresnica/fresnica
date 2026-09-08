@@ -16,6 +16,7 @@ pub mod rpc_gateway;
 pub mod signing_coordination;
 pub mod soroban;
 pub mod storage;
+pub mod system_auth;
 pub mod transaction;
 pub mod trustline;
 pub mod wallet;
@@ -84,11 +85,16 @@ pub use soroban::{
     submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
 };
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
+pub use system_auth::{
+    prepare_system_auth_enrollment, system_auth_slot, SystemAuthEnrollment, SystemAuthSlot,
+    SystemAuthUnlockProvider, SYSTEM_AUTH_UNLOCK_KEY_LENGTH,
+};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
     minimum_balance_stroops, network_passphrase, parse_positive_stroops, parse_stroops,
-    parse_transaction_xdr, sign_transaction_xdr_with_passcode, TransactionSubmission,
+    parse_transaction_xdr, sign_transaction_xdr_with_passcode,
+    sign_transaction_xdr_with_unlock_key, TransactionSubmission,
     DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS, STROOPS_PER_XLM,
 };
 pub(crate) use transaction::{

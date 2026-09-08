@@ -9,9 +9,10 @@ use crate::ledger_authorization::{
     LedgerAuthorizationSnapshot, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 use crate::storage::{WalletRecord, WalletStorage};
+use crate::system_auth::{system_auth_slot, SystemAuthUnlockProvider};
 use crate::transaction::{
     network_passphrase, parse_transaction_xdr, sign_transaction_xdr_with_passcode,
-    transaction_hash_bytes, transaction_xdr_bytes,
+    sign_transaction_xdr_with_unlock_key, transaction_hash_bytes, transaction_xdr_bytes,
 };
 use crate::wallet::verify_passcode;
 
@@ -70,6 +71,7 @@ pub fn sign_with_ed25519_providers(
     network: &str,
     envelope: &mut TransactionEnvelope,
     passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
     external_providers: &[ExternalEd25519SigningProvider],
 ) -> Result<(), String> {
     let network_passphrase = network_passphrase(network)?;
@@ -83,6 +85,7 @@ pub fn sign_with_ed25519_providers(
         network,
         envelope,
         passcode,
+        system_auth_providers,
         external_providers,
     )?;
 
@@ -103,10 +106,30 @@ pub fn sign_needed_with_ed25519_providers(
     network: &str,
     envelope: &mut TransactionEnvelope,
     passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
     external_providers: &[ExternalEd25519SigningProvider],
 ) -> Result<(), String> {
     let network_passphrase = network_passphrase(network)?;
     let records = local_signing_records(storage, network)?;
+
+    let mut system_auth = BTreeMap::new();
+    for provider in system_auth_providers {
+        if !records.contains_key(provider.public_key()) {
+            return Err(format!(
+                "system-auth provider {} has no matching local protected software signer",
+                provider.public_key()
+            ));
+        }
+        if system_auth
+            .insert(provider.public_key().to_owned(), provider)
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate system-auth provider: {}",
+                provider.public_key()
+            ));
+        }
+    }
 
     let mut providers = BTreeMap::new();
     for provider in external_providers {
@@ -121,6 +144,12 @@ pub fn sign_needed_with_ed25519_providers(
         }
     }
 
+    if let Some(key) = providers.keys().find(|key| system_auth.contains_key(*key)) {
+        return Err(format!(
+            "signer {key} is configured as both system-auth and external provider"
+        ));
+    }
+
     let available = records
         .keys()
         .chain(providers.keys())
@@ -131,7 +160,7 @@ pub fn sign_needed_with_ed25519_providers(
 
     let local_selected = selected
         .iter()
-        .filter(|key| !providers.contains_key(*key))
+        .filter(|key| !providers.contains_key(*key) && !system_auth.contains_key(*key))
         .collect::<Vec<_>>();
     if !local_selected.is_empty() {
         let passcode = passcode.ok_or_else(|| {
@@ -175,6 +204,19 @@ pub fn sign_needed_with_ed25519_providers(
             .expect("selected signer must be available locally or externally");
         let transaction_xdr = transaction_xdr_bytes(envelope)
             .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
+        if let Some(provider) = system_auth.get(&key) {
+            let slot = system_auth_slot(record)?;
+            let unlock_key = provider
+                .release(&slot)
+                .map_err(|error| format!("System authentication for {key} failed: {error}"))?;
+            *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_unlock_key(
+                record,
+                network,
+                transaction_xdr,
+                unlock_key,
+            )?)?;
+            continue;
+        }
         *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_passcode(
             record,
             network,
@@ -447,8 +489,16 @@ mod tests {
         };
         let provider = sdk_backed_external_provider();
 
-        sign_with_ed25519_providers(&storage, &plan, "testnet", &mut envelope, None, &[provider])
-            .unwrap();
+        sign_with_ed25519_providers(
+            &storage,
+            &plan,
+            "testnet",
+            &mut envelope,
+            None,
+            &[],
+            &[provider],
+        )
+        .unwrap();
 
         let satisfied = satisfied_transaction_conditions(
             &plan,
@@ -457,6 +507,156 @@ mod tests {
         )
         .unwrap();
         assert!(plan.is_satisfiable_by(&satisfied));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn system_auth_provider_signs_local_software_signer_without_passphrase() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-system-auth-signing-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
+        storage.save(&record, false).unwrap();
+        let enrollment = crate::prepare_system_auth_enrollment(&record, PASSCODE).unwrap();
+        let expected_slot = enrollment.slot.storage_id();
+        let unlock_key = enrollment.unlock_key().to_vec();
+        let provider = SystemAuthUnlockProvider::new(SIGNER_A, move |slot| {
+            if slot.storage_id() != expected_slot {
+                return Err("unexpected system-auth slot".to_owned());
+            }
+            Ok(unlock_key.clone())
+        })
+        .unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"system-auth".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+
+        sign_with_ed25519_providers(
+            &storage,
+            &plan,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+            &[],
+        )
+        .unwrap();
+
+        let satisfied = satisfied_transaction_conditions(
+            &plan,
+            &envelope,
+            network_passphrase("testnet").unwrap(),
+        )
+        .unwrap();
+        assert!(plan.is_satisfiable_by(&satisfied));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn system_auth_provider_fails_closed_on_stale_unlock_key() {
+        let root =
+            std::env::temp_dir().join(format!("fresnica-system-auth-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
+        storage.save(&record, false).unwrap();
+        let provider = SystemAuthUnlockProvider::new(SIGNER_A, |_| Ok(vec![0u8; 32])).unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"stale".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+
+        let error = sign_with_ed25519_providers(
+            &storage,
+            &plan,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+            &[],
+        )
+        .unwrap_err();
+        assert!(error.contains("invalid system-auth unlock key"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn system_auth_provider_cannot_impersonate_nonlocal_signer() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-system-auth-nonlocal-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let provider = SystemAuthUnlockProvider::new(SIGNER_A, |_| Ok(vec![0u8; 32])).unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"nonlocal".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+
+        let error = sign_with_ed25519_providers(
+            &storage,
+            &plan,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+            &[],
+        )
+        .unwrap_err();
+        assert!(error.contains("no matching local protected software signer"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -498,6 +698,7 @@ mod tests {
             "testnet",
             &mut envelope,
             None,
+            &[],
             &[provider],
         )
         .unwrap_err();
@@ -551,6 +752,7 @@ mod tests {
             "testnet",
             &mut envelope,
             None,
+            &[],
             &[provider],
         )
         .unwrap();
@@ -597,6 +799,7 @@ mod tests {
             "testnet",
             &mut envelope,
             None,
+            &[],
             &[provider],
         )
         .unwrap_err();
@@ -642,6 +845,7 @@ mod tests {
             "testnet",
             &mut envelope,
             None,
+            &[],
             &[first, second],
         )
         .unwrap_err();

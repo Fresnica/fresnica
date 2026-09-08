@@ -310,7 +310,7 @@ fn map_attach_error(error: SdkError) -> String {
     }
 }
 
-fn record_envelope_json(record: &WalletRecord) -> Result<String, String> {
+pub(crate) fn record_envelope_json(record: &WalletRecord) -> Result<String, String> {
     let envelope = record
         .secret
         .as_ref()
