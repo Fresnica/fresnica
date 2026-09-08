@@ -7,14 +7,17 @@ use crate::asset_catalog::AssetCatalog;
 use crate::balance_state::AssetBalance;
 use crate::contacts::ContactStore;
 use crate::contract::{
-    authorize_contract_invoke, contract_interface, prepare_contract_invoke,
-    prepare_contract_invoke_outcome, sign_contract_invoke, submit_contract_invoke,
-    ContractInterface, ContractInvokePreparation, ContractInvokeRequest, PreparedContractInvoke,
+    authorize_contract_invoke, authorize_contract_invoke_with_system_auth, contract_interface,
+    prepare_contract_invoke, prepare_contract_invoke_outcome, sign_contract_invoke,
+    sign_contract_invoke_with_providers, submit_contract_invoke, ContractInterface,
+    ContractInvokePreparation, ContractInvokeRequest, PreparedContractInvoke,
 };
 use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
+use crate::signing_coordination::ExternalEd25519SigningProvider;
 use crate::storage::{WalletRecord, WalletStorage};
+use crate::system_auth::SystemAuthUnlockProvider;
 use crate::transaction::{
     validate_classic_transaction_timeout_seconds, PendingTransactionStore, TransactionSubmission,
     DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
@@ -261,12 +264,43 @@ impl FresnicaClient {
         authorize_contract_invoke(&self.storage, prepared, passcode)
     }
 
+    pub fn authorize_contract_invoke_with_system_auth(
+        &self,
+        prepared: &mut PreparedContractInvoke,
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+    ) -> Result<(), String> {
+        authorize_contract_invoke_with_system_auth(
+            &self.storage,
+            prepared,
+            passcode,
+            system_auth_providers,
+        )
+    }
+
     pub fn sign_contract_invoke(
         &self,
         prepared: &mut PreparedContractInvoke,
         passcode: &str,
     ) -> Result<(), String> {
         sign_contract_invoke(&self.storage, prepared, &self.gateway, passcode)
+    }
+
+    pub fn sign_contract_invoke_with_providers(
+        &self,
+        prepared: &mut PreparedContractInvoke,
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+        external_providers: &[ExternalEd25519SigningProvider],
+    ) -> Result<(), String> {
+        sign_contract_invoke_with_providers(
+            &self.storage,
+            prepared,
+            &self.gateway,
+            passcode,
+            system_auth_providers,
+            external_providers,
+        )
     }
 
     pub async fn submit_contract_invoke(

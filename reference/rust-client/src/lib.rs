@@ -81,7 +81,8 @@ pub use signing_coordination::{
     sign_with_local_ed25519, ExternalEd25519SigningProvider, LOCAL_SOFTWARE_PASSPHRASE_REQUIRED,
 };
 pub use soroban::{
-    authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
+    authorize_prepared_soroban, authorize_prepared_soroban_with_system_auth,
+    prepare_soroban_invoke, sign_prepared_soroban, sign_prepared_soroban_with_providers,
     submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
 };
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
