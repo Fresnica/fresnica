@@ -8,13 +8,14 @@ use stellar_xdr::{
 };
 
 use crate::asset::AssetId;
-use crate::transaction::prepared_classic_authorization_snapshot;
+use crate::transaction::{
+    build_single_operation_envelope_with_memo_and_timeout, prepared_classic_authorization_snapshot,
+};
 use crate::{
-    account_sequence, balance_stroops, build_single_operation_envelope_with_memo, format_stroops,
-    minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_write_wallet,
-    sign_and_submit, sign_and_submit_with_providers, ExternalEd25519SigningProvider,
-    FresnicaClient, LedgerAuthorizationSnapshot, LedgerParameters, TransactionSubmission,
-    WalletRecord,
+    account_sequence, balance_stroops, format_stroops, minimum_balance_stroops,
+    parse_positive_stroops, resolve_destination, resolve_write_wallet, sign_and_submit,
+    sign_and_submit_with_providers, ExternalEd25519SigningProvider, FresnicaClient,
+    LedgerAuthorizationSnapshot, LedgerParameters, TransactionSubmission, WalletRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +131,7 @@ pub struct PaymentReview {
     pub asset: String,
     pub fee_xlm: String,
     pub network: String,
+    pub transaction_timeout_seconds: u64,
     pub memo: Option<PaymentMemoReview>,
     pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
@@ -269,12 +271,13 @@ impl FresnicaClient {
 
         let create_destination = destination_account.is_none();
         let body = payment_body(&destination, &asset, amount, create_destination)?;
-        let envelope = build_single_operation_envelope_with_memo(
+        let envelope = build_single_operation_envelope_with_memo_and_timeout(
             &current.address,
             body,
             account_sequence(&account)?,
             ledger.base_fee_in_stroops,
             memo_xdr,
+            self.classic_transaction_timeout_seconds(),
         )?;
         let ledger_authorization = prepared_classic_authorization_snapshot(
             self.storage(),
@@ -296,6 +299,7 @@ impl FresnicaClient {
             asset: asset.display(),
             fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
             network: current.network.clone(),
+            transaction_timeout_seconds: self.classic_transaction_timeout_seconds(),
             memo: memo.review(),
             ledger_authorization,
         };

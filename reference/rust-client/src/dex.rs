@@ -5,13 +5,14 @@ use stellar_xdr::{
 };
 
 use crate::asset::AssetId;
-use crate::transaction::prepared_classic_authorization_snapshot;
+use crate::transaction::{
+    build_operation_envelope_with_timeout, prepared_classic_authorization_snapshot,
+};
 use crate::{
-    account_sequence, balance_stroops, build_operation_envelope, format_stroops,
-    minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit,
-    sign_and_submit_with_providers, ExternalEd25519SigningProvider, FresnicaClient,
-    LedgerAuthorizationSnapshot, TransactionSubmission, WalletRecord, DEFAULT_TRUSTLINE_LIMIT,
-    STROOPS_PER_XLM,
+    account_sequence, balance_stroops, format_stroops, minimum_balance_stroops, parse_stroops,
+    resolve_write_wallet, sign_and_submit, sign_and_submit_with_providers,
+    ExternalEd25519SigningProvider, FresnicaClient, LedgerAuthorizationSnapshot,
+    TransactionSubmission, WalletRecord, DEFAULT_TRUSTLINE_LIMIT, STROOPS_PER_XLM,
 };
 
 const INT32_MAX: i64 = i32::MAX as i64;
@@ -132,6 +133,7 @@ pub struct OfferReview {
     pub offer_id: Option<i64>,
     pub fee_xlm: String,
     pub network: String,
+    pub transaction_timeout_seconds: u64,
     pub details: OfferReviewDetails,
     pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
@@ -592,12 +594,13 @@ impl FresnicaClient {
             price.clone(),
             0,
         )?);
-        let envelope = build_operation_envelope(
+        let envelope = build_operation_envelope_with_timeout(
             &wallet.address,
             operations,
             account_sequence(&account)?,
             ledger.base_fee_in_stroops,
             None,
+            self.classic_transaction_timeout_seconds(),
         )?;
         let ledger_authorization = prepared_classic_authorization_snapshot(
             self.storage(),
@@ -615,6 +618,7 @@ impl FresnicaClient {
                 offer_id: None,
                 fee_xlm: format_stroops(total_fee),
                 network: wallet.network.clone(),
+                transaction_timeout_seconds: self.classic_transaction_timeout_seconds(),
                 details: OfferReviewDetails::Trade {
                     side,
                     base: base.display(),
@@ -700,12 +704,13 @@ impl FresnicaClient {
             total_fee,
         )?;
         let body = offer_operation(side, &base, &counter, amount, price.clone(), offer_id)?;
-        let envelope = build_operation_envelope(
+        let envelope = build_operation_envelope_with_timeout(
             &wallet.address,
             vec![body],
             account_sequence(&account)?,
             ledger.base_fee_in_stroops,
             None,
+            self.classic_transaction_timeout_seconds(),
         )?;
         let ledger_authorization = prepared_classic_authorization_snapshot(
             self.storage(),
@@ -723,6 +728,7 @@ impl FresnicaClient {
                 offer_id: Some(offer_id),
                 fee_xlm: format_stroops(total_fee),
                 network: wallet.network.clone(),
+                transaction_timeout_seconds: self.classic_transaction_timeout_seconds(),
                 details: OfferReviewDetails::Trade {
                     side,
                     base: base.display(),
@@ -787,12 +793,13 @@ impl FresnicaClient {
             ledger.base_reserve_in_stroops,
             i64::from(ledger.base_fee_in_stroops),
         )?;
-        let envelope = build_operation_envelope(
+        let envelope = build_operation_envelope_with_timeout(
             &wallet.address,
             vec![body],
             account_sequence(&account)?,
             ledger.base_fee_in_stroops,
             None,
+            self.classic_transaction_timeout_seconds(),
         )?;
         let ledger_authorization = prepared_classic_authorization_snapshot(
             self.storage(),
@@ -810,6 +817,7 @@ impl FresnicaClient {
                 offer_id: Some(offer_id),
                 fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
                 network: wallet.network.clone(),
+                transaction_timeout_seconds: self.classic_transaction_timeout_seconds(),
                 details: OfferReviewDetails::Cancel {
                     selling: selling.display(),
                     buying: buying.display(),

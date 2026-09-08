@@ -89,7 +89,7 @@ pub use transaction::{
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
     minimum_balance_stroops, network_passphrase, parse_positive_stroops, parse_stroops,
     parse_transaction_xdr, sign_transaction_xdr_with_passcode, TransactionSubmission,
-    STROOPS_PER_XLM,
+    DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS, STROOPS_PER_XLM,
 };
 pub(crate) use transaction::{
     resolve_write_wallet, sign_and_submit, sign_and_submit_with_providers,

@@ -2,12 +2,14 @@ use serde_json::Value;
 use stellar_xdr::{ChangeTrustOp, OperationBody, TransactionEnvelope};
 
 use crate::asset::AssetId;
-use crate::transaction::prepared_classic_authorization_snapshot;
+use crate::transaction::{
+    build_single_operation_envelope_with_timeout, prepared_classic_authorization_snapshot,
+};
 use crate::{
-    account_sequence, balance_stroops, build_single_operation_envelope, format_stroops,
-    minimum_balance_stroops, parse_stroops, resolve_write_wallet, sign_and_submit,
-    sign_and_submit_with_providers, ExternalEd25519SigningProvider, FresnicaClient, HorizonGateway,
-    LedgerAuthorizationSnapshot, TransactionSubmission, WalletRecord,
+    account_sequence, balance_stroops, format_stroops, minimum_balance_stroops, parse_stroops,
+    resolve_write_wallet, sign_and_submit, sign_and_submit_with_providers,
+    ExternalEd25519SigningProvider, FresnicaClient, HorizonGateway, LedgerAuthorizationSnapshot,
+    TransactionSubmission, WalletRecord,
 };
 
 pub const DEFAULT_TRUSTLINE_LIMIT: &str = "708269837873.6765";
@@ -71,6 +73,7 @@ pub struct TrustlineReview {
     pub clawback_enabled: Option<bool>,
     pub fee_xlm: String,
     pub network: String,
+    pub transaction_timeout_seconds: u64,
     pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
 
@@ -190,12 +193,13 @@ impl FresnicaClient {
             line: asset.to_change_trust_xdr()?,
             limit,
         });
-        let envelope = build_single_operation_envelope(
+        let envelope = build_single_operation_envelope_with_timeout(
             &wallet.address,
             body,
             account_sequence(&account)?,
             ledger.base_fee_in_stroops,
             None,
+            self.classic_transaction_timeout_seconds(),
         )?;
         let ledger_authorization = prepared_classic_authorization_snapshot(
             self.storage(),
@@ -213,6 +217,7 @@ impl FresnicaClient {
             clawback_enabled,
             fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
             network: wallet.network.clone(),
+            transaction_timeout_seconds: self.classic_transaction_timeout_seconds(),
             ledger_authorization,
         };
         Ok(PreparedTrustline {

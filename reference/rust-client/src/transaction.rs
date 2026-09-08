@@ -32,7 +32,7 @@ use crate::signing_coordination::{
 use crate::{HorizonGateway, SubmissionError, WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
-const TX_TIMEOUT_SECONDS: u64 = 5 * 60;
+pub const DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS: u64 = 5 * 60;
 const PENDING_TTL_SECONDS: i64 = 210;
 const MAINNET_PASSPHRASE: &str = "Public Global Stellar Network ; September 2015";
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
@@ -101,8 +101,33 @@ pub fn build_single_operation_envelope(
     base_fee: u32,
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
+    build_single_operation_envelope_with_timeout(
+        source,
+        body,
+        current_sequence,
+        base_fee,
+        memo,
+        DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+    )
+}
+
+pub(crate) fn build_single_operation_envelope_with_timeout(
+    source: &str,
+    body: OperationBody,
+    current_sequence: i64,
+    base_fee: u32,
+    memo: Option<&str>,
+    timeout_seconds: u64,
+) -> Result<TransactionEnvelope, String> {
     let memo = text_memo(memo)?;
-    build_single_operation_envelope_with_memo(source, body, current_sequence, base_fee, memo)
+    build_single_operation_envelope_with_memo_and_timeout(
+        source,
+        body,
+        current_sequence,
+        base_fee,
+        memo,
+        timeout_seconds,
+    )
 }
 
 pub fn build_single_operation_envelope_with_memo(
@@ -112,7 +137,32 @@ pub fn build_single_operation_envelope_with_memo(
     base_fee: u32,
     memo: Memo,
 ) -> Result<TransactionEnvelope, String> {
-    build_operation_envelope_with_memo(source, vec![body], current_sequence, base_fee, memo)
+    build_single_operation_envelope_with_memo_and_timeout(
+        source,
+        body,
+        current_sequence,
+        base_fee,
+        memo,
+        DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+    )
+}
+
+pub(crate) fn build_single_operation_envelope_with_memo_and_timeout(
+    source: &str,
+    body: OperationBody,
+    current_sequence: i64,
+    base_fee: u32,
+    memo: Memo,
+    timeout_seconds: u64,
+) -> Result<TransactionEnvelope, String> {
+    build_operation_envelope_with_memo_and_timeout(
+        source,
+        vec![body],
+        current_sequence,
+        base_fee,
+        memo,
+        timeout_seconds,
+    )
 }
 
 pub fn build_operation_envelope(
@@ -122,13 +172,32 @@ pub fn build_operation_envelope(
     base_fee_per_operation: u32,
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
-    let memo = text_memo(memo)?;
-    build_operation_envelope_with_memo(
+    build_operation_envelope_with_timeout(
         source,
         bodies,
         current_sequence,
         base_fee_per_operation,
         memo,
+        DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+    )
+}
+
+pub(crate) fn build_operation_envelope_with_timeout(
+    source: &str,
+    bodies: Vec<OperationBody>,
+    current_sequence: i64,
+    base_fee_per_operation: u32,
+    memo: Option<&str>,
+    timeout_seconds: u64,
+) -> Result<TransactionEnvelope, String> {
+    let memo = text_memo(memo)?;
+    build_operation_envelope_with_memo_and_timeout(
+        source,
+        bodies,
+        current_sequence,
+        base_fee_per_operation,
+        memo,
+        timeout_seconds,
     )
 }
 
@@ -142,13 +211,15 @@ fn text_memo(memo: Option<&str>) -> Result<Memo, String> {
     }
 }
 
-fn build_operation_envelope_with_memo(
+pub(crate) fn build_operation_envelope_with_memo_and_timeout(
     source: &str,
     bodies: Vec<OperationBody>,
     current_sequence: i64,
     base_fee_per_operation: u32,
     memo: Memo,
+    timeout_seconds: u64,
 ) -> Result<TransactionEnvelope, String> {
+    let timeout_seconds = validate_classic_transaction_timeout_seconds(timeout_seconds)?;
     if bodies.is_empty() {
         return Err("transaction must contain at least one operation".to_owned());
     }
@@ -175,7 +246,7 @@ fn build_operation_envelope_with_memo(
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "system clock is before Unix epoch".to_owned())?
         .as_secs()
-        .checked_add(TX_TIMEOUT_SECONDS)
+        .checked_add(timeout_seconds)
         .ok_or_else(|| "transaction timeout overflow".to_owned())?;
     let transaction = Transaction {
         source_account: account_id_to_muxed(&source),
@@ -199,6 +270,16 @@ fn build_operation_envelope_with_memo(
 pub struct TransactionSubmission {
     pub hash: String,
     pub ledger: Option<u64>,
+}
+
+pub(crate) fn validate_classic_transaction_timeout_seconds(
+    timeout_seconds: u64,
+) -> Result<u64, String> {
+    if timeout_seconds == 0 {
+        Err("Classic transaction timeout must be greater than zero seconds".to_owned())
+    } else {
+        Ok(timeout_seconds)
+    }
 }
 
 pub(crate) fn ensure_transaction_not_expired(envelope: &TransactionEnvelope) -> Result<(), String> {
@@ -789,8 +870,38 @@ mod tests {
     }
 
     #[test]
-    fn classic_transaction_timeout_allows_interactive_signing_window() {
-        assert_eq!(TX_TIMEOUT_SECONDS, 5 * 60);
+    fn classic_transaction_timeout_is_configurable_without_changing_default() {
+        assert_eq!(DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS, 5 * 60);
+        assert_eq!(
+            validate_classic_transaction_timeout_seconds(42).unwrap(),
+            42
+        );
+        assert_eq!(
+            validate_classic_transaction_timeout_seconds(0).unwrap_err(),
+            "Classic transaction timeout must be greater than zero seconds"
+        );
+
+        let body = OperationBody::BumpSequence(stellar_xdr::BumpSequenceOp {
+            bump_to: SequenceNumber(9),
+        });
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let envelope =
+            build_operation_envelope_with_timeout(SOURCE, vec![body], 7, 100, None, 42).unwrap();
+        let after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let TransactionEnvelope::Tx(envelope) = envelope else {
+            panic!("expected v1 transaction envelope");
+        };
+        let Preconditions::Time(bounds) = envelope.tx.cond else {
+            panic!("expected time bounds");
+        };
+        assert!(bounds.max_time.0 >= before + 42);
+        assert!(bounds.max_time.0 <= after + 42);
     }
 
     #[test]

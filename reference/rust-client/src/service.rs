@@ -15,7 +15,10 @@ use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
 use crate::storage::{WalletRecord, WalletStorage};
-use crate::transaction::{PendingTransactionStore, TransactionSubmission};
+use crate::transaction::{
+    validate_classic_transaction_timeout_seconds, PendingTransactionStore, TransactionSubmission,
+    DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkProfile {
@@ -88,6 +91,7 @@ pub struct FresnicaClient {
     asset_catalog: AssetCatalog,
     gateway: HorizonGateway,
     rpc: Option<RpcGateway>,
+    classic_transaction_timeout_seconds: u64,
 }
 
 impl FresnicaClient {
@@ -113,6 +117,7 @@ impl FresnicaClient {
             asset_catalog,
             gateway,
             rpc,
+            classic_transaction_timeout_seconds: DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
         })
     }
 
@@ -122,6 +127,19 @@ impl FresnicaClient {
 
     pub fn network_profile(&self) -> &NetworkProfile {
         &self.profile
+    }
+
+    pub fn classic_transaction_timeout_seconds(&self) -> u64 {
+        self.classic_transaction_timeout_seconds
+    }
+
+    pub fn with_classic_transaction_timeout_seconds(
+        mut self,
+        timeout_seconds: u64,
+    ) -> Result<Self, String> {
+        self.classic_transaction_timeout_seconds =
+            validate_classic_transaction_timeout_seconds(timeout_seconds)?;
+        Ok(self)
     }
 
     pub fn storage(&self) -> &WalletStorage {
@@ -305,6 +323,27 @@ mod tests {
             .err()
             .expect("invalid network should fail");
         assert_eq!(error, "unknown network: future-net");
+    }
+
+    #[test]
+    fn classic_transaction_timeout_has_safe_default_and_explicit_override() {
+        let client = FresnicaClient::new(&temp_home("tx-timeout"), "testnet").unwrap();
+        assert_eq!(
+            client.classic_transaction_timeout_seconds(),
+            DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS
+        );
+        let client = client
+            .with_classic_transaction_timeout_seconds(900)
+            .unwrap();
+        assert_eq!(client.classic_transaction_timeout_seconds(), 900);
+        assert_eq!(
+            FresnicaClient::new(&temp_home("tx-timeout-zero"), "testnet")
+                .unwrap()
+                .with_classic_transaction_timeout_seconds(0)
+                .err()
+                .unwrap(),
+            "Classic transaction timeout must be greater than zero seconds"
+        );
     }
 
     #[test]
