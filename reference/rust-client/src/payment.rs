@@ -142,6 +142,17 @@ pub struct PreparedPayment {
 }
 
 impl FresnicaClient {
+    pub fn ensure_payment_receive_ready(
+        &self,
+        wallet: Option<&str>,
+        asset_text: &str,
+    ) -> Result<(), String> {
+        let wallet = self.resolve_wallet(wallet)?;
+        let asset = AssetId::parse(asset_text)?;
+        let account = self.gateway().get_account(&wallet.address)?;
+        validate_destination_receive(&account, &wallet.address, &asset, 1)
+    }
+
     pub fn prepare_payment(&self, request: &PaymentRequest) -> Result<PreparedPayment, String> {
         let wallet = resolve_write_wallet(
             self.storage(),
