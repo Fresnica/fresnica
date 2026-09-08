@@ -6,7 +6,7 @@ import Security
 ///
 /// One Keychain-protected EC private key authorizes use of every local software signer on this
 /// installation. Its public key wraps each signer's independent WalletUnlockKey without prompting.
-/// The private key is gated by the current biometric set and is used only to unwrap during signing.
+/// The private key is gated by device user presence and is used only to unwrap during signing.
 public final class FresnicaWalletUnlockKeyStore {
     public static let unlockKeyLength = 32
 
@@ -207,7 +207,7 @@ public final class FresnicaWalletUnlockKeyStore {
         guard let accessControl = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
-            [.userPresence, .privateKeyUsage],
+            [.userPresence],
             &accessError
         ) else {
             throw StoreError.accessControlCreationFailed(
