@@ -1094,6 +1094,50 @@ mod tests {
     }
 
     #[test]
+    fn detached_classic_authorization_accepts_system_auth_unlock_key() {
+        let request =
+            SorobanInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "transfer", vec![]);
+        let public = StrkeyPublicKey::from_string(ACCOUNT).unwrap();
+        let auth = address_auth(ScAddress::Account(stellar_xdr::AccountId(
+            PublicKey::PublicKeyTypeEd25519(Uint256(public.0)),
+        )));
+        let mut prepared = assemble_reviewed_transaction(
+            "main".to_owned(),
+            TESTNET,
+            &request,
+            candidate(&request),
+            simulation(auth),
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-soroban-system-auth-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let signer = import_secret_record("signer", TESTNET, SECRET, PASSCODE).unwrap();
+        storage.save(&signer, false).unwrap();
+        let enrollment = crate::prepare_system_auth_enrollment(&signer, PASSCODE).unwrap();
+        let expected_slot = enrollment.slot.storage_id();
+        let unlock_key = enrollment.unlock_key().to_vec();
+        let provider = SystemAuthUnlockProvider::new(ACCOUNT, move |slot| {
+            if slot.storage_id() != expected_slot {
+                return SystemAuthRelease::Failed("unexpected system-auth slot".to_owned());
+            }
+            SystemAuthRelease::UnlockKey(unlock_key.clone())
+        })
+        .unwrap();
+        authorize_prepared_soroban_with_system_auth(&storage, &mut prepared, None, &[provider])
+            .unwrap();
+        let entries = invoke_auth_entries(&prepared.envelope).unwrap();
+        let SorobanCredentials::AddressV2(credentials) = &entries[0].credentials else {
+            panic!("expected AddressV2 credentials");
+        };
+        assert!(!matches!(credentials.signature, ScVal::Void));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn invoke_host_function_uses_medium_ledger_threshold() {
         let request =
             SorobanInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "transfer", vec![]);
