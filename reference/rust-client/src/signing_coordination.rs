@@ -74,6 +74,38 @@ pub fn sign_with_ed25519_providers(
 ) -> Result<(), String> {
     let network_passphrase = network_passphrase(network)?;
     let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase)?;
+    sign_needed_with_ed25519_providers(
+        storage,
+        plan,
+        &satisfied,
+        &BTreeSet::new(),
+        0,
+        network,
+        envelope,
+        passcode,
+        external_providers,
+    )?;
+
+    let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase)?;
+    if plan.is_satisfiable_by(&satisfied) {
+        Ok(())
+    } else {
+        Err("Signing Coordination did not satisfy ledger authorization".to_owned())
+    }
+}
+
+pub fn sign_needed_with_ed25519_providers(
+    storage: &WalletStorage,
+    plan: &LedgerAuthorizationPlan,
+    satisfied: &BTreeSet<LedgerSignerCondition>,
+    excluded_keys: &BTreeSet<String>,
+    minimum_signatures: usize,
+    network: &str,
+    envelope: &mut TransactionEnvelope,
+    passcode: Option<&str>,
+    external_providers: &[ExternalEd25519SigningProvider],
+) -> Result<(), String> {
+    let network_passphrase = network_passphrase(network)?;
     let records = local_signing_records(storage, network)?;
 
     let mut providers = BTreeMap::new();
@@ -92,9 +124,10 @@ pub fn sign_with_ed25519_providers(
     let available = records
         .keys()
         .chain(providers.keys())
+        .filter(|key| !excluded_keys.contains(*key))
         .cloned()
         .collect::<BTreeSet<_>>();
-    let selected = select_ed25519_signers(plan, &satisfied, &available, 0)?;
+    let selected = select_ed25519_signers(plan, satisfied, &available, minimum_signatures)?;
 
     let local_selected = selected
         .iter()
@@ -149,13 +182,7 @@ pub fn sign_with_ed25519_providers(
             passcode.expect("local signer passcode was preflighted"),
         )?)?;
     }
-
-    let satisfied = satisfied_transaction_conditions(plan, envelope, network_passphrase)?;
-    if plan.is_satisfiable_by(&satisfied) {
-        Ok(())
-    } else {
-        Err("Signing Coordination did not satisfy ledger authorization".to_owned())
-    }
+    Ok(())
 }
 
 pub fn sign_with_local_ed25519(
@@ -430,6 +457,108 @@ mod tests {
         )
         .unwrap();
         assert!(plan.is_satisfiable_by(&satisfied));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn needed_provider_signing_honors_excluded_keys() {
+        let root =
+            std::env::temp_dir().join(format!("fresnica-external-excluded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"excluded".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+        let provider = sdk_backed_external_provider();
+        let excluded = BTreeSet::from([SIGNER_A.to_owned()]);
+
+        let error = sign_needed_with_ed25519_providers(
+            &storage,
+            &plan,
+            &BTreeSet::new(),
+            &excluded,
+            1,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+        )
+        .unwrap_err();
+
+        assert!(error.contains("cannot satisfy ledger authorization"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn needed_provider_signing_can_require_one_client_signature() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-external-minimum-proof-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"proof".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 0,
+                uses: Vec::new(),
+                signers: vec![WeightedLedgerSigner {
+                    condition: LedgerSignerCondition {
+                        kind: LedgerSignerKind::Ed25519PublicKey,
+                        key: SIGNER_A.to_owned(),
+                    },
+                    weight: 0,
+                }],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+        let provider = sdk_backed_external_provider();
+
+        sign_needed_with_ed25519_providers(
+            &storage,
+            &plan,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            1,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+        )
+        .unwrap();
+
+        let TransactionEnvelope::Tx(transaction) = envelope else {
+            unreachable!();
+        };
+        assert_eq!(transaction.signatures.len(), 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 

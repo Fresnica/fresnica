@@ -75,8 +75,8 @@ pub use service::{
 };
 pub use signing_coordination::{
     review_ledger_authorization, select_ed25519_signers, select_local_ed25519_signers,
-    sign_needed_local_ed25519, sign_with_ed25519_providers, sign_with_local_ed25519,
-    ExternalEd25519SigningProvider,
+    sign_needed_local_ed25519, sign_needed_with_ed25519_providers, sign_with_ed25519_providers,
+    sign_with_local_ed25519, ExternalEd25519SigningProvider,
 };
 pub use soroban::{
     authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
