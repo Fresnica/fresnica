@@ -215,7 +215,7 @@ public final class FresnicaWalletUnlockKeyStore {
             )
         }
 
-        let attributes: [CFString: Any] = [
+        var attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits: 256,
             kSecPrivateKeyAttrs: [
@@ -224,6 +224,7 @@ public final class FresnicaWalletUnlockKeyStore {
                 kSecAttrAccessControl: accessControl,
             ],
         ]
+        useDataProtectionKeychainIfNeeded(&attributes)
         var keyError: Unmanaged<CFError>?
         guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &keyError) else {
             throw StoreError.crypto(keyError?.takeRetainedValue().localizedDescription)
