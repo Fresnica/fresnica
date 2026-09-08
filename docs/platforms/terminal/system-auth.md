@@ -1,6 +1,6 @@
 # TUI / CLI System Authorization
 
-Status: **client path implemented; OS backends are platform-specific**.
+Status: **Rust client + Terminal one-shot signing path validated; production OS backends are platform-specific and not yet shipped**.
 
 This document applies the [Client / Rust Core Security Contract](../../core/client-security.md) to the current Fresnica TUI/CLI.
 
@@ -24,7 +24,9 @@ TUI / CLI
           +-- reveal/export(fresh passcode)
 ```
 
-The current Python TUI uses the Python reference boundary while the production Rust binding is not yet wired into this client. The client behavior is intentionally the same so the OS adapters do not need to change when the TUI switches to Rust Core.
+The Rust reference client now owns the platform-neutral `SystemAuthSlot` and System Auth signing source. Terminal injects a client-owned backend; the released protected envelope is still signed only through Fresnica SDK/Core. No OS API or KDF/decryption logic moved into Terminal or Core.
+
+CLI system authentication is one-shot. Non-interactive CLI invocation does not activate System Auth. Session lifetime remains an application/TUI concern rather than a CLI credential cache.
 
 ## TUI behavior
 
@@ -36,8 +38,9 @@ When a backend is available:
 4. Only that unlock key is passed to the OS backend.
 5. Later unlock requests first ask the backend to perform its local authorization and release the key.
 6. The released key opens the same canonical password envelope.
-7. If no enrollment exists or system authorization cannot be used, the TUI falls back to the app passcode.
-8. A stale unlock key is rejected by wallet AEAD authentication and the client falls back to the passcode path.
+7. If no exact enrollment exists or no System Auth backend is available, the client may use the fresh Passphrase path.
+8. Once an enrolled System Auth provider is invoked, cancellation, provider failure, stale enrollment, or an invalid released key fails the current attempt; it must not silently downgrade to a Passphrase prompt.
+9. If the first signing plan instead reports that selected local software signers have no System Auth source, a fresh Passphrase retry covers all selected software signers and does not also invoke System Auth.
 
 System unlock does not authorize signing-material Reveal / Export.
 
@@ -63,7 +66,7 @@ A production macOS backend should use an OS facility that cryptographically gate
 
 macOS has both the legacy file-based keychain and the data-protection keychain. Apple's data-protection `SecAccessControl` model is designed around app-like code-signing/access-group entitlements, which makes a pure unsigned command-line process materially different from a normal macOS app.
 
-Therefore the preferred macOS implementation is a small signed native client helper/agent (or packaged app-style TUI host) that owns Keychain/LocalAuthentication access and returns only the wallet unlock key after successful user presence. The TUI talks to that helper as a client adapter; Rust Core remains unchanged.
+Therefore the preferred macOS implementation is the existing signed native Keychain/LocalAuthentication helper pattern (or equivalent app-style host) that returns only the wallet unlock key after successful user presence. The existing Apple `FresnicaWalletUnlockKeyStore` API already matches the backend lifecycle. A Terminal backend can use `SystemAuthSlot::storage_id()` (`public-key:envelope-fingerprint`) as its signer identifier so Passphrase re-protection cannot reuse a stale enrollment. Rust Core remains unchanged.
 
 A shell call to `/usr/bin/security` is not an acceptable substitute for per-use user-presence protection.
 
@@ -73,13 +76,15 @@ A Windows TUI/CLI backend should map the same interface to Windows platform cred
 
 ## Linux
 
-Linux has no single universal user-presence API. A client backend may integrate with the desktop's Secret Service/keyring plus an explicit local-auth policy appropriate to that environment, or report system unlock unavailable and use the Fresnica passcode fallback.
+Linux has no single universal user-presence API. A client backend may integrate with the desktop's Secret Service/keyring plus an explicit local-auth policy appropriate to that environment, or report system unlock unavailable and use the Fresnica Passphrase path.
+
+Linux may provide this backend as a separately installed high-trust `SystemAuthProvider`, but it is **not** an ordinary `fresnica-*` command plugin and must never be auto-trusted merely because an executable appears on `PATH`. Provider registration/integrity and its local-auth guarantee belong to the platform client layer.
 
 The backend must not claim stronger guarantees than the underlying desktop/session actually provides.
 
 ## Testing
 
-Cross-platform CI tests the backend contract using an injected fake backend:
+The Rust client/Terminal architecture slice is tested with an injected fake backend:
 
 - enrollment stores only 32 unlock-key bytes;
 - system release unlocks the expected wallet;

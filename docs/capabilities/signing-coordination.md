@@ -47,9 +47,11 @@ Stale system-auth registrations/unlock keys must fail safely after re-protection
 
 ## Current Rust reference
 
-The Rust reference coordinates only the local software Ed25519 signatures still required by a Ledger Authorization plan and stops as soon as the plan is satisfied. A source Account may be watch-only while separate same-network signer records supply authority. Normal transaction submission also recognizes already-valid Ed25519, matching preauthorized-transaction, Hash-X and signed-payload conditions before selecting more local signers.
+The Rust reference coordinates the Ed25519 signatures still required by a Ledger Authorization plan and stops as soon as the plan is satisfied. Local protected software signers may be authorized either by a fresh Passphrase or an exact-envelope `SystemAuthUnlockProvider`; external Ed25519 signer providers remain a separate source. A System Auth provider is accepted only for a matching local protected signer and cannot overlap the external-provider identity for the same key.
 
-Classic SEP-10 reuses the same local Ed25519 coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Fresnica still does not collect Hash-X, signed-payload or other external/provider authorization material itself.
+A source Account may be watch-only while separate same-network signer records supply authority. Normal transaction submission also recognizes already-valid Ed25519, matching preauthorized-transaction, Hash-X and signed-payload conditions before selecting more signers. Released System Auth unlock material is passed into the existing SDK unlock-key signing API; stale/wrong keys are rejected by SDK/Core protected-envelope authentication.
+
+Classic SEP-10 reuses the same coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Fresnica still does not collect Hash-X, signed-payload or other unsupported authorization material itself.
 
 ## External signer authorization
 
