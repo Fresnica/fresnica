@@ -35,7 +35,15 @@ impl SystemAuthEnrollment {
     }
 }
 
-type ReleaseUnlockKeyFn = dyn Fn(&SystemAuthSlot) -> Result<Vec<u8>, String>;
+#[derive(Debug, PartialEq, Eq)]
+pub enum SystemAuthRelease {
+    UnlockKey(Vec<u8>),
+    PassphraseRequired,
+    Cancelled,
+    Failed(String),
+}
+
+type ReleaseUnlockKeyFn = dyn Fn(&SystemAuthSlot) -> SystemAuthRelease;
 
 pub struct SystemAuthUnlockProvider {
     public_key: String,
@@ -45,7 +53,7 @@ pub struct SystemAuthUnlockProvider {
 impl SystemAuthUnlockProvider {
     pub fn new<F>(public_key: &str, release_unlock_key: F) -> Result<Self, String>
     where
-        F: Fn(&SystemAuthSlot) -> Result<Vec<u8>, String> + 'static,
+        F: Fn(&SystemAuthSlot) -> SystemAuthRelease + 'static,
     {
         let public = PublicKey::from_string(public_key.trim()).map_err(|_| {
             "system-auth provider requires a valid Stellar Ed25519 public key".to_owned()
@@ -60,18 +68,20 @@ impl SystemAuthUnlockProvider {
         &self.public_key
     }
 
-    pub(crate) fn release(&self, slot: &SystemAuthSlot) -> Result<Vec<u8>, String> {
+    pub(crate) fn release(&self, slot: &SystemAuthSlot) -> Result<SystemAuthRelease, String> {
         if slot.signer_public_key != self.public_key {
             return Err("system-auth provider slot does not match signer identity".to_owned());
         }
-        let key = (self.release_unlock_key)(slot)?;
-        if key.len() != SYSTEM_AUTH_UNLOCK_KEY_LENGTH {
-            return Err(format!(
-                "system-auth provider returned {} bytes; expected {SYSTEM_AUTH_UNLOCK_KEY_LENGTH}",
-                key.len()
-            ));
+        let release = (self.release_unlock_key)(slot);
+        if let SystemAuthRelease::UnlockKey(key) = &release {
+            if key.len() != SYSTEM_AUTH_UNLOCK_KEY_LENGTH {
+                return Err(format!(
+                    "system-auth provider returned {} bytes; expected {SYSTEM_AUTH_UNLOCK_KEY_LENGTH}",
+                    key.len()
+                ));
+            }
         }
-        Ok(key)
+        Ok(release)
     }
 }
 
@@ -166,7 +176,9 @@ mod tests {
     #[test]
     fn provider_rejects_wrong_identity_and_wrong_key_length() {
         let slot = system_auth_slot(&record()).unwrap();
-        let provider = SystemAuthUnlockProvider::new(PUBLIC, |_| Ok(vec![0u8; 31])).unwrap();
+        let provider =
+            SystemAuthUnlockProvider::new(PUBLIC, |_| SystemAuthRelease::UnlockKey(vec![0u8; 31]))
+                .unwrap();
         assert!(provider.release(&slot).unwrap_err().contains("expected 32"));
         let other = SystemAuthSlot {
             signer_public_key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"

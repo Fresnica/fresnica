@@ -9,7 +9,7 @@ use crate::ledger_authorization::{
     LedgerAuthorizationSnapshot, LedgerSignerCondition, LedgerSignerKind, WeightedLedgerSigner,
 };
 use crate::storage::{WalletRecord, WalletStorage};
-use crate::system_auth::{system_auth_slot, SystemAuthUnlockProvider};
+use crate::system_auth::{system_auth_slot, SystemAuthRelease, SystemAuthUnlockProvider};
 use crate::transaction::{
     network_passphrase, parse_transaction_xdr, sign_transaction_xdr_with_passcode,
     sign_transaction_xdr_with_unlock_key, transaction_hash_bytes, transaction_xdr_bytes,
@@ -17,6 +17,9 @@ use crate::transaction::{
 use crate::wallet::verify_passcode;
 
 type ExternalEd25519SigningFn = dyn Fn(&SdkEd25519SigningRequest) -> Result<Vec<u8>, String>;
+
+pub const LOCAL_SOFTWARE_PASSPHRASE_REQUIRED: &str =
+    "Fresnica passphrase is required for selected local software signers";
 
 pub struct ExternalEd25519SigningProvider {
     public_key: String,
@@ -163,9 +166,7 @@ pub fn sign_needed_with_ed25519_providers(
         .filter(|key| !providers.contains_key(*key) && !system_auth.contains_key(*key))
         .collect::<Vec<_>>();
     if !local_selected.is_empty() {
-        let passcode = passcode.ok_or_else(|| {
-            "Fresnica passphrase is required for selected local software signers".to_owned()
-        })?;
+        let passcode = passcode.ok_or_else(|| LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned())?;
         for key in &local_selected {
             let record = records
                 .get(*key)
@@ -206,16 +207,29 @@ pub fn sign_needed_with_ed25519_providers(
             .map_err(|error| format!("Unable to encode transaction before signing: {error}"))?;
         if let Some(provider) = system_auth.get(&key) {
             let slot = system_auth_slot(record)?;
-            let unlock_key = provider
+            match provider
                 .release(&slot)
-                .map_err(|error| format!("System authentication for {key} failed: {error}"))?;
-            *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_unlock_key(
-                record,
-                network,
-                transaction_xdr,
-                unlock_key,
-            )?)?;
-            continue;
+                .map_err(|error| format!("System authentication for {key} failed: {error}"))?
+            {
+                SystemAuthRelease::UnlockKey(unlock_key) => {
+                    *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_unlock_key(
+                        record,
+                        network,
+                        transaction_xdr,
+                        unlock_key,
+                    )?)?;
+                    continue;
+                }
+                SystemAuthRelease::PassphraseRequired => {
+                    return Err(LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned());
+                }
+                SystemAuthRelease::Cancelled => {
+                    return Err("System authentication cancelled".to_owned());
+                }
+                SystemAuthRelease::Failed(error) => {
+                    return Err(format!("System authentication for {key} failed: {error}"));
+                }
+            }
         }
         *envelope = parse_transaction_xdr(&sign_transaction_xdr_with_passcode(
             record,
@@ -525,9 +539,9 @@ mod tests {
         let unlock_key = enrollment.unlock_key().to_vec();
         let provider = SystemAuthUnlockProvider::new(SIGNER_A, move |slot| {
             if slot.storage_id() != expected_slot {
-                return Err("unexpected system-auth slot".to_owned());
+                return SystemAuthRelease::Failed("unexpected system-auth slot".to_owned());
             }
-            Ok(unlock_key.clone())
+            SystemAuthRelease::UnlockKey(unlock_key.clone())
         })
         .unwrap();
         let mut envelope = build_operation_envelope(
@@ -580,7 +594,10 @@ mod tests {
         let storage = WalletStorage::new(&root).unwrap();
         let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
         storage.save(&record, false).unwrap();
-        let provider = SystemAuthUnlockProvider::new(SIGNER_A, |_| Ok(vec![0u8; 32])).unwrap();
+        let provider = SystemAuthUnlockProvider::new(SIGNER_A, |_| {
+            SystemAuthRelease::UnlockKey(vec![0u8; 32])
+        })
+        .unwrap();
         let mut envelope = build_operation_envelope(
             ACCOUNT,
             vec![OperationBody::ManageData(ManageDataOp {
@@ -617,6 +634,101 @@ mod tests {
     }
 
     #[test]
+    fn exhausted_system_auth_requests_fresh_passphrase_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-system-auth-fallback-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
+        storage.save(&record, false).unwrap();
+        let provider =
+            SystemAuthUnlockProvider::new(SIGNER_A, |_| SystemAuthRelease::PassphraseRequired)
+                .unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"fallback".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+
+        let error = sign_with_ed25519_providers(
+            &storage,
+            &plan,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(error, LOCAL_SOFTWARE_PASSPHRASE_REQUIRED);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cancelled_system_auth_does_not_request_passphrase_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-system-auth-cancelled-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
+        storage.save(&record, false).unwrap();
+        let provider =
+            SystemAuthUnlockProvider::new(SIGNER_A, |_| SystemAuthRelease::Cancelled).unwrap();
+        let mut envelope = build_operation_envelope(
+            ACCOUNT,
+            vec![OperationBody::ManageData(ManageDataOp {
+                data_name: String64::try_from(b"cancelled".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT.to_owned(),
+                required_weight: 1,
+                uses: Vec::new(),
+                signers: vec![signer(SIGNER_A)],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+
+        let error = sign_with_ed25519_providers(
+            &storage,
+            &plan,
+            "testnet",
+            &mut envelope,
+            None,
+            &[provider],
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(error, "System authentication cancelled");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn system_auth_provider_cannot_impersonate_nonlocal_signer() {
         let root = std::env::temp_dir().join(format!(
             "fresnica-system-auth-nonlocal-{}",
@@ -624,7 +736,10 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         let storage = WalletStorage::new(&root).unwrap();
-        let provider = SystemAuthUnlockProvider::new(SIGNER_A, |_| Ok(vec![0u8; 32])).unwrap();
+        let provider = SystemAuthUnlockProvider::new(SIGNER_A, |_| {
+            SystemAuthRelease::UnlockKey(vec![0u8; 32])
+        })
+        .unwrap();
         let mut envelope = build_operation_envelope(
             ACCOUNT,
             vec![OperationBody::ManageData(ManageDataOp {
