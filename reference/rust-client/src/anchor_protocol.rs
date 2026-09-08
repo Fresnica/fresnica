@@ -721,6 +721,17 @@ pub fn fetch_anchor_transaction(
     parse_anchor_transaction_response(&value, transaction_id)
 }
 
+pub fn discover_anchor_at(asset_text: &str, home_domain: &str) -> Result<AnchorDiscovery, String> {
+    let asset = AnchorAsset::parse(asset_text)?;
+    let home_domain = canonical_home_domain(home_domain)?;
+    let capabilities = discover(&asset, &home_domain)?;
+    Ok(AnchorDiscovery {
+        asset,
+        home_domain,
+        capabilities,
+    })
+}
+
 impl FresnicaClient {
     pub fn discover_anchor(&self, asset_text: &str) -> Result<AnchorDiscovery, String> {
         let asset = AnchorAsset::parse(asset_text)?;
@@ -731,13 +742,7 @@ impl FresnicaClient {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| format!("Asset issuer {} has no home_domain", asset.issuer))?;
-        let home_domain = canonical_home_domain(home_domain)?;
-        let capabilities = discover(&asset, &home_domain)?;
-        Ok(AnchorDiscovery {
-            asset,
-            home_domain,
-            capabilities,
-        })
+        discover_anchor_at(asset_text, home_domain)
     }
 }
 

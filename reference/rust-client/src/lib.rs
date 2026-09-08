@@ -30,7 +30,7 @@ pub use anchor::{
 };
 pub use anchor_protocol::{
     anchor_sep6_requires_auth, anchor_status_requires_sep10, anchor_transaction_text,
-    anchor_transfer_requires_sep10, anchor_withdrawal_payment_from_transaction,
+    anchor_transfer_requires_sep10, anchor_withdrawal_payment_from_transaction, discover_anchor_at,
     exchange_anchor_sep10_challenge, fetch_anchor_transaction, prepare_anchor_sep10_challenge,
     select_anchor_status_protocol, select_anchor_transfer_protocol, sep10_authorization_plan,
     start_anchor_sep24_transfer, start_anchor_sep6_transfer, AnchorAsset, AnchorCapabilities,
