@@ -354,6 +354,35 @@ pub fn anchor_withdrawal_payment_from_transaction(
     })
 }
 
+pub fn anchor_withdrawal_payment_from_sep6_response(
+    response: &JsonValue,
+    requested_amount: &str,
+) -> Result<AnchorWithdrawalPayment, String> {
+    let destination = anchor_transaction_text(response, "account_id")
+        .ok_or_else(|| "SEP-6 withdrawal response has no account_id".to_owned())?;
+    let identity = FresnicaSdk::new()
+        .parse_account(destination.to_owned())
+        .map_err(|_| "SEP-6 withdrawal account_id is not a valid Stellar address".to_owned())?;
+    if identity.kind != SdkAccountKind::Classic {
+        return Err("SEP-6 withdrawal account_id must be a Classic G address".to_owned());
+    }
+
+    let amount = requested_amount.trim();
+    if amount.is_empty() {
+        return Err(
+            "SEP-6 immediate withdrawal requires the requested amount before payment".to_owned(),
+        );
+    }
+
+    let memo_type = anchor_transaction_text(response, "memo_type");
+    let memo = anchor_transaction_text(response, "memo");
+    Ok(AnchorWithdrawalPayment {
+        destination: identity.address,
+        amount: amount.to_owned(),
+        memo: PaymentMemo::from_anchor_fields(memo_type, memo)?,
+    })
+}
+
 pub fn anchor_transaction_text<'a>(transaction: &'a JsonValue, key: &str) -> Option<&'a str> {
     transaction
         .get(key)
@@ -2426,6 +2455,28 @@ issuer = "{ISSUER}"
             }),
             ISSUER,
             &asset(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sep6_immediate_withdrawal_parses_account_and_hash_memo() {
+        let payment = anchor_withdrawal_payment_from_sep6_response(
+            &serde_json::json!({
+                "account_id": ISSUER,
+                "memo_type": "hash",
+                "memo": "AIWb2IO0QZRXzyxuWLV3RD2mY0al335opgAAAAAAAAA="
+            }),
+            "5",
+        )
+        .unwrap();
+        assert_eq!(payment.destination, ISSUER);
+        assert_eq!(payment.amount, "5");
+        assert!(matches!(payment.memo, PaymentMemo::Hash(_)));
+
+        assert!(anchor_withdrawal_payment_from_sep6_response(
+            &serde_json::json!({"account_id": ISSUER}),
+            "",
         )
         .is_err());
     }
