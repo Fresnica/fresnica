@@ -1,9 +1,9 @@
 use fresnica_core::detect_mnemonic_language;
-use fresnica_sdk::{FresnicaSdk, SdkError, SdkErrorCode, SdkSigningMaterialKind};
+use fresnica_sdk::{FresnicaSdk, SdkAccountKind, SdkError, SdkErrorCode, SdkSigningMaterialKind};
 use serde_json::{Map, Number, Value};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::storage::WalletRecord;
+use crate::storage::{WalletRecord, WalletStorage};
 
 const MIN_FRESNICA_PASSPHRASE_CHARS: usize = 15;
 
@@ -16,6 +16,43 @@ pub fn validate_new_passphrase(passphrase: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Terminal/reference policy helper. This does not define a cross-platform wallet contract.
+pub fn has_app_passcode(storage: &WalletStorage) -> Result<bool, String> {
+    Ok(storage
+        .list()?
+        .iter()
+        .any(|record| !record.watch_only() && record.secret.is_some()))
+}
+
+/// Require one Fresnica passphrase for every local protected software signer.
+///
+/// This preserves the current terminal/reference product policy without moving
+/// protected-envelope semantics out of SDK/Core.
+pub fn validate_app_passcode(storage: &WalletStorage, passcode: &str) -> Result<(), String> {
+    for record in storage.list()? {
+        if record.watch_only() || record.secret.is_none() {
+            continue;
+        }
+        verify_passcode(&record, passcode)?;
+    }
+    Ok(())
+}
+
+/// Revalidate restored protected signing material before it becomes active.
+///
+/// Backup parsing already validates static record shape. This step proves that
+/// protected material decrypts under the current terminal/reference passphrase
+/// and remains bound to the restored account address.
+pub fn validate_restore_signer_compatibility(
+    record: &WalletRecord,
+    passcode: &str,
+) -> Result<(), String> {
+    if record.watch_only() {
+        return Ok(());
+    }
+    verify_passcode(record, passcode)
+        .map_err(|_| "backup does not use the current Fresnica passphrase".to_owned())
+}
 pub enum RevealedSigningMaterial {
     Secret {
         secret: Zeroizing<String>,
@@ -26,6 +63,28 @@ pub enum RevealedSigningMaterial {
         index: usize,
         language: String,
     },
+}
+
+pub fn import_watch_record(
+    name: &str,
+    network: &str,
+    address: &str,
+) -> Result<WalletRecord, String> {
+    validate_name_and_network(name, network)?;
+    let identity = FresnicaSdk::new()
+        .parse_account(address.to_owned())
+        .map_err(|_| "invalid Stellar G address".to_owned())?;
+    if identity.kind != SdkAccountKind::Classic {
+        return Err("watch-only wallet requires a Classic G address".to_owned());
+    }
+    Ok(WalletRecord {
+        name: name.to_owned(),
+        address: identity.address,
+        wallet_type: "watch-only".to_owned(),
+        network: network.to_owned(),
+        secret: None,
+        metadata: Map::new(),
+    })
 }
 
 pub fn import_secret_record(
@@ -290,6 +349,8 @@ fn mnemonic_metadata(index: usize, language: &str) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
 
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
@@ -299,6 +360,90 @@ mod tests {
         "illness spike retreat truth genius clock brain pass fit cave bargain toe";
     const MNEMONIC_PUBLIC: &str = "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6";
     const PASSPHRASE: &str = "correct horse battery staple";
+
+    fn temp_storage(label: &str) -> (std::path::PathBuf, WalletStorage) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "fresnica-wallet-policy-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        let storage = WalletStorage::new(&home).unwrap();
+        (home, storage)
+    }
+
+    #[test]
+    fn app_passcode_policy_covers_every_local_signing_record() {
+        let (home, storage) = temp_storage("app-passcode");
+        let watch = import_watch_record("observer", "testnet", OTHER_PUBLIC).unwrap();
+        storage.save(&watch, false).unwrap();
+
+        assert!(!has_app_passcode(&storage).unwrap());
+        validate_app_passcode(&storage, "anything").unwrap();
+
+        let secret = import_secret_record("secret", "testnet", SECRET, PASSPHRASE).unwrap();
+        storage.save(&secret, false).unwrap();
+        let mnemonic =
+            import_mnemonic_record("mnemonic", "testnet", MNEMONIC, "", 0, None, PASSPHRASE)
+                .unwrap();
+        storage.save(&mnemonic, false).unwrap();
+
+        assert!(has_app_passcode(&storage).unwrap());
+        validate_app_passcode(&storage, PASSPHRASE).unwrap();
+        assert_eq!(
+            validate_app_passcode(&storage, "different passphrase value").unwrap_err(),
+            "invalid Fresnica passphrase"
+        );
+
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn restore_signer_compatibility_revalidates_passphrase_and_identity() {
+        let watch = import_watch_record("observer", "testnet", OTHER_PUBLIC).unwrap();
+        validate_restore_signer_compatibility(&watch, "anything").unwrap();
+
+        let protected = import_secret_record("signing", "testnet", SECRET, PASSPHRASE).unwrap();
+        validate_restore_signer_compatibility(&protected, PASSPHRASE).unwrap();
+        assert_eq!(
+            validate_restore_signer_compatibility(&protected, "different passphrase value")
+                .unwrap_err(),
+            "backup does not use the current Fresnica passphrase"
+        );
+
+        let mut mismatched = protected.clone();
+        mismatched.address = OTHER_PUBLIC.to_owned();
+        assert_eq!(
+            validate_restore_signer_compatibility(&mismatched, PASSPHRASE).unwrap_err(),
+            "backup does not use the current Fresnica passphrase"
+        );
+    }
+
+    #[test]
+    fn watch_only_registration_uses_sdk_account_identity() {
+        let record = import_watch_record("observer", "testnet", PUBLIC).unwrap();
+        assert_eq!(record.name, "observer");
+        assert_eq!(record.address, PUBLIC);
+        assert_eq!(record.wallet_type, "watch-only");
+        assert_eq!(record.network, "testnet");
+        assert!(record.secret.is_none());
+        assert!(record.metadata.is_empty());
+
+        assert_eq!(
+            import_watch_record("observer", "testnet", "not-an-address").unwrap_err(),
+            "invalid Stellar G address"
+        );
+        assert_eq!(
+            import_watch_record("", "testnet", PUBLIC).unwrap_err(),
+            "wallet name cannot be empty"
+        );
+        assert_eq!(
+            import_watch_record("observer", "future-net", PUBLIC).unwrap_err(),
+            "unknown network: future-net"
+        );
+    }
 
     #[test]
     fn new_protection_rejects_pin_length_and_accepts_unicode_phrase() {

@@ -1,11 +1,12 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+
+use stellar_xdr::MuxedAccount;
 
 use fresnica_sdk::{FresnicaSdk, SdkAccountKind};
 use serde::{Deserialize, Serialize};
-
-use crate::storage::WalletStorage;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Contact {
@@ -129,22 +130,19 @@ impl ContactStore {
 }
 
 pub fn resolve_destination(
-    storage: &WalletStorage,
+    store: &ContactStore,
     destination: &str,
     explicit_memo: Option<&str>,
 ) -> Result<ResolvedDestination, String> {
     let destination = destination.trim();
-    if let Ok(identity) = FresnicaSdk::new().parse_account(destination.to_owned()) {
-        if identity.kind == SdkAccountKind::Classic && identity.address == destination {
-            return Ok(ResolvedDestination {
-                address: identity.address,
-                memo: explicit_memo.map(str::to_owned),
-                contact_name: None,
-            });
-        }
+    if MuxedAccount::from_str(destination).is_ok_and(|address| address.to_string() == destination) {
+        return Ok(ResolvedDestination {
+            address: destination.to_owned(),
+            memo: explicit_memo.map(str::to_owned),
+            contact_name: None,
+        });
     }
 
-    let store = ContactStore::for_home(storage.home());
     let Some(contact) = store.find(destination)? else {
         return Ok(ResolvedDestination {
             address: destination.to_owned(),
@@ -215,6 +213,8 @@ mod tests {
 
     const ALICE: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
     const BOB: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+    const MUXED_ALICE: &str =
+        "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAABUTGI4";
 
     fn store(label: &str) -> ContactStore {
         let nonce = SystemTime::now()
@@ -269,28 +269,35 @@ mod tests {
     #[test]
     fn destination_resolution_prefers_explicit_memo() {
         let store = store("resolve");
-        let home = store.path.parent().unwrap().to_path_buf();
         store.add("Alice", ALICE, Some("default-memo")).unwrap();
-        let storage = WalletStorage::new(&home).unwrap();
 
-        let resolved = resolve_destination(&storage, "ALICE", None).unwrap();
+        let resolved = resolve_destination(&store, "ALICE", None).unwrap();
         assert_eq!(resolved.address, ALICE);
         assert_eq!(resolved.memo.as_deref(), Some("default-memo"));
         assert_eq!(resolved.contact_name.as_deref(), Some("Alice"));
 
-        let explicit = resolve_destination(&storage, "alice", Some("explicit")).unwrap();
+        let explicit = resolve_destination(&store, "alice", Some("explicit")).unwrap();
         assert_eq!(explicit.memo.as_deref(), Some("explicit"));
     }
 
     #[test]
     fn destination_resolution_does_not_allow_alias_to_shadow_direct_address() {
         let store = store("direct-address");
-        let home = store.path.parent().unwrap().to_path_buf();
         store.add(ALICE, BOB, Some("shadowed-memo")).unwrap();
-        let storage = WalletStorage::new(&home).unwrap();
 
-        let resolved = resolve_destination(&storage, ALICE, Some("direct-memo")).unwrap();
+        let resolved = resolve_destination(&store, ALICE, Some("direct-memo")).unwrap();
         assert_eq!(resolved.address, ALICE);
+        assert_eq!(resolved.memo.as_deref(), Some("direct-memo"));
+        assert_eq!(resolved.contact_name, None);
+    }
+
+    #[test]
+    fn destination_resolution_does_not_allow_alias_to_shadow_direct_muxed_address() {
+        let store = store("direct-muxed-address");
+        store.add(MUXED_ALICE, BOB, Some("shadowed-memo")).unwrap();
+
+        let resolved = resolve_destination(&store, MUXED_ALICE, Some("direct-memo")).unwrap();
+        assert_eq!(resolved.address, MUXED_ALICE);
         assert_eq!(resolved.memo.as_deref(), Some("direct-memo"));
         assert_eq!(resolved.contact_name, None);
     }

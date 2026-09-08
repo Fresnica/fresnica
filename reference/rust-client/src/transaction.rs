@@ -21,15 +21,18 @@ use stellar_xdr::{
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::ledger_authorization::load_classic_ledger_authorization_plan;
-use crate::signing_coordination::sign_with_local_ed25519;
-use crate::{
-    HorizonGateway, SubmissionError, WalletRecord, WalletStorage, MAINNET_HORIZON_URL,
-    TESTNET_HORIZON_URL,
+use crate::ledger_authorization::{
+    load_classic_ledger_authorization_plan, plan_classic_ledger_authorization,
+    LedgerAccountAuthorization, LedgerAuthorizationSnapshot,
 };
+use crate::signing_coordination::{
+    review_ledger_authorization, sign_with_ed25519_providers, sign_with_local_ed25519,
+    ExternalEd25519SigningProvider,
+};
+use crate::{HorizonGateway, SubmissionError, WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
-const TX_TIMEOUT_SECONDS: u64 = 30;
+pub const DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS: u64 = 5 * 60;
 const PENDING_TTL_SECONDS: i64 = 210;
 const MAINNET_PASSPHRASE: &str = "Public Global Stellar Network ; September 2015";
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
@@ -64,26 +67,15 @@ pub fn has_valid_transaction_signature(
     .map_err(|error| format!("unable to verify transaction signature: {error}"))
 }
 
-pub fn network_gateway(network: &str) -> Result<HorizonGateway, String> {
-    Ok(HorizonGateway::new(match network {
-        "mainnet" => MAINNET_HORIZON_URL,
-        "testnet" => TESTNET_HORIZON_URL,
-        other => return Err(format!("unknown network: {other}")),
-    }))
-}
-
-pub fn resolve_write_wallet(
+pub(crate) fn resolve_write_wallet(
     storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
     horizon: &HorizonGateway,
     network: &str,
     name: Option<&str>,
 ) -> Result<WalletRecord, String> {
     let record = resolve_network_wallet(storage, network, name)?;
-    PendingTransactionStore::for_home(storage.home()).reconcile_and_ensure_clear(
-        network,
-        &record.address,
-        horizon,
-    )?;
+    pending_transactions.reconcile_and_ensure_clear(network, &record.address, horizon)?;
     Ok(record)
 }
 
@@ -109,8 +101,33 @@ pub fn build_single_operation_envelope(
     base_fee: u32,
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
+    build_single_operation_envelope_with_timeout(
+        source,
+        body,
+        current_sequence,
+        base_fee,
+        memo,
+        DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+    )
+}
+
+pub(crate) fn build_single_operation_envelope_with_timeout(
+    source: &str,
+    body: OperationBody,
+    current_sequence: i64,
+    base_fee: u32,
+    memo: Option<&str>,
+    timeout_seconds: u64,
+) -> Result<TransactionEnvelope, String> {
     let memo = text_memo(memo)?;
-    build_single_operation_envelope_with_memo(source, body, current_sequence, base_fee, memo)
+    build_single_operation_envelope_with_memo_and_timeout(
+        source,
+        body,
+        current_sequence,
+        base_fee,
+        memo,
+        timeout_seconds,
+    )
 }
 
 pub fn build_single_operation_envelope_with_memo(
@@ -120,7 +137,32 @@ pub fn build_single_operation_envelope_with_memo(
     base_fee: u32,
     memo: Memo,
 ) -> Result<TransactionEnvelope, String> {
-    build_operation_envelope_with_memo(source, vec![body], current_sequence, base_fee, memo)
+    build_single_operation_envelope_with_memo_and_timeout(
+        source,
+        body,
+        current_sequence,
+        base_fee,
+        memo,
+        DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+    )
+}
+
+pub(crate) fn build_single_operation_envelope_with_memo_and_timeout(
+    source: &str,
+    body: OperationBody,
+    current_sequence: i64,
+    base_fee: u32,
+    memo: Memo,
+    timeout_seconds: u64,
+) -> Result<TransactionEnvelope, String> {
+    build_operation_envelope_with_memo_and_timeout(
+        source,
+        vec![body],
+        current_sequence,
+        base_fee,
+        memo,
+        timeout_seconds,
+    )
 }
 
 pub fn build_operation_envelope(
@@ -130,13 +172,32 @@ pub fn build_operation_envelope(
     base_fee_per_operation: u32,
     memo: Option<&str>,
 ) -> Result<TransactionEnvelope, String> {
-    let memo = text_memo(memo)?;
-    build_operation_envelope_with_memo(
+    build_operation_envelope_with_timeout(
         source,
         bodies,
         current_sequence,
         base_fee_per_operation,
         memo,
+        DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
+    )
+}
+
+pub(crate) fn build_operation_envelope_with_timeout(
+    source: &str,
+    bodies: Vec<OperationBody>,
+    current_sequence: i64,
+    base_fee_per_operation: u32,
+    memo: Option<&str>,
+    timeout_seconds: u64,
+) -> Result<TransactionEnvelope, String> {
+    let memo = text_memo(memo)?;
+    build_operation_envelope_with_memo_and_timeout(
+        source,
+        bodies,
+        current_sequence,
+        base_fee_per_operation,
+        memo,
+        timeout_seconds,
     )
 }
 
@@ -150,13 +211,15 @@ fn text_memo(memo: Option<&str>) -> Result<Memo, String> {
     }
 }
 
-fn build_operation_envelope_with_memo(
+pub(crate) fn build_operation_envelope_with_memo_and_timeout(
     source: &str,
     bodies: Vec<OperationBody>,
     current_sequence: i64,
     base_fee_per_operation: u32,
     memo: Memo,
+    timeout_seconds: u64,
 ) -> Result<TransactionEnvelope, String> {
+    let timeout_seconds = validate_classic_transaction_timeout_seconds(timeout_seconds)?;
     if bodies.is_empty() {
         return Err("transaction must contain at least one operation".to_owned());
     }
@@ -183,7 +246,7 @@ fn build_operation_envelope_with_memo(
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "system clock is before Unix epoch".to_owned())?
         .as_secs()
-        .checked_add(TX_TIMEOUT_SECONDS)
+        .checked_add(timeout_seconds)
         .ok_or_else(|| "transaction timeout overflow".to_owned())?;
     let transaction = Transaction {
         source_account: account_id_to_muxed(&source),
@@ -207,6 +270,16 @@ fn build_operation_envelope_with_memo(
 pub struct TransactionSubmission {
     pub hash: String,
     pub ledger: Option<u64>,
+}
+
+pub(crate) fn validate_classic_transaction_timeout_seconds(
+    timeout_seconds: u64,
+) -> Result<u64, String> {
+    if timeout_seconds == 0 {
+        Err("Classic transaction timeout must be greater than zero seconds".to_owned())
+    } else {
+        Ok(timeout_seconds)
+    }
 }
 
 pub(crate) fn ensure_transaction_not_expired(envelope: &TransactionEnvelope) -> Result<(), String> {
@@ -234,15 +307,15 @@ fn ensure_transaction_not_expired_at(
     };
     if max_time != 0 && now_unix > max_time {
         return Err(
-            "Prepared transaction has expired; prepare and review the transaction again before signing"
-                .to_owned(),
+            "Prepared transaction has expired; prepare and review the transaction again".to_owned(),
         );
     }
     Ok(())
 }
 
-pub fn sign_and_submit(
+pub(crate) fn sign_and_submit(
     storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
     record: &WalletRecord,
     network: &str,
     envelope: &mut TransactionEnvelope,
@@ -252,6 +325,40 @@ pub fn sign_and_submit(
     ensure_transaction_not_expired(envelope)?;
     let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
     sign_with_local_ed25519(storage, &authorization, network, envelope, passcode)?;
+    submit_signed_transaction(pending_transactions, record, network, envelope, horizon)
+}
+
+pub(crate) fn sign_and_submit_with_providers(
+    storage: &WalletStorage,
+    pending_transactions: &PendingTransactionStore,
+    record: &WalletRecord,
+    network: &str,
+    envelope: &mut TransactionEnvelope,
+    horizon: &HorizonGateway,
+    passcode: Option<&str>,
+    external_providers: &[ExternalEd25519SigningProvider],
+) -> Result<TransactionSubmission, String> {
+    ensure_transaction_not_expired(envelope)?;
+    let authorization = load_classic_ledger_authorization_plan(horizon, envelope)?;
+    sign_with_ed25519_providers(
+        storage,
+        &authorization,
+        network,
+        envelope,
+        passcode,
+        external_providers,
+    )?;
+    submit_signed_transaction(pending_transactions, record, network, envelope, horizon)
+}
+
+fn submit_signed_transaction(
+    pending_transactions: &PendingTransactionStore,
+    record: &WalletRecord,
+    network: &str,
+    envelope: &TransactionEnvelope,
+    horizon: &HorizonGateway,
+) -> Result<TransactionSubmission, String> {
+    ensure_transaction_not_expired(envelope)?;
     let network_passphrase = network_passphrase(network)?;
 
     let tx_hash = transaction_hash(envelope, network_passphrase)
@@ -274,7 +381,7 @@ pub fn sign_and_submit(
             Err(format!("Transaction rejected ({tx_hash_hex}): {message}"))
         }
         Err(SubmissionError::Uncertain(message)) => {
-            let persist_result = PendingTransactionStore::for_home(storage.home()).remember(
+            let persist_result = pending_transactions.remember(
                 network,
                 &record.address,
                 &tx_hash_hex,
@@ -290,6 +397,19 @@ pub fn sign_and_submit(
             }
         }
     }
+}
+
+pub(crate) fn prepared_classic_authorization_snapshot(
+    storage: &WalletStorage,
+    network: &str,
+    envelope: &TransactionEnvelope,
+    source_account: &Value,
+) -> Result<LedgerAuthorizationSnapshot, String> {
+    let account = LedgerAccountAuthorization::from_horizon(source_account).map_err(|error| {
+        format!("Unable to interpret prepared transaction authorization: {error}")
+    })?;
+    let plan = plan_classic_ledger_authorization(envelope, &[account])?;
+    review_ledger_authorization(storage, &plan, network, envelope)
 }
 
 pub fn sign_transaction_xdr_with_passcode(
@@ -745,8 +865,43 @@ mod tests {
         assert!(ensure_transaction_not_expired_at(&envelope, 100).is_ok());
         assert_eq!(
             ensure_transaction_not_expired_at(&envelope, 101).unwrap_err(),
-            "Prepared transaction has expired; prepare and review the transaction again before signing"
+            "Prepared transaction has expired; prepare and review the transaction again"
         );
+    }
+
+    #[test]
+    fn classic_transaction_timeout_is_configurable_without_changing_default() {
+        assert_eq!(DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS, 5 * 60);
+        assert_eq!(
+            validate_classic_transaction_timeout_seconds(42).unwrap(),
+            42
+        );
+        assert_eq!(
+            validate_classic_transaction_timeout_seconds(0).unwrap_err(),
+            "Classic transaction timeout must be greater than zero seconds"
+        );
+
+        let body = OperationBody::BumpSequence(stellar_xdr::BumpSequenceOp {
+            bump_to: SequenceNumber(9),
+        });
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let envelope =
+            build_operation_envelope_with_timeout(SOURCE, vec![body], 7, 100, None, 42).unwrap();
+        let after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let TransactionEnvelope::Tx(envelope) = envelope else {
+            panic!("expected v1 transaction envelope");
+        };
+        let Preconditions::Time(bounds) = envelope.tx.cond else {
+            panic!("expected time bounds");
+        };
+        assert!(bounds.max_time.0 >= before + 42);
+        assert!(bounds.max_time.0 <= after + 42);
     }
 
     #[test]

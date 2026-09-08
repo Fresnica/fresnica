@@ -183,6 +183,126 @@ impl LedgerAuthorizationPlan {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerSignerAvailability {
+    Satisfied,
+    LocalEd25519,
+    UnavailableLocally,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WeightedLedgerSignerSnapshot {
+    pub condition: LedgerSignerCondition,
+    pub weight: u8,
+    pub availability: LedgerSignerAvailability,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtraSignerSnapshot {
+    pub condition: LedgerSignerCondition,
+    pub availability: LedgerSignerAvailability,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountAuthorizationSnapshot {
+    pub account_id: String,
+    pub required_weight: u8,
+    pub satisfied_weight: u32,
+    pub local_available_weight: u32,
+    pub remaining_weight: u32,
+    pub uses: Vec<AuthorizationUse>,
+    pub signers: Vec<WeightedLedgerSignerSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LedgerAuthorizationSnapshot {
+    pub transaction_hash: String,
+    pub accounts: Vec<AccountAuthorizationSnapshot>,
+    pub extra_signers: Vec<ExtraSignerSnapshot>,
+    pub satisfied: bool,
+    pub locally_satisfiable: bool,
+}
+
+pub fn summarize_ledger_authorization(
+    plan: &LedgerAuthorizationPlan,
+    satisfied: &BTreeSet<LedgerSignerCondition>,
+    local_ed25519_keys: &BTreeSet<String>,
+    transaction_hash: String,
+) -> LedgerAuthorizationSnapshot {
+    let mut available_after_local = satisfied.clone();
+    for condition in signer_conditions(plan) {
+        if condition.kind == LedgerSignerKind::Ed25519PublicKey
+            && local_ed25519_keys.contains(&condition.key)
+        {
+            available_after_local.insert(condition);
+        }
+    }
+
+    let accounts = plan
+        .requirements
+        .iter()
+        .map(|requirement| {
+            let satisfied_weight = requirement.available_weight(satisfied);
+            let available_after_local_weight = requirement.available_weight(&available_after_local);
+            AccountAuthorizationSnapshot {
+                account_id: requirement.account_id.clone(),
+                required_weight: requirement.required_weight,
+                satisfied_weight,
+                local_available_weight: available_after_local_weight
+                    .saturating_sub(satisfied_weight),
+                remaining_weight: u32::from(requirement.required_weight)
+                    .saturating_sub(available_after_local_weight),
+                uses: requirement.uses.clone(),
+                signers: requirement
+                    .signers
+                    .iter()
+                    .map(|signer| WeightedLedgerSignerSnapshot {
+                        condition: signer.condition.clone(),
+                        weight: signer.weight,
+                        availability: signer_availability(
+                            &signer.condition,
+                            satisfied,
+                            local_ed25519_keys,
+                        ),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    let extra_signers = plan
+        .extra_signers
+        .iter()
+        .map(|condition| ExtraSignerSnapshot {
+            condition: condition.clone(),
+            availability: signer_availability(condition, satisfied, local_ed25519_keys),
+        })
+        .collect();
+
+    LedgerAuthorizationSnapshot {
+        transaction_hash,
+        accounts,
+        extra_signers,
+        satisfied: plan.is_satisfiable_by(satisfied),
+        locally_satisfiable: plan.is_satisfiable_by(&available_after_local),
+    }
+}
+
+fn signer_availability(
+    condition: &LedgerSignerCondition,
+    satisfied: &BTreeSet<LedgerSignerCondition>,
+    local_ed25519_keys: &BTreeSet<String>,
+) -> LedgerSignerAvailability {
+    if satisfied.contains(condition) {
+        LedgerSignerAvailability::Satisfied
+    } else if condition.kind == LedgerSignerKind::Ed25519PublicKey
+        && local_ed25519_keys.contains(&condition.key)
+    {
+        LedgerSignerAvailability::LocalEd25519
+    } else {
+        LedgerSignerAvailability::UnavailableLocally
+    }
+}
+
 pub fn satisfied_ed25519_conditions(
     plan: &LedgerAuthorizationPlan,
     envelope: &TransactionEnvelope,
@@ -388,11 +508,14 @@ fn add_requirement(
     let account = accounts.get(account_id).copied().ok_or_else(|| {
         format!("missing ledger authorization state for source account {account_id}")
     })?;
-    let required_weight = account.required_weight(threshold);
+    let threshold_weight = account.required_weight(threshold);
+    // stellar-core still requires a matching signer when a threshold is zero;
+    // keep the raw threshold for review, but model the effective requirement.
+    let required_weight = threshold_weight.max(1);
     let authorization_use = AuthorizationUse {
         scope,
         threshold,
-        required_weight,
+        required_weight: threshold_weight,
     };
 
     if let Some(requirement) = requirements
@@ -504,6 +627,110 @@ mod tests {
             kind: LedgerSignerKind::Ed25519PublicKey,
             key: key.to_owned(),
         }
+    }
+
+    #[test]
+    fn review_snapshot_distinguishes_satisfied_local_and_unavailable_signers() {
+        let unavailable = LedgerSignerCondition {
+            kind: LedgerSignerKind::PreauthorizedTransaction,
+            key: "TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB5JD".to_owned(),
+        };
+        let extra = ed25519(ACCOUNT_A);
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT_A.to_owned(),
+                required_weight: 2,
+                uses: vec![AuthorizationUse {
+                    scope: AuthorizationScope::Operation {
+                        index: 0,
+                        kind: ClassicOperationKind::ManageData,
+                    },
+                    threshold: AuthorizationThreshold::Medium,
+                    required_weight: 2,
+                }],
+                signers: vec![
+                    WeightedLedgerSigner {
+                        condition: ed25519(ACCOUNT_B),
+                        weight: 1,
+                    },
+                    WeightedLedgerSigner {
+                        condition: ed25519(SIGNER_C),
+                        weight: 1,
+                    },
+                    WeightedLedgerSigner {
+                        condition: unavailable.clone(),
+                        weight: 1,
+                    },
+                ],
+            }],
+            extra_signers: BTreeSet::from([extra.clone()]),
+        };
+        let satisfied = BTreeSet::from([ed25519(ACCOUNT_B)]);
+        let local = BTreeSet::from([SIGNER_C.to_owned(), ACCOUNT_A.to_owned()]);
+
+        let snapshot = summarize_ledger_authorization(
+            &plan,
+            &satisfied,
+            &local,
+            "0123456789abcdef".to_owned(),
+        );
+
+        assert_eq!(snapshot.transaction_hash, "0123456789abcdef");
+        assert!(!snapshot.satisfied);
+        assert!(snapshot.locally_satisfiable);
+        let account = &snapshot.accounts[0];
+        assert_eq!(account.required_weight, 2);
+        assert_eq!(account.satisfied_weight, 1);
+        assert_eq!(account.local_available_weight, 1);
+        assert_eq!(account.remaining_weight, 0);
+        assert_eq!(
+            account.signers[0].availability,
+            LedgerSignerAvailability::Satisfied
+        );
+        assert_eq!(
+            account.signers[1].availability,
+            LedgerSignerAvailability::LocalEd25519
+        );
+        assert_eq!(
+            account.signers[2].availability,
+            LedgerSignerAvailability::UnavailableLocally
+        );
+        assert_eq!(snapshot.extra_signers.len(), 1);
+        assert_eq!(
+            snapshot.extra_signers[0].availability,
+            LedgerSignerAvailability::LocalEd25519
+        );
+    }
+
+    #[test]
+    fn review_snapshot_reports_weight_that_local_signers_cannot_satisfy() {
+        let plan = LedgerAuthorizationPlan {
+            requirements: vec![AccountAuthorizationRequirement {
+                account_id: ACCOUNT_A.to_owned(),
+                required_weight: 3,
+                uses: Vec::new(),
+                signers: vec![
+                    WeightedLedgerSigner {
+                        condition: ed25519(ACCOUNT_B),
+                        weight: 1,
+                    },
+                    WeightedLedgerSigner {
+                        condition: ed25519(SIGNER_C),
+                        weight: 1,
+                    },
+                ],
+            }],
+            extra_signers: BTreeSet::new(),
+        };
+        let satisfied = BTreeSet::from([ed25519(ACCOUNT_B)]);
+        let local = BTreeSet::from([SIGNER_C.to_owned()]);
+
+        let snapshot = summarize_ledger_authorization(&plan, &satisfied, &local, "hash".to_owned());
+
+        assert!(!snapshot.locally_satisfiable);
+        assert_eq!(snapshot.accounts[0].satisfied_weight, 1);
+        assert_eq!(snapshot.accounts[0].local_available_weight, 1);
+        assert_eq!(snapshot.accounts[0].remaining_weight, 1);
     }
 
     #[test]
@@ -719,6 +946,34 @@ mod tests {
             plan_classic_ledger_authorization(&envelope, &[account]).unwrap_err(),
             "PreconditionsV2.extraSigners contains a duplicate signer"
         );
+    }
+
+    #[test]
+    fn zero_threshold_still_requires_one_valid_signer() {
+        let account = horizon_account(ACCOUNT_A, 0, 0, 0, &[(ACCOUNT_A, 1, "ed25519_public_key")]);
+        let envelope = build_operation_envelope(
+            ACCOUNT_A,
+            vec![OperationBody::ManageData(stellar_xdr::ManageDataOp {
+                data_name: String64::try_from(b"zero-threshold".to_vec()).unwrap(),
+                data_value: None,
+            })],
+            1,
+            100,
+            None,
+        )
+        .unwrap();
+
+        let plan = plan_classic_ledger_authorization(&envelope, &[account]).unwrap();
+        assert_eq!(plan.requirements.len(), 1);
+        let requirement = &plan.requirements[0];
+        assert_eq!(requirement.required_weight, 1);
+        assert_eq!(requirement.uses.len(), 2);
+        assert!(requirement
+            .uses
+            .iter()
+            .all(|authorization_use| authorization_use.required_weight == 0));
+        assert!(!plan.is_satisfiable_by(&BTreeSet::new()));
+        assert!(plan.is_satisfiable_by(&BTreeSet::from([ed25519(ACCOUNT_A)])));
     }
 
     #[test]

@@ -8,10 +8,14 @@ use stellar_xdr::{
 };
 
 use crate::asset::AssetId;
+use crate::transaction::{
+    build_single_operation_envelope_with_memo_and_timeout, prepared_classic_authorization_snapshot,
+};
 use crate::{
-    account_sequence, balance_stroops, build_single_operation_envelope_with_memo, format_stroops,
-    minimum_balance_stroops, parse_positive_stroops, resolve_destination, resolve_write_wallet,
-    sign_and_submit, FresnicaClient, LedgerParameters, TransactionSubmission, WalletRecord,
+    account_sequence, balance_stroops, format_stroops, minimum_balance_stroops,
+    parse_positive_stroops, resolve_destination, resolve_write_wallet, sign_and_submit,
+    sign_and_submit_with_providers, ExternalEd25519SigningProvider, FresnicaClient,
+    LedgerAuthorizationSnapshot, LedgerParameters, TransactionSubmission, WalletRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,7 +131,9 @@ pub struct PaymentReview {
     pub asset: String,
     pub fee_xlm: String,
     pub network: String,
+    pub transaction_timeout_seconds: u64,
     pub memo: Option<PaymentMemoReview>,
+    pub ledger_authorization: LedgerAuthorizationSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -138,15 +144,27 @@ pub struct PreparedPayment {
 }
 
 impl FresnicaClient {
+    pub fn ensure_payment_receive_ready(
+        &self,
+        wallet: Option<&str>,
+        asset_text: &str,
+    ) -> Result<(), String> {
+        let wallet = self.resolve_wallet(wallet)?;
+        let asset = AssetId::parse(asset_text)?;
+        let account = self.gateway().get_account(&wallet.address)?;
+        validate_destination_receive(&account, &wallet.address, &asset, 1)
+    }
+
     pub fn prepare_payment(&self, request: &PaymentRequest) -> Result<PreparedPayment, String> {
         let wallet = resolve_write_wallet(
             self.storage(),
+            self.pending_transaction_store(),
             self.gateway(),
             self.network(),
             request.wallet.as_deref(),
         )?;
         let resolved = resolve_destination(
-            self.storage(),
+            self.contact_store(),
             &request.destination,
             request.memo.as_deref(),
         )?;
@@ -171,6 +189,7 @@ impl FresnicaClient {
     ) -> Result<PreparedPayment, String> {
         let current = resolve_write_wallet(
             self.storage(),
+            self.pending_transaction_store(),
             self.gateway(),
             self.network(),
             Some(&wallet.name),
@@ -202,34 +221,42 @@ impl FresnicaClient {
     ) -> Result<PreparedPayment, String> {
         let asset = AssetId::parse(asset_text)?;
         let amount = parse_positive_stroops(amount_text)?;
-        let destination = AccountId::from_str(destination_address)
-            .map_err(|_| "destination must be a Classic Stellar G address".to_owned())?;
+        let destination = PaymentDestination::parse(destination_address)?;
+        let destination_ledger_address = destination.ledger_account.to_string();
         let memo_xdr = memo.to_xdr()?;
 
         let account = self.gateway().get_account(&current.address)?;
-        let destination_exists = self.gateway().account_exists(destination_address)?;
-        if !destination_exists && !asset.is_native() {
+        let destination_account = self
+            .gateway()
+            .get_account_optional(&destination_ledger_address)?;
+        if destination_account.is_none() && destination.is_muxed() {
+            return Err(format!(
+                "Muxed destination {destination_address} refers to missing account {destination_ledger_address}; M addresses cannot create Stellar accounts"
+            ));
+        }
+        if destination_account.is_none() && !asset.is_native() {
             return Err(
                 "Destination account does not exist. Only XLM can create a new Stellar account; issued assets require an existing account and trustline."
                     .to_owned(),
             );
         }
-        let destination_account = if destination_exists {
-            Some(self.gateway().get_account(destination_address)?)
-        } else {
-            None
-        };
         let ledger = self.gateway().get_ledger_parameters()?;
         validate_transfer(&account, &current.address, &asset, amount, ledger)?;
         if let Some(destination_account) = destination_account.as_ref() {
-            validate_destination_receive(destination_account, destination_address, &asset, amount)?;
-            if matches!(&memo, PaymentMemo::None) && account_requires_memo(destination_account)? {
-                return Err(format!(
-                    "Destination {destination_address} requires a transaction memo (SEP-29). Add a memo and try again."
-                ));
-            }
+            validate_destination_receive(
+                destination_account,
+                &destination_ledger_address,
+                &asset,
+                amount,
+            )?;
+            validate_destination_memo(
+                destination_address,
+                &destination,
+                &memo,
+                destination_account,
+            )?;
         }
-        if !destination_exists {
+        if destination_account.is_none() {
             let minimum = 2_i64
                 .checked_mul(ledger.base_reserve_in_stroops)
                 .ok_or_else(|| "base reserve overflow".to_owned())?;
@@ -242,14 +269,21 @@ impl FresnicaClient {
             }
         }
 
-        let create_destination = !destination_exists;
-        let body = payment_body(destination, &asset, amount, create_destination)?;
-        let envelope = build_single_operation_envelope_with_memo(
+        let create_destination = destination_account.is_none();
+        let body = payment_body(&destination, &asset, amount, create_destination)?;
+        let envelope = build_single_operation_envelope_with_memo_and_timeout(
             &current.address,
             body,
             account_sequence(&account)?,
             ledger.base_fee_in_stroops,
             memo_xdr,
+            self.classic_transaction_timeout_seconds(),
+        )?;
+        let ledger_authorization = prepared_classic_authorization_snapshot(
+            self.storage(),
+            self.network(),
+            &envelope,
+            &account,
         )?;
         let review = PaymentReview {
             operation: if create_destination {
@@ -265,7 +299,9 @@ impl FresnicaClient {
             asset: asset.display(),
             fee_xlm: format_stroops(i64::from(ledger.base_fee_in_stroops)),
             network: current.network.clone(),
+            transaction_timeout_seconds: self.classic_transaction_timeout_seconds(),
             memo: memo.review(),
+            ledger_authorization,
         };
         Ok(PreparedPayment {
             review,
@@ -282,6 +318,7 @@ impl FresnicaClient {
         let mut envelope = prepared.envelope.clone();
         sign_and_submit(
             self.storage(),
+            self.pending_transaction_store(),
             &prepared.wallet,
             self.network(),
             &mut envelope,
@@ -289,22 +326,77 @@ impl FresnicaClient {
             passcode,
         )
     }
+
+    pub fn submit_payment_with_providers(
+        &self,
+        prepared: &PreparedPayment,
+        passcode: Option<&str>,
+        external_providers: &[ExternalEd25519SigningProvider],
+    ) -> Result<TransactionSubmission, String> {
+        let mut envelope = prepared.envelope.clone();
+        sign_and_submit_with_providers(
+            self.storage(),
+            self.pending_transaction_store(),
+            &prepared.wallet,
+            self.network(),
+            &mut envelope,
+            self.gateway(),
+            passcode,
+            external_providers,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PaymentDestination {
+    ledger_account: AccountId,
+    operation_destination: MuxedAccount,
+    muxed_id: Option<u64>,
+}
+
+impl PaymentDestination {
+    fn parse(value: &str) -> Result<Self, String> {
+        let operation_destination = MuxedAccount::from_str(value)
+            .map_err(|_| "destination must be a Classic Stellar G or M address".to_owned())?;
+        let (ledger_account, muxed_id) = match &operation_destination {
+            MuxedAccount::Ed25519(key) => (
+                AccountId(PublicKey::PublicKeyTypeEd25519(key.clone())),
+                None,
+            ),
+            MuxedAccount::MuxedEd25519(muxed) => (
+                AccountId(PublicKey::PublicKeyTypeEd25519(muxed.ed25519.clone())),
+                Some(muxed.id),
+            ),
+        };
+        Ok(Self {
+            ledger_account,
+            operation_destination,
+            muxed_id,
+        })
+    }
+
+    fn is_muxed(&self) -> bool {
+        self.muxed_id.is_some()
+    }
 }
 
 fn payment_body(
-    destination: AccountId,
+    destination: &PaymentDestination,
     asset: &AssetId,
     amount: i64,
     create_destination: bool,
 ) -> Result<OperationBody, String> {
     if create_destination {
+        if destination.is_muxed() {
+            return Err("CreateAccount cannot target a muxed M address".to_owned());
+        }
         return Ok(OperationBody::CreateAccount(CreateAccountOp {
-            destination,
+            destination: destination.ledger_account.clone(),
             starting_balance: amount,
         }));
     }
     Ok(OperationBody::Payment(PaymentOp {
-        destination: account_id_to_muxed(&destination),
+        destination: destination.operation_destination.clone(),
         asset: asset.to_xdr(),
         amount,
     }))
@@ -444,6 +536,30 @@ fn ensure_payment_trustline_authorized(raw: &Value, asset: &AssetId) -> Result<(
     }
 }
 
+fn validate_destination_memo(
+    destination_address: &str,
+    destination: &PaymentDestination,
+    memo: &PaymentMemo,
+    account: &Value,
+) -> Result<(), String> {
+    if let (Some(muxed_id), PaymentMemo::Id(memo_id)) = (destination.muxed_id, memo) {
+        if muxed_id != *memo_id {
+            return Err(format!(
+                "Muxed destination {destination_address} embeds id {muxed_id}, which conflicts with memo id {memo_id}"
+            ));
+        }
+    }
+    if destination.is_muxed() {
+        return Ok(());
+    }
+    if matches!(memo, PaymentMemo::None) && account_requires_memo(account)? {
+        return Err(format!(
+            "Destination {destination_address} requires a transaction memo (SEP-29). Add a memo and try again."
+        ));
+    }
+    Ok(())
+}
+
 fn account_requires_memo(account: &Value) -> Result<bool, String> {
     let Some(encoded) = account
         .get("data")
@@ -459,12 +575,6 @@ fn account_requires_memo(account: &Value) -> Result<bool, String> {
     Ok(decoded.as_slice() == b"1")
 }
 
-fn account_id_to_muxed(account: &AccountId) -> MuxedAccount {
-    match &account.0 {
-        PublicKey::PublicKeyTypeEd25519(key) => MuxedAccount::Ed25519(key.clone()),
-    }
-}
-
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
@@ -475,6 +585,9 @@ mod tests {
     use stellar_xdr::Asset;
 
     const DESTINATION: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const MUXED_BASE: &str = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ";
+    const MUXED_DESTINATION: &str =
+        "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAABUTGI4";
 
     fn account(native_balance: &str, subentries: i64) -> Value {
         serde_json::json!({
@@ -655,16 +768,67 @@ mod tests {
     }
 
     #[test]
-    fn payment_body_switches_to_create_account_for_missing_destination() {
-        let destination = AccountId::from_str(DESTINATION).unwrap();
+    fn payment_destination_preserves_muxed_address_and_base_account() {
+        let destination = PaymentDestination::parse(MUXED_DESTINATION).unwrap();
+        assert_eq!(destination.ledger_account.to_string(), MUXED_BASE);
+        assert_eq!(destination.muxed_id, Some(420));
+        assert_eq!(
+            destination.operation_destination.to_string(),
+            MUXED_DESTINATION
+        );
+    }
+
+    #[test]
+    fn payment_body_switches_to_create_account_only_for_unmuxed_destination() {
+        let destination = PaymentDestination::parse(DESTINATION).unwrap();
         assert!(matches!(
-            payment_body(destination.clone(), &AssetId::native(), 10_000_000, false).unwrap(),
+            payment_body(&destination, &AssetId::native(), 10_000_000, false).unwrap(),
             OperationBody::Payment(_)
         ));
         assert!(matches!(
-            payment_body(destination, &AssetId::native(), 10_000_000, true).unwrap(),
+            payment_body(&destination, &AssetId::native(), 10_000_000, true).unwrap(),
             OperationBody::CreateAccount(_)
         ));
+
+        let muxed = PaymentDestination::parse(MUXED_DESTINATION).unwrap();
+        let OperationBody::Payment(payment) =
+            payment_body(&muxed, &AssetId::native(), 10_000_000, false).unwrap()
+        else {
+            panic!("expected payment");
+        };
+        assert_eq!(payment.destination.to_string(), MUXED_DESTINATION);
+        assert!(payment_body(&muxed, &AssetId::native(), 10_000_000, true).is_err());
+    }
+
+    #[test]
+    fn muxed_destination_replaces_sep29_routing_memo_and_rejects_conflicting_id() {
+        let account = serde_json::json!({
+            "data": {"config.memo_required": "MQ=="}
+        });
+        let muxed = PaymentDestination::parse(MUXED_DESTINATION).unwrap();
+        assert!(
+            validate_destination_memo(MUXED_DESTINATION, &muxed, &PaymentMemo::None, &account)
+                .is_ok()
+        );
+        assert!(validate_destination_memo(
+            MUXED_DESTINATION,
+            &muxed,
+            &PaymentMemo::Id(420),
+            &account,
+        )
+        .is_ok());
+        assert!(validate_destination_memo(
+            MUXED_DESTINATION,
+            &muxed,
+            &PaymentMemo::Id(421),
+            &account,
+        )
+        .is_err());
+
+        let unmuxed = PaymentDestination::parse(MUXED_BASE).unwrap();
+        assert!(
+            validate_destination_memo(MUXED_BASE, &unmuxed, &PaymentMemo::None, &account).is_err()
+        );
     }
 
     #[test]
