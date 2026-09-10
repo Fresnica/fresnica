@@ -5,15 +5,17 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::storage::{WalletRecord, WalletStorage};
 
-const MIN_FRESNICA_PASSPHRASE_CHARS: usize = 15;
+pub const RECOMMENDED_FRESNICA_PASSPHRASE_CHARS: usize = 15;
 
 pub fn validate_new_passphrase(passphrase: &str) -> Result<(), String> {
-    if passphrase.chars().count() < MIN_FRESNICA_PASSPHRASE_CHARS {
-        return Err(format!(
-            "Fresnica passphrase must contain at least {MIN_FRESNICA_PASSPHRASE_CHARS} characters"
-        ));
+    if passphrase.is_empty() {
+        return Err("Fresnica passphrase cannot be empty".to_owned());
     }
     Ok(())
+}
+
+pub fn new_passphrase_is_short(passphrase: &str) -> bool {
+    passphrase.chars().count() < RECOMMENDED_FRESNICA_PASSPHRASE_CHARS
 }
 
 /// Terminal/reference policy helper. This does not define a cross-platform wallet contract.
@@ -446,14 +448,19 @@ mod tests {
     }
 
     #[test]
-    fn new_protection_rejects_pin_length_and_accepts_unicode_phrase() {
+    fn new_protection_allows_short_nonempty_passphrase_but_marks_it_short() {
+        assert!(import_secret_record("weak", "testnet", SECRET, "123456").is_ok());
+        assert!(new_passphrase_is_short("123456"));
         assert_eq!(
-            import_secret_record("weak", "testnet", SECRET, "123456").unwrap_err(),
-            "Fresnica passphrase must contain at least 15 characters"
+            validate_new_passphrase("").unwrap_err(),
+            "Fresnica passphrase cannot be empty"
         );
         let phrase = "萤火照亮自己的路前行吧钱包安全";
-        assert_eq!(phrase.chars().count(), MIN_FRESNICA_PASSPHRASE_CHARS);
-        assert!(validate_new_passphrase(phrase).is_ok());
+        assert_eq!(
+            phrase.chars().count(),
+            RECOMMENDED_FRESNICA_PASSPHRASE_CHARS
+        );
+        assert!(!new_passphrase_is_short(phrase));
     }
 
     #[test]

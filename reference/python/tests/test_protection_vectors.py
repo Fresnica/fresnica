@@ -13,6 +13,7 @@ from fresnica.secret_store import (
 
 
 VECTOR_PATH = Path(__file__).parents[3] / "spec" / "test-vectors" / "protection-v1.json"
+V2_VECTOR_PATH = Path(__file__).parents[3] / "spec" / "test-vectors" / "protection-v2.json"
 
 
 def test_shared_protection_vectors_match_python_reference():
@@ -31,3 +32,14 @@ def test_shared_protection_vectors_match_python_reference():
     # Historical low-level key-AEAD vector. This is not the product system-auth path.
     key = bytes.fromhex(vectors["system"]["key_hex"])
     assert decrypt_secret_with_key(vectors["system"]["envelope"], key) == vectors["payload"]
+
+
+def test_shared_argon2id_v2_vector_matches_python_reference():
+    vectors = json.loads(V2_VECTOR_PATH.read_text(encoding="utf-8"))
+
+    assert vectors["schema"] == "fresnica-protection-v2"
+    password_envelope = vectors["password"]["envelope"]
+    password = vectors["password"]["password"]
+    unlock_key = derive_unlock_key(password_envelope, password)
+    assert unlock_key.as_bytes().hex() == vectors["password"]["unlock_key_hex"]
+    assert decrypt_secret(password_envelope, password) == vectors["payload"]
