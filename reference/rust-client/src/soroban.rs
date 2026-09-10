@@ -15,7 +15,10 @@ use stellar_xdr::{
 
 use crate::ledger_authorization::load_classic_ledger_authorization_plan;
 use crate::rpc_gateway::{RpcGateway, RpcSubmissionError, RpcTransactionStatus};
-use crate::signing_coordination::sign_with_local_ed25519;
+use crate::signing_coordination::{
+    sign_with_ed25519_providers, ExternalEd25519SigningProvider, LOCAL_SOFTWARE_PASSPHRASE_REQUIRED,
+};
+use crate::system_auth::{system_auth_slot, SystemAuthRelease, SystemAuthUnlockProvider};
 use crate::transaction::{
     build_single_operation_envelope, ensure_transaction_not_expired, network_passphrase,
     resolve_network_wallet, transaction_hash_bytes, transaction_xdr_bytes, PendingTransactionStore,
@@ -190,12 +193,22 @@ pub fn authorize_prepared_soroban(
     prepared: &mut PreparedSorobanTransaction,
     passcode: &str,
 ) -> Result<(), String> {
+    authorize_prepared_soroban_with_system_auth(storage, prepared, Some(passcode), &[])
+}
+
+pub fn authorize_prepared_soroban_with_system_auth(
+    storage: &WalletStorage,
+    prepared: &mut PreparedSorobanTransaction,
+    passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
+) -> Result<(), String> {
     prepared.assert_review_binding()?;
     if prepared.authorized_envelope_xdr.is_some() {
         return Err("Soroban authorization has already been applied".to_owned());
     }
     let network = prepared.review.network.clone();
     let signers = local_signing_records(storage, &network)?;
+    let system_auth = system_auth_provider_map(&signers, system_auth_providers)?;
     let mut entries = invoke_auth_entries(&prepared.envelope)?.to_vec();
     if entries.len() != prepared.review.auth_entry_count {
         return Err("Soroban authorization entry count changed after review".to_owned());
@@ -211,13 +224,43 @@ pub fn authorize_prepared_soroban(
                     format!("No local signer capability for Soroban authorizer {authorizer}")
                 })?;
                 let unsigned = authorization_entry_xdr(entry)?;
-                let signed = sign_authorization_entry(
-                    signer,
-                    &network,
-                    &authorizer,
-                    unsigned.clone(),
-                    passcode,
-                )?;
+                let signed = if let Some(provider) = system_auth.get(&authorizer) {
+                    let slot = system_auth_slot(signer)?;
+                    match provider.release(&slot).map_err(|error| {
+                        format!("System authentication for {authorizer} failed: {error}")
+                    })? {
+                        SystemAuthRelease::UnlockKey(unlock_key) => {
+                            sign_authorization_entry_with_unlock_key(
+                                signer,
+                                &network,
+                                &authorizer,
+                                unsigned.clone(),
+                                unlock_key,
+                            )?
+                        }
+                        SystemAuthRelease::PassphraseRequired => {
+                            return Err(LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned());
+                        }
+                        SystemAuthRelease::Cancelled => {
+                            return Err("System authentication cancelled".to_owned());
+                        }
+                        SystemAuthRelease::Failed(error) => {
+                            return Err(format!(
+                                "System authentication for {authorizer} failed: {error}"
+                            ));
+                        }
+                    }
+                } else {
+                    let passcode =
+                        passcode.ok_or_else(|| LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned())?;
+                    sign_authorization_entry(
+                        signer,
+                        &network,
+                        &authorizer,
+                        unsigned.clone(),
+                        passcode,
+                    )?
+                };
                 if signed == unsigned {
                     return Err("Soroban authorization signer returned no signature".to_owned());
                 }
@@ -244,6 +287,17 @@ pub fn sign_prepared_soroban(
     horizon: &HorizonGateway,
     passcode: &str,
 ) -> Result<(), String> {
+    sign_prepared_soroban_with_providers(storage, prepared, horizon, Some(passcode), &[], &[])
+}
+
+pub fn sign_prepared_soroban_with_providers(
+    storage: &WalletStorage,
+    prepared: &mut PreparedSorobanTransaction,
+    horizon: &HorizonGateway,
+    passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
+    external_providers: &[ExternalEd25519SigningProvider],
+) -> Result<(), String> {
     if prepared.authorized_envelope_xdr.is_none() {
         return Err(
             "Authorize the reviewed Soroban transaction before envelope signing".to_owned(),
@@ -255,12 +309,14 @@ pub fn sign_prepared_soroban(
     prepared.assert_review_binding()?;
     ensure_transaction_not_expired(&prepared.envelope)?;
     let authorization = load_classic_ledger_authorization_plan(horizon, &prepared.envelope)?;
-    sign_with_local_ed25519(
+    sign_with_ed25519_providers(
         storage,
         &authorization,
         &prepared.review.network,
         &mut prepared.envelope,
         passcode,
+        system_auth_providers,
+        external_providers,
     )?;
     prepared.assert_submit_binding()?;
     prepared.envelope_signing_complete = true;
@@ -605,6 +661,64 @@ fn set_signature_void(entry: &mut SorobanAuthorizationEntry) -> Result<(), Strin
             Err("Source-account authorization does not carry a detached signature".to_owned())
         }
     }
+}
+
+fn system_auth_provider_map<'a>(
+    signers: &BTreeMap<String, WalletRecord>,
+    providers: &'a [SystemAuthUnlockProvider],
+) -> Result<BTreeMap<String, &'a SystemAuthUnlockProvider>, String> {
+    let mut mapped = BTreeMap::new();
+    for provider in providers {
+        if !signers.contains_key(provider.public_key()) {
+            return Err(format!(
+                "system-auth provider {} has no matching local protected software signer",
+                provider.public_key()
+            ));
+        }
+        if mapped
+            .insert(provider.public_key().to_owned(), provider)
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate system-auth provider: {}",
+                provider.public_key()
+            ));
+        }
+    }
+    Ok(mapped)
+}
+
+fn sign_authorization_entry_with_unlock_key(
+    record: &WalletRecord,
+    network: &str,
+    expected_authorizer: &str,
+    authorization_entry_xdr: Vec<u8>,
+    unlock_key: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    if record.watch_only() || record.secret.is_none() {
+        return Err(format!("wallet \"{}\" is watch-only", record.name));
+    }
+    let protected_json = serde_json::to_string(
+        record
+            .secret
+            .as_ref()
+            .ok_or_else(|| "wallet has no protected signing material".to_owned())?,
+    )
+    .map_err(|error| format!("Unable to encode protected signing material: {error}"))?;
+    FresnicaSdk::new()
+        .sign_soroban_authorization_xdr(
+            protected_json,
+            unlock_key,
+            expected_authorizer.to_owned(),
+            authorization_entry_xdr,
+            network_passphrase(network)?.to_owned(),
+        )
+        .map_err(|error| match error.code {
+            SdkErrorCode::InvalidUnlockKey => {
+                "Unable to unlock Soroban authorizer: invalid system-auth unlock key".to_owned()
+            }
+            _ => format!("Unable to sign Soroban authorization: {error}"),
+        })
 }
 
 fn sign_authorization_entry(
@@ -971,6 +1085,50 @@ mod tests {
 
         assert_ne!(prepared.signing_transaction_hash(), reviewed_hash);
         prepared.assert_review_binding().unwrap();
+        let entries = invoke_auth_entries(&prepared.envelope).unwrap();
+        let SorobanCredentials::AddressV2(credentials) = &entries[0].credentials else {
+            panic!("expected AddressV2 credentials");
+        };
+        assert!(!matches!(credentials.signature, ScVal::Void));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detached_classic_authorization_accepts_system_auth_unlock_key() {
+        let request =
+            SorobanInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "transfer", vec![]);
+        let public = StrkeyPublicKey::from_string(ACCOUNT).unwrap();
+        let auth = address_auth(ScAddress::Account(stellar_xdr::AccountId(
+            PublicKey::PublicKeyTypeEd25519(Uint256(public.0)),
+        )));
+        let mut prepared = assemble_reviewed_transaction(
+            "main".to_owned(),
+            TESTNET,
+            &request,
+            candidate(&request),
+            simulation(auth),
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-soroban-system-auth-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let signer = import_secret_record("signer", TESTNET, SECRET, PASSCODE).unwrap();
+        storage.save(&signer, false).unwrap();
+        let enrollment = crate::prepare_system_auth_enrollment(&signer, PASSCODE).unwrap();
+        let expected_slot = enrollment.slot.storage_id();
+        let unlock_key = enrollment.unlock_key().to_vec();
+        let provider = SystemAuthUnlockProvider::new(ACCOUNT, move |slot| {
+            if slot.storage_id() != expected_slot {
+                return SystemAuthRelease::Failed("unexpected system-auth slot".to_owned());
+            }
+            SystemAuthRelease::UnlockKey(unlock_key.clone())
+        })
+        .unwrap();
+        authorize_prepared_soroban_with_system_auth(&storage, &mut prepared, None, &[provider])
+            .unwrap();
         let entries = invoke_auth_entries(&prepared.envelope).unwrap();
         let SorobanCredentials::AddressV2(credentials) = &entries[0].credentials else {
             panic!("expected AddressV2 credentials");

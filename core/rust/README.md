@@ -18,7 +18,7 @@ Implemented production primitives currently include:
 - Canonical password-protected wallet envelopes using Scrypt + AES-256-GCM
 - protected wallet initialization from Stellar secret or mnemonic material
 - protected mnemonic generation for new software wallets
-- `WalletUnlockKey`, the 32-byte Scrypt output used to open that same canonical envelope
+- `WalletUnlockKey`, the 32-byte versioned password-KDF output used to open that same canonical envelope
 - Verified unlock-key derivation with public-key identity validation before client enrollment
 - One-shot protected transaction and SEP-53 message signing using `WalletUnlockKey`
 - Explicit passcode-only signing-material export for user-requested reveal/migration flows
@@ -64,7 +64,7 @@ SEP-53 itself has no network passphrase or dapp-origin/replay semantics. Those b
 
 ## Secret-protection boundary
 
-The canonical software-wallet format remains the version-1 Scrypt + AES-256-GCM password envelope. Each wallet has independent random KDF salt and AEAD nonce material, so one Fresnica app passcode still produces a different unlock key for every wallet.
+New software-wallet protection uses the version-2 Argon2id + AES-256-GCM password envelope; version-1 Scrypt envelopes remain readable. Each wallet has independent random KDF salt and AEAD nonce material, so one Fresnica passphrase still produces a different unlock key for every wallet.
 
 `SystemProtectionProvider` and `SystemKeyStore` are not part of Core. OS-specific authorization is a client concern.
 

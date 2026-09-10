@@ -113,7 +113,7 @@ The software-signer boundary deliberately distinguishes two inputs.
 
 ### WalletUnlockKey: routine use
 
-`WalletUnlockKey` is the 32-byte Scrypt output for one canonical password-protected software-signer envelope.
+`WalletUnlockKey` is the 32-byte versioned password-KDF output for one canonical protected software-signer envelope.
 
 It may be stored behind client-controlled system authentication.
 

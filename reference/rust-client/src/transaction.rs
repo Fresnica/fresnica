@@ -29,6 +29,7 @@ use crate::signing_coordination::{
     review_ledger_authorization, sign_with_ed25519_providers, sign_with_local_ed25519,
     ExternalEd25519SigningProvider,
 };
+use crate::system_auth::SystemAuthUnlockProvider;
 use crate::{HorizonGateway, SubmissionError, WalletRecord, WalletStorage};
 
 pub const STROOPS_PER_XLM: i64 = 10_000_000;
@@ -336,6 +337,7 @@ pub(crate) fn sign_and_submit_with_providers(
     envelope: &mut TransactionEnvelope,
     horizon: &HorizonGateway,
     passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
     external_providers: &[ExternalEd25519SigningProvider],
 ) -> Result<TransactionSubmission, String> {
     ensure_transaction_not_expired(envelope)?;
@@ -346,6 +348,7 @@ pub(crate) fn sign_and_submit_with_providers(
         network,
         envelope,
         passcode,
+        system_auth_providers,
         external_providers,
     )?;
     submit_signed_transaction(pending_transactions, record, network, envelope, horizon)
@@ -410,6 +413,37 @@ pub(crate) fn prepared_classic_authorization_snapshot(
     })?;
     let plan = plan_classic_ledger_authorization(envelope, &[account])?;
     review_ledger_authorization(storage, &plan, network, envelope)
+}
+
+pub fn sign_transaction_xdr_with_unlock_key(
+    record: &WalletRecord,
+    network: &str,
+    transaction_xdr: Vec<u8>,
+    unlock_key: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    if record.watch_only() || record.secret.is_none() {
+        return Err(format!("wallet \"{}\" is watch-only", record.name));
+    }
+    let protected = record
+        .secret
+        .as_ref()
+        .ok_or_else(|| "wallet has no protected signing material".to_owned())?;
+    let protected_json = serde_json::to_string(protected)
+        .map_err(|error| format!("Unable to encode protected signing material: {error}"))?;
+    FresnicaSdk::new()
+        .sign_transaction_xdr(
+            protected_json,
+            unlock_key,
+            record.address.clone(),
+            transaction_xdr,
+            network_passphrase(network)?.to_owned(),
+        )
+        .map_err(|error| match error.code {
+            SdkErrorCode::InvalidUnlockKey => {
+                "Unable to unlock wallet: invalid system-auth unlock key".to_owned()
+            }
+            _ => format!("Unable to sign transaction: {error}"),
+        })
 }
 
 pub fn sign_transaction_xdr_with_passcode(

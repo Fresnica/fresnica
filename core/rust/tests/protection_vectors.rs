@@ -33,10 +33,22 @@ fn protection_envelope_matches_cross_language_vector_and_unlock_key_path() {
         SecretStoreError::InvalidPassword
     );
 
-    let unlock_key = derive_unlock_key(&vectors.password.envelope, &vectors.password.password)
-        .unwrap();
+    let unlock_key =
+        derive_unlock_key(&vectors.password.envelope, &vectors.password.password).unwrap();
     assert_eq!(
         decrypt_secret_with_unlock_key(&vectors.password.envelope, &unlock_key).unwrap(),
+        vectors.payload
+    );
+}
+
+#[test]
+fn argon2id_v2_envelope_matches_cross_language_vector() {
+    let raw = include_str!("../../../spec/test-vectors/protection-v2.json");
+    let vectors: ProtectionVectors = serde_json::from_str(raw).unwrap();
+
+    assert_eq!(vectors.schema, "fresnica-protection-v2");
+    assert_eq!(
+        decrypt_secret(&vectors.password.envelope, &vectors.password.password).unwrap(),
         vectors.payload
     );
 }

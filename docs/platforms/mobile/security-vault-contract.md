@@ -122,11 +122,11 @@ The single user-chosen Fresnica passcode used for ordinary local software-signer
 
 A versioned encrypted blob produced and consumed by Rust Core. Mobile treats it as opaque persisted data.
 
-For the current v1 encrypted format, Core uses Scrypt and AES-256-GCM with random per-signer salt and nonce.
+For password envelopes, Core owns the versioned KDF and AES-256-GCM semantics with random per-signer salt and nonce.
 
 ### WalletUnlockKey
 
-The exact 32-byte Scrypt output derived by Core from the app passcode and one software-signer envelope's KDF salt.
+The exact 32-byte password-KDF output derived by Core from the Fresnica passphrase and one software-signer envelope's versioned KDF metadata.
 
 It decrypts the same canonical password-protected signer envelope. It does not create a second ciphertext or independent system wallet key.
 

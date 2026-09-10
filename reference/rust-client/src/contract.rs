@@ -10,12 +10,15 @@ use stellar_xdr::{
 
 use crate::horizon_gateway::HorizonGateway;
 use crate::rpc_gateway::RpcGateway;
+use crate::signing_coordination::ExternalEd25519SigningProvider;
 use crate::soroban::{
-    authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
+    authorize_prepared_soroban, authorize_prepared_soroban_with_system_auth,
+    prepare_soroban_invoke, sign_prepared_soroban, sign_prepared_soroban_with_providers,
     simulate_soroban_invoke, submit_prepared_soroban, validate_soroban_simulation,
     PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
 };
 use crate::storage::WalletStorage;
+use crate::system_auth::SystemAuthUnlockProvider;
 use crate::transaction::TransactionSubmission;
 
 pub const DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS: u32 = 100;
@@ -468,6 +471,20 @@ pub(crate) fn authorize_contract_invoke(
     authorize_prepared_soroban(storage, &mut prepared.prepared, passcode)
 }
 
+pub(crate) fn authorize_contract_invoke_with_system_auth(
+    storage: &WalletStorage,
+    prepared: &mut PreparedContractInvoke,
+    passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
+) -> Result<(), String> {
+    authorize_prepared_soroban_with_system_auth(
+        storage,
+        &mut prepared.prepared,
+        passcode,
+        system_auth_providers,
+    )
+}
+
 pub(crate) fn sign_contract_invoke(
     storage: &WalletStorage,
     prepared: &mut PreparedContractInvoke,
@@ -475,6 +492,24 @@ pub(crate) fn sign_contract_invoke(
     passcode: &str,
 ) -> Result<(), String> {
     sign_prepared_soroban(storage, &mut prepared.prepared, horizon, passcode)
+}
+
+pub(crate) fn sign_contract_invoke_with_providers(
+    storage: &WalletStorage,
+    prepared: &mut PreparedContractInvoke,
+    horizon: &HorizonGateway,
+    passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
+    external_providers: &[ExternalEd25519SigningProvider],
+) -> Result<(), String> {
+    sign_prepared_soroban_with_providers(
+        storage,
+        &mut prepared.prepared,
+        horizon,
+        passcode,
+        system_auth_providers,
+        external_providers,
+    )
 }
 
 pub(crate) async fn submit_contract_invoke(

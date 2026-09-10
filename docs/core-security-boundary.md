@@ -92,7 +92,7 @@ System authentication must not silently become a replacement recovery credential
 
 A native `WalletUnlockKey` is routine software-signing authorization material, not a Reveal/Export credential. It must remain outside normal JavaScript/Dart/application scripting state.
 
-Passphrase strength and credential-entry UX are Wallet/Application policy. The current Fresnica product baseline requires at least 15 Unicode scalar values when establishing new protection, while Core remains authoritative for KDF/encryption semantics rather than password-composition policy. Existing protected envelopes must remain unlockable so weak historical credentials can be rotated safely.
+Passphrase strength and credential-entry UX are Wallet/Application policy. Fresnica recommends at least 15 Unicode scalar values when establishing new protection, but a user may explicitly accept the risk of a shorter non-empty passphrase. Core remains authoritative for KDF/encryption semantics rather than password-composition policy. New password envelopes use Argon2id with versioned parameters; existing Scrypt v1 envelopes remain unlockable so credentials can be rotated safely.
 
 ## 6. Transaction integrity
 

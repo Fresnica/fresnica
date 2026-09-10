@@ -13,7 +13,7 @@ public final class FresnicaSignerAuthorization {
         self.keyStore = keyStore
     }
 
-    public func canEnrollSystemAuth() -> Bool { keyStore.canEnrollBiometry() }
+    public func canEnrollSystemAuth() -> Bool { keyStore.canEnrollSystemAuth() }
 
     public func hasSystemAuthDomain() throws -> Bool { try keyStore.hasDomain() }
 
