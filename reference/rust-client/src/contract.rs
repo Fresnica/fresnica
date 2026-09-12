@@ -479,6 +479,27 @@ pub(crate) async fn contract_interface(
     ))
 }
 
+fn ensure_contract_executable_unchanged(
+    before: &ContractExecutableObservation,
+    after: &ContractExecutableObservation,
+) -> Result<(), String> {
+    if before == after {
+        return Ok(());
+    }
+    Err(format!(
+        "contract executable changed while preparing the invocation: {} -> {}; inspect the deployed contract and prepare the call again",
+        executable_identity(before),
+        executable_identity(after)
+    ))
+}
+
+fn executable_identity(observation: &ContractExecutableObservation) -> String {
+    match &observation.wasm_hash {
+        Some(hash) => format!("{}:{hash}", observation.kind.as_str()),
+        None => observation.kind.as_str().to_owned(),
+    }
+}
+
 pub(crate) async fn prepare_contract_invoke(
     storage: &WalletStorage,
     rpc: &RpcGateway,
@@ -487,8 +508,11 @@ pub(crate) async fn prepare_contract_invoke(
     let snapshot = rpc.contract_spec_snapshot(&request.contract_id).await?;
     let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
     let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
-    let review =
-        ContractInvokeReview::from_soroban(&prepared.review, snapshot.executable, arguments);
+    let executable = rpc
+        .contract_executable_observation(&request.contract_id)
+        .await?;
+    ensure_contract_executable_unchanged(&snapshot.executable, &executable)?;
+    let review = ContractInvokeReview::from_soroban(&prepared.review, executable, arguments);
     Ok(PreparedContractInvoke { review, prepared })
 }
 
@@ -504,8 +528,11 @@ pub(crate) async fn prepare_contract_invoke_outcome(
 
     if simulation_requires_send(&simulation)? {
         let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
-        let review =
-            ContractInvokeReview::from_soroban(&prepared.review, snapshot.executable, arguments);
+        let executable = rpc
+            .contract_executable_observation(&request.contract_id)
+            .await?;
+        ensure_contract_executable_unchanged(&snapshot.executable, &executable)?;
+        let review = ContractInvokeReview::from_soroban(&prepared.review, executable, arguments);
         return Ok(ContractInvokePreparation::Transaction(
             PreparedContractInvoke { review, prepared },
         ));
@@ -727,6 +754,23 @@ mod tests {
         };
         let result = ContractInvokeReview::from_soroban(&review, executable.clone(), Vec::new());
         assert_eq!(result.executable, executable);
+    }
+
+    #[test]
+    fn executable_change_during_write_preparation_fails_closed() {
+        let before = ContractExecutableObservation {
+            kind: ContractExecutableKind::Wasm,
+            wasm_hash: Some("11".repeat(32)),
+        };
+        let after = ContractExecutableObservation {
+            kind: ContractExecutableKind::Wasm,
+            wasm_hash: Some("22".repeat(32)),
+        };
+        assert!(ensure_contract_executable_unchanged(&before, &before).is_ok());
+        let error = ensure_contract_executable_unchanged(&before, &after).unwrap_err();
+        assert!(error.contains("changed while preparing"));
+        assert!(error.contains(&"11".repeat(32)));
+        assert!(error.contains(&"22".repeat(32)));
     }
 
     #[test]

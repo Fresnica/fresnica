@@ -122,6 +122,29 @@ impl RpcGateway {
         &self,
         contract_id: &str,
     ) -> Result<ContractSpecSnapshot, String> {
+        let executable = self.contract_executable(contract_id).await?;
+        let (observation, wasm_hash) = self.resolve_contract_executable(executable).await?;
+        let entries = match wasm_hash {
+            Some(hash) => self.contract_spec_for_wasm(hash).await?,
+            None => soroban_spec::read::parse_raw(stellar_asset_spec::xdr())
+                .map_err(|error| format!("Unable to read Stellar Asset Contract spec: {error}"))?,
+        };
+        Ok(ContractSpecSnapshot {
+            entries,
+            executable: observation,
+        })
+    }
+
+    pub(crate) async fn contract_executable_observation(
+        &self,
+        contract_id: &str,
+    ) -> Result<ContractExecutableObservation, String> {
+        let executable = self.contract_executable(contract_id).await?;
+        let (observation, _) = self.resolve_contract_executable(executable).await?;
+        Ok(observation)
+    }
+
+    async fn contract_executable(&self, contract_id: &str) -> Result<ContractExecutable, String> {
         let contract = StrkeyContract::from_str(contract_id)
             .map_err(|_| format!("Invalid Stellar contract address: {contract_id}"))?;
         let instance = self
@@ -129,37 +152,37 @@ impl RpcGateway {
             .get_contract_instance(&contract.0)
             .await
             .map_err(|error| format!("Unable to load contract {contract_id}: {error}"))?;
+        Ok(instance.executable)
+    }
 
-        match instance.executable {
-            ContractExecutable::StellarAsset => Ok(ContractSpecSnapshot {
-                entries: soroban_spec::read::parse_raw(stellar_asset_spec::xdr()).map_err(
-                    |error| format!("Unable to read Stellar Asset Contract spec: {error}"),
-                )?,
-                executable: ContractExecutableObservation {
+    async fn resolve_contract_executable(
+        &self,
+        executable: ContractExecutable,
+    ) -> Result<(ContractExecutableObservation, Option<Hash>), String> {
+        match executable {
+            ContractExecutable::StellarAsset => Ok((
+                ContractExecutableObservation {
                     kind: ContractExecutableKind::StellarAsset,
                     wasm_hash: None,
                 },
-            }),
-            ContractExecutable::Wasm(hash) => {
-                let wasm_hash = hash_hex(&hash);
-                Ok(ContractSpecSnapshot {
-                    entries: self.contract_spec_for_wasm(hash).await?,
-                    executable: ContractExecutableObservation {
-                        kind: ContractExecutableKind::Wasm,
-                        wasm_hash: Some(wasm_hash),
-                    },
-                })
-            }
+                None,
+            )),
+            ContractExecutable::Wasm(hash) => Ok((
+                ContractExecutableObservation {
+                    kind: ContractExecutableKind::Wasm,
+                    wasm_hash: Some(hash_hex(&hash)),
+                },
+                Some(hash),
+            )),
             ContractExecutable::ExternalRef(reference) => {
                 let hash = self.resolve_external_ref_wasm_hash(&reference).await?;
-                let wasm_hash = hash_hex(&hash);
-                Ok(ContractSpecSnapshot {
-                    entries: self.contract_spec_for_wasm(hash).await?,
-                    executable: ContractExecutableObservation {
+                Ok((
+                    ContractExecutableObservation {
                         kind: ContractExecutableKind::ExternalRef,
-                        wasm_hash: Some(wasm_hash),
+                        wasm_hash: Some(hash_hex(&hash)),
                     },
-                })
+                    Some(hash),
+                ))
             }
         }
     }
