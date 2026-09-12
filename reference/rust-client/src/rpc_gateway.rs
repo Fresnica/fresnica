@@ -118,13 +118,6 @@ impl RpcGateway {
         Ok(fee.max(100))
     }
 
-    pub(crate) async fn contract_spec_entries(
-        &self,
-        contract_id: &str,
-    ) -> Result<Vec<ScSpecEntry>, String> {
-        Ok(self.contract_spec_snapshot(contract_id).await?.entries)
-    }
-
     pub(crate) async fn contract_spec_snapshot(
         &self,
         contract_id: &str,

@@ -393,6 +393,7 @@ pub struct ContractInvokeReview {
     pub fee_payer: String,
     pub operation_source: String,
     pub contract_id: String,
+    pub executable: ContractExecutableObservation,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub authorizers: Vec<String>,
@@ -409,12 +410,17 @@ pub struct ContractInvokeReview {
 }
 
 impl ContractInvokeReview {
-    fn from_soroban(review: &SorobanReview, arguments: Vec<ContractArgumentReview>) -> Self {
+    fn from_soroban(
+        review: &SorobanReview,
+        executable: ContractExecutableObservation,
+        arguments: Vec<ContractArgumentReview>,
+    ) -> Self {
         Self {
             wallet_name: review.wallet_name.clone(),
             fee_payer: review.fee_payer.clone(),
             operation_source: review.operation_source.clone(),
             contract_id: review.contract_id.clone(),
+            executable,
             function_name: review.function_name.clone(),
             arguments,
             authorizers: review.authorizers.clone(),
@@ -435,6 +441,7 @@ impl ContractInvokeReview {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContractReadResult {
     pub contract_id: String,
+    pub executable: ContractExecutableObservation,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub output: Option<Value>,
@@ -477,10 +484,11 @@ pub(crate) async fn prepare_contract_invoke(
     rpc: &RpcGateway,
     request: ContractInvokeRequest,
 ) -> Result<PreparedContractInvoke, String> {
-    let spec_entries = rpc.contract_spec_entries(&request.contract_id).await?;
-    let (low_level_request, arguments) = request.resolve(&spec_entries)?;
+    let snapshot = rpc.contract_spec_snapshot(&request.contract_id).await?;
+    let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
     let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
-    let review = ContractInvokeReview::from_soroban(&prepared.review, arguments);
+    let review =
+        ContractInvokeReview::from_soroban(&prepared.review, snapshot.executable, arguments);
     Ok(PreparedContractInvoke { review, prepared })
 }
 
@@ -489,22 +497,24 @@ pub(crate) async fn prepare_contract_invoke_outcome(
     rpc: &RpcGateway,
     request: ContractInvokeRequest,
 ) -> Result<ContractInvokePreparation, String> {
-    let spec_entries = rpc.contract_spec_entries(&request.contract_id).await?;
-    let (low_level_request, arguments) = request.resolve(&spec_entries)?;
+    let snapshot = rpc.contract_spec_snapshot(&request.contract_id).await?;
+    let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
     let simulation = simulate_soroban_invoke(rpc, &low_level_request).await?;
     validate_soroban_simulation(&simulation)?;
 
     if simulation_requires_send(&simulation)? {
         let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
-        let review = ContractInvokeReview::from_soroban(&prepared.review, arguments);
+        let review =
+            ContractInvokeReview::from_soroban(&prepared.review, snapshot.executable, arguments);
         return Ok(ContractInvokePreparation::Transaction(
             PreparedContractInvoke { review, prepared },
         ));
     }
 
-    let output = decode_simulation_output(&spec_entries, &request.function_name, &simulation)?;
+    let output = decode_simulation_output(&snapshot.entries, &request.function_name, &simulation)?;
     Ok(ContractInvokePreparation::ReadOnly(ContractReadResult {
         contract_id: request.contract_id,
+        executable: snapshot.executable,
         function_name: request.function_name,
         arguments,
         output,
@@ -688,6 +698,35 @@ mod tests {
         assert_eq!(function.inputs[0].value_type.name, "vec<u32>");
         assert!(function.inputs[0].value_type.example.is_some());
         assert_eq!(function.inputs[1].value_type.name, "bytes[4]");
+    }
+
+    #[test]
+    fn invoke_review_preserves_executable_observation() {
+        let executable = ContractExecutableObservation {
+            kind: ContractExecutableKind::Wasm,
+            wasm_hash: Some("cd".repeat(32)),
+        };
+        let review = SorobanReview {
+            wallet_name: "wallet".to_owned(),
+            fee_payer: ACCOUNT.to_owned(),
+            operation_source: ACCOUNT.to_owned(),
+            contract_id: "CCONTRACT".to_owned(),
+            function_name: "balance".to_owned(),
+            argument_count: 0,
+            authorizers: Vec::new(),
+            credential_types: Vec::new(),
+            auth_entry_count: 0,
+            total_fee_stroops: 100,
+            resource_fee_stroops: 0,
+            inclusion_fee_stroops: 100,
+            min_resource_fee_stroops: 0,
+            simulation_ledger: 123,
+            authorization_expiration_ledger: None,
+            network: "testnet".to_owned(),
+            transaction_hash: "deadbeef".to_owned(),
+        };
+        let result = ContractInvokeReview::from_soroban(&review, executable.clone(), Vec::new());
+        assert_eq!(result.executable, executable);
     }
 
     #[test]
