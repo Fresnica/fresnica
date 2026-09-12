@@ -309,6 +309,7 @@ pub struct ContractInvokeRequest {
     pub contract_id: String,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentInput>,
+    positional_arguments: Option<Vec<String>>,
     pub inclusion_fee_stroops: Option<u32>,
     pub authorization_lifetime_ledgers: u32,
     address_names: BTreeMap<String, String>,
@@ -325,10 +326,42 @@ impl ContractInvokeRequest {
             contract_id: contract_id.into(),
             function_name: function_name.into(),
             arguments,
+            positional_arguments: None,
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
             address_names: BTreeMap::new(),
         }
+    }
+
+    pub fn new_positional(
+        contract_id: impl Into<String>,
+        function_name: impl Into<String>,
+        arguments: Vec<String>,
+    ) -> Self {
+        Self {
+            wallet: None,
+            contract_id: contract_id.into(),
+            function_name: function_name.into(),
+            arguments: Vec::new(),
+            positional_arguments: Some(arguments),
+            inclusion_fee_stroops: None,
+            authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+            address_names: BTreeMap::new(),
+        }
+    }
+
+    pub fn references_argument_value(&self, candidate: &str) -> bool {
+        let candidate = candidate.trim().trim_matches('"').to_ascii_lowercase();
+        self.arguments
+            .iter()
+            .map(|argument| argument.value.as_str())
+            .chain(
+                self.positional_arguments
+                    .iter()
+                    .flatten()
+                    .map(String::as_str),
+            )
+            .any(|value| value.trim().trim_matches('"').to_ascii_lowercase() == candidate)
     }
 
     pub fn add_address_name(&mut self, name: &str, address: &str) -> Result<(), String> {
@@ -362,52 +395,99 @@ impl ContractInvokeRequest {
         let spec = Spec::new(spec_entries);
         let function = find_function(&spec, &self.function_name)?;
         let function_name = function.name.to_utf8_string_lossy();
-        let mut supplied = BTreeMap::new();
-        for argument in &self.arguments {
-            if supplied
-                .insert(argument.name.clone(), argument.value.clone())
-                .is_some()
-            {
-                return Err(format!(
-                    "contract argument --{} was provided more than once",
-                    argument.name
-                ));
-            }
-        }
-
-        let mut scvals = Vec::with_capacity(function.inputs.len());
-        let mut review_arguments = Vec::with_capacity(function.inputs.len());
-        for input in &function.inputs {
-            let name = sanitize(&input.name.to_utf8_string_lossy());
-            let value_type = contract_type_name(&input.type_);
-            let parsed = match remove_argument(&mut supplied, &name) {
-                Some(value) => {
-                    parse_argument(&spec, &name, &value, &input.type_, &self.address_names)?
-                }
-                None if matches!(input.type_, ScSpecTypeDef::Option(_)) => ScVal::Void,
-                None => {
+        let (scvals, review_arguments) = match &self.positional_arguments {
+            Some(arguments) => {
+                if arguments.len() > function.inputs.len() {
                     return Err(format!(
-                        "missing contract argument --{name} (expected {value_type})"
+                        "contract function {} accepts {} arguments but {} were provided",
+                        self.function_name,
+                        function.inputs.len(),
+                        arguments.len()
                     ));
                 }
-            };
-            let normalized = spec.xdr_to_json(&parsed, &input.type_).map_err(|error| {
-                format!("unable to normalize contract argument --{name} ({value_type}): {error}")
-            })?;
-            scvals.push(parsed);
-            review_arguments.push(ContractArgumentReview {
-                name,
-                value_type,
-                value: normalized,
-            });
-        }
+                let mut scvals = Vec::with_capacity(function.inputs.len());
+                let mut review_arguments = Vec::with_capacity(function.inputs.len());
+                for (index, input) in function.inputs.iter().enumerate() {
+                    let name = sanitize(&input.name.to_utf8_string_lossy());
+                    let value_type = contract_type_name(&input.type_);
+                    let parsed = match arguments.get(index) {
+                        Some(value) => {
+                            parse_argument(&spec, &name, value, &input.type_, &self.address_names)?
+                        }
+                        None if matches!(input.type_, ScSpecTypeDef::Option(_)) => ScVal::Void,
+                        None => {
+                            return Err(format!(
+                                "missing positional contract argument {} ({name}: {value_type})",
+                                index + 1
+                            ));
+                        }
+                    };
+                    let normalized = spec.xdr_to_json(&parsed, &input.type_).map_err(|error| {
+                        format!(
+                            "unable to normalize contract argument {name} ({value_type}): {error}"
+                        )
+                    })?;
+                    scvals.push(parsed);
+                    review_arguments.push(ContractArgumentReview {
+                        name,
+                        value_type,
+                        value: normalized,
+                    });
+                }
+                (scvals, review_arguments)
+            }
+            None => {
+                let mut supplied = BTreeMap::new();
+                for argument in &self.arguments {
+                    if supplied
+                        .insert(argument.name.clone(), argument.value.clone())
+                        .is_some()
+                    {
+                        return Err(format!(
+                            "contract argument --{} was provided more than once",
+                            argument.name
+                        ));
+                    }
+                }
 
-        if let Some((name, _)) = supplied.first_key_value() {
-            return Err(format!(
-                "unknown contract argument --{name} for function {}",
-                self.function_name
-            ));
-        }
+                let mut scvals = Vec::with_capacity(function.inputs.len());
+                let mut review_arguments = Vec::with_capacity(function.inputs.len());
+                for input in &function.inputs {
+                    let name = sanitize(&input.name.to_utf8_string_lossy());
+                    let value_type = contract_type_name(&input.type_);
+                    let parsed = match remove_argument(&mut supplied, &name) {
+                        Some(value) => {
+                            parse_argument(&spec, &name, &value, &input.type_, &self.address_names)?
+                        }
+                        None if matches!(input.type_, ScSpecTypeDef::Option(_)) => ScVal::Void,
+                        None => {
+                            return Err(format!(
+                                "missing contract argument --{name} (expected {value_type})"
+                            ));
+                        }
+                    };
+                    let normalized = spec.xdr_to_json(&parsed, &input.type_).map_err(|error| {
+                        format!(
+                            "unable to normalize contract argument --{name} ({value_type}): {error}"
+                        )
+                    })?;
+                    scvals.push(parsed);
+                    review_arguments.push(ContractArgumentReview {
+                        name,
+                        value_type,
+                        value: normalized,
+                    });
+                }
+
+                if let Some((name, _)) = supplied.first_key_value() {
+                    return Err(format!(
+                        "unknown contract argument --{name} for function {}",
+                        self.function_name
+                    ));
+                }
+                (scvals, review_arguments)
+            }
+        };
 
         let mut request =
             SorobanInvokeRequest::new(self.contract_id.clone(), function_name, scvals);
@@ -1150,6 +1230,77 @@ mod tests {
         assert!(error.contains("ambiguous"));
         assert!(error.contains(ACCOUNT));
         assert!(error.contains(OTHER_ACCOUNT));
+    }
+
+    #[test]
+    fn positional_arguments_follow_spec_order_not_parameter_names() {
+        let entries = vec![function_entry(
+            "transfer",
+            &[
+                ("source_account", ScSpecTypeDef::Address),
+                ("quantity", ScSpecTypeDef::I128),
+            ],
+        )];
+        let request = ContractInvokeRequest::new_positional(
+            format!("{}", StrkeyContract([0; 32])),
+            "transfer",
+            vec![ACCOUNT.to_owned(), "100".to_owned()],
+        );
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Address(_)));
+        assert!(matches!(low_level.args[1], ScVal::I128(_)));
+        assert_eq!(review[0].name, "source_account");
+        assert_eq!(review[1].name, "quantity");
+        assert_eq!(review[1].value, json!("100"));
+    }
+
+    #[test]
+    fn positional_arguments_support_address_names_and_optional_tail() {
+        let entries = vec![function_entry(
+            "lookup",
+            &[
+                ("who", ScSpecTypeDef::Address),
+                ("memo", option_of(ScSpecTypeDef::String)),
+            ],
+        )];
+        let mut request = ContractInvokeRequest::new_positional(
+            format!("{}", StrkeyContract([0; 32])),
+            "lookup",
+            vec!["Alice".to_owned()],
+        );
+        request.add_address_name("alice", ACCOUNT).unwrap();
+        assert!(request.references_argument_value("ALICE"));
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Address(_)));
+        assert!(matches!(low_level.args[1], ScVal::Void));
+        assert_eq!(review[0].value, json!(ACCOUNT));
+    }
+
+    #[test]
+    fn positional_argument_count_fails_closed() {
+        let entries = vec![function_entry(
+            "balance",
+            &[("who", ScSpecTypeDef::Address)],
+        )];
+        let too_many = ContractInvokeRequest::new_positional(
+            format!("{}", StrkeyContract([0; 32])),
+            "balance",
+            vec![ACCOUNT.to_owned(), OTHER_ACCOUNT.to_owned()],
+        );
+        assert!(too_many
+            .resolve(&entries)
+            .unwrap_err()
+            .contains("accepts 1 arguments"));
+
+        let missing = ContractInvokeRequest::new_positional(
+            format!("{}", StrkeyContract([0; 32])),
+            "balance",
+            Vec::new(),
+        );
+        assert!(missing
+            .resolve(&entries)
+            .unwrap_err()
+            .contains("missing positional contract argument 1"));
     }
 
     #[test]
