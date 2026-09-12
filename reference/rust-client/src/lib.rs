@@ -45,8 +45,9 @@ pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestinati
 pub use contract::{
     ContractArgumentInput, ContractArgumentReview, ContractExecutableKind,
     ContractExecutableObservation, ContractFunction, ContractInterface, ContractInvokePreparation,
-    ContractInvokeRequest, ContractInvokeReview, ContractParameter, ContractParameterType,
-    ContractReadResult, PreparedContractInvoke, DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+    ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry, ContractParameter,
+    ContractParameterType, ContractReadResult, PreparedContractInvoke,
+    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
 };
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,

@@ -4,8 +4,8 @@ use serde_json::Value;
 use soroban_spec_tools::{sanitize, Spec};
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_xdr::{
-    ContractEvent, ContractEventType, DiagnosticEvent, ScSpecEntry, ScSpecFunctionV0,
-    ScSpecTypeDef, ScVal,
+    ContractEvent, ContractEventType, DiagnosticEvent, ScMetaEntry, ScMetaV0, ScSpecEntry,
+    ScSpecFunctionV0, ScSpecTypeDef, ScVal,
 };
 
 use crate::horizon_gateway::HorizonGateway;
@@ -85,6 +85,23 @@ pub struct ContractFunction {
     pub outputs: Vec<ContractParameterType>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractMetadataEntry {
+    pub key: String,
+    pub value: String,
+}
+
+impl ContractMetadataEntry {
+    pub(crate) fn from_xdr(entry: &ScMetaEntry) -> Self {
+        match entry {
+            ScMetaEntry::ScMetaV0(ScMetaV0 { key, val }) => Self {
+                key: key.to_utf8_string_lossy(),
+                value: val.to_utf8_string_lossy(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContractExecutableKind {
     StellarAsset,
@@ -112,6 +129,7 @@ pub struct ContractExecutableObservation {
 pub struct ContractInterface {
     pub contract_id: String,
     pub executable: ContractExecutableObservation,
+    pub metadata: Vec<ContractMetadataEntry>,
     pub functions: Vec<ContractFunction>,
 }
 
@@ -119,6 +137,7 @@ impl ContractInterface {
     pub(crate) fn from_spec(
         contract_id: &str,
         executable: ContractExecutableObservation,
+        metadata: Vec<ContractMetadataEntry>,
         entries: &[ScSpecEntry],
     ) -> Self {
         let spec = Spec::new(entries);
@@ -132,6 +151,7 @@ impl ContractInterface {
         Self {
             contract_id: contract_id.to_owned(),
             executable,
+            metadata,
             functions,
         }
     }
@@ -394,6 +414,7 @@ pub struct ContractInvokeReview {
     pub operation_source: String,
     pub contract_id: String,
     pub executable: ContractExecutableObservation,
+    pub metadata: Vec<ContractMetadataEntry>,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub authorizers: Vec<String>,
@@ -413,6 +434,7 @@ impl ContractInvokeReview {
     fn from_soroban(
         review: &SorobanReview,
         executable: ContractExecutableObservation,
+        metadata: Vec<ContractMetadataEntry>,
         arguments: Vec<ContractArgumentReview>,
     ) -> Self {
         Self {
@@ -421,6 +443,7 @@ impl ContractInvokeReview {
             operation_source: review.operation_source.clone(),
             contract_id: review.contract_id.clone(),
             executable,
+            metadata,
             function_name: review.function_name.clone(),
             arguments,
             authorizers: review.authorizers.clone(),
@@ -442,6 +465,7 @@ impl ContractInvokeReview {
 pub struct ContractReadResult {
     pub contract_id: String,
     pub executable: ContractExecutableObservation,
+    pub metadata: Vec<ContractMetadataEntry>,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub output: Option<Value>,
@@ -475,6 +499,7 @@ pub(crate) async fn contract_interface(
     Ok(ContractInterface::from_spec(
         contract_id,
         snapshot.executable,
+        snapshot.metadata,
         &snapshot.entries,
     ))
 }
@@ -512,7 +537,12 @@ pub(crate) async fn prepare_contract_invoke(
         .contract_executable_observation(&request.contract_id)
         .await?;
     ensure_contract_executable_unchanged(&snapshot.executable, &executable)?;
-    let review = ContractInvokeReview::from_soroban(&prepared.review, executable, arguments);
+    let review = ContractInvokeReview::from_soroban(
+        &prepared.review,
+        executable,
+        snapshot.metadata,
+        arguments,
+    );
     Ok(PreparedContractInvoke { review, prepared })
 }
 
@@ -532,7 +562,12 @@ pub(crate) async fn prepare_contract_invoke_outcome(
             .contract_executable_observation(&request.contract_id)
             .await?;
         ensure_contract_executable_unchanged(&snapshot.executable, &executable)?;
-        let review = ContractInvokeReview::from_soroban(&prepared.review, executable, arguments);
+        let review = ContractInvokeReview::from_soroban(
+            &prepared.review,
+            executable,
+            snapshot.metadata,
+            arguments,
+        );
         return Ok(ContractInvokePreparation::Transaction(
             PreparedContractInvoke { review, prepared },
         ));
@@ -542,6 +577,7 @@ pub(crate) async fn prepare_contract_invoke_outcome(
     Ok(ContractInvokePreparation::ReadOnly(ContractReadResult {
         contract_id: request.contract_id,
         executable: snapshot.executable,
+        metadata: snapshot.metadata,
         function_name: request.function_name,
         arguments,
         output,
@@ -712,10 +748,16 @@ mod tests {
                 kind: ContractExecutableKind::Wasm,
                 wasm_hash: Some("ab".repeat(32)),
             },
+            vec![ContractMetadataEntry {
+                key: "binver".to_owned(),
+                value: "2.3.7".to_owned(),
+            }],
             &entries,
         );
         let function = interface.function("batch").unwrap();
         assert_eq!(interface.executable.kind, ContractExecutableKind::Wasm);
+        assert_eq!(interface.metadata[0].key, "binver");
+        assert_eq!(interface.metadata[0].value, "2.3.7");
         assert_eq!(
             interface.executable.wasm_hash.as_deref(),
             Some("abababababababababababababababababababababababababababababababab")
@@ -752,8 +794,33 @@ mod tests {
             network: "testnet".to_owned(),
             transaction_hash: "deadbeef".to_owned(),
         };
-        let result = ContractInvokeReview::from_soroban(&review, executable.clone(), Vec::new());
+        let metadata = vec![ContractMetadataEntry {
+            key: "sep".to_owned(),
+            value: "41".to_owned(),
+        }];
+        let result = ContractInvokeReview::from_soroban(
+            &review,
+            executable.clone(),
+            metadata.clone(),
+            Vec::new(),
+        );
         assert_eq!(result.executable, executable);
+        assert_eq!(result.metadata, metadata);
+    }
+
+    #[test]
+    fn contract_metadata_preserves_wasm_key_value_entries() {
+        let entry = ScMetaEntry::ScMetaV0(ScMetaV0 {
+            key: "home_domain".try_into().unwrap(),
+            val: "example.org".try_into().unwrap(),
+        });
+        assert_eq!(
+            ContractMetadataEntry::from_xdr(&entry),
+            ContractMetadataEntry {
+                key: "home_domain".to_owned(),
+                value: "example.org".to_owned(),
+            }
+        );
     }
 
     #[test]
