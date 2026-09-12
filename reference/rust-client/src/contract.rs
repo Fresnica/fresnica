@@ -303,6 +303,41 @@ pub struct ContractArgumentReview {
     pub value: Value,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContractAddressNames {
+    names: BTreeMap<String, String>,
+}
+
+impl ContractAddressNames {
+    pub fn add(&mut self, name: &str, address: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("contract address name cannot be empty".to_owned());
+        }
+        let address = address.trim();
+        if address.is_empty() {
+            return Err(format!(
+                "contract address name {name:?} cannot resolve to an empty address"
+            ));
+        }
+        let key = address_name_key(name);
+        if let Some(existing) = self.names.get(&key) {
+            if existing == address {
+                return Ok(());
+            }
+            return Err(format!(
+                "contract address name {name:?} is ambiguous: {existing} or {address}"
+            ));
+        }
+        self.names.insert(key, address.to_owned());
+        Ok(())
+    }
+
+    fn get(&self, name: &str) -> Option<&str> {
+        self.names.get(&address_name_key(name)).map(String::as_str)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractInvokeRequest {
     pub wallet: Option<String>,
@@ -312,7 +347,7 @@ pub struct ContractInvokeRequest {
     positional_arguments: Option<Vec<String>>,
     pub inclusion_fee_stroops: Option<u32>,
     pub authorization_lifetime_ledgers: u32,
-    address_names: BTreeMap<String, String>,
+    address_names: ContractAddressNames,
 }
 
 impl ContractInvokeRequest {
@@ -329,7 +364,7 @@ impl ContractInvokeRequest {
             positional_arguments: None,
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
-            address_names: BTreeMap::new(),
+            address_names: ContractAddressNames::default(),
         }
     }
 
@@ -346,7 +381,7 @@ impl ContractInvokeRequest {
             positional_arguments: Some(arguments),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
-            address_names: BTreeMap::new(),
+            address_names: ContractAddressNames::default(),
         }
     }
 
@@ -365,27 +400,11 @@ impl ContractInvokeRequest {
     }
 
     pub fn add_address_name(&mut self, name: &str, address: &str) -> Result<(), String> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err("contract address name cannot be empty".to_owned());
-        }
-        let address = address.trim();
-        if address.is_empty() {
-            return Err(format!(
-                "contract address name {name:?} cannot resolve to an empty address"
-            ));
-        }
-        let key = address_name_key(name);
-        if let Some(existing) = self.address_names.get(&key) {
-            if existing == address {
-                return Ok(());
-            }
-            return Err(format!(
-                "contract address name {name:?} is ambiguous: {existing} or {address}"
-            ));
-        }
-        self.address_names.insert(key, address.to_owned());
-        Ok(())
+        self.address_names.add(name, address)
+    }
+
+    pub(crate) fn set_address_names(&mut self, address_names: ContractAddressNames) {
+        self.address_names = address_names;
     }
 
     fn resolve(
@@ -540,7 +559,7 @@ fn parse_argument(
     name: &str,
     value: &str,
     type_def: &ScSpecTypeDef,
-    address_names: &BTreeMap<String, String>,
+    address_names: &ContractAddressNames,
 ) -> Result<ScVal, String> {
     match spec.from_string(value, type_def) {
         Ok(parsed) => return Ok(parsed),
@@ -549,8 +568,7 @@ fn parse_argument(
                 type_def,
                 ScSpecTypeDef::Address | ScSpecTypeDef::MuxedAddress
             ) {
-                let key = address_name_key(value.trim().trim_matches('"'));
-                if let Some(address) = address_names.get(&key) {
+                if let Some(address) = address_names.get(value.trim().trim_matches('"')) {
                     return spec.from_string(address, type_def).map_err(|error| {
                         format!(
                             "contract address name {value:?} resolved to {address}, but the resolved address is invalid for --{name}: {error}"

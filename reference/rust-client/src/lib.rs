@@ -44,11 +44,12 @@ pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATAL
 pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use contract::{
-    ContractArgumentInput, ContractArgumentReview, ContractCapabilities, ContractExecutableKind,
-    ContractExecutableObservation, ContractFunction, ContractInterface, ContractInvokePreparation,
-    ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry, ContractParameter,
-    ContractParameterType, ContractReadResult, ContractSep41Evidence, PreparedContractInvoke,
-    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS, SEP41_INTERFACE_VERSION,
+    ContractAddressNames, ContractArgumentInput, ContractArgumentReview, ContractCapabilities,
+    ContractExecutableKind, ContractExecutableObservation, ContractFunction, ContractInterface,
+    ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry,
+    ContractParameter, ContractParameterType, ContractReadResult, ContractSep41Evidence,
+    PreparedContractInvoke, DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+    SEP41_INTERFACE_VERSION,
 };
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
@@ -92,7 +93,10 @@ pub use system_auth::{
     prepare_system_auth_enrollment, system_auth_slot, SystemAuthEnrollment, SystemAuthRelease,
     SystemAuthSlot, SystemAuthUnlockProvider, SYSTEM_AUTH_UNLOCK_KEY_LENGTH,
 };
-pub use token::{resolve_token, ResolvedToken, ResolvedTokenSource};
+pub use token::{
+    resolve_token, PreparedTokenTransfer, ResolvedToken, ResolvedTokenSource, TokenAmount,
+    TokenBalanceRequest, TokenBalanceResult, TokenTransferRequest, STELLAR_ASSET_TOKEN_DECIMALS,
+};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
