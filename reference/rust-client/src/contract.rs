@@ -85,14 +85,42 @@ pub struct ContractFunction {
     pub outputs: Vec<ContractParameterType>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractExecutableKind {
+    StellarAsset,
+    Wasm,
+    ExternalRef,
+}
+
+impl ContractExecutableKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StellarAsset => "stellar_asset",
+            Self::Wasm => "wasm",
+            Self::ExternalRef => "external_ref",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractExecutableObservation {
+    pub kind: ContractExecutableKind,
+    pub wasm_hash: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractInterface {
     pub contract_id: String,
+    pub executable: ContractExecutableObservation,
     pub functions: Vec<ContractFunction>,
 }
 
 impl ContractInterface {
-    pub(crate) fn from_spec(contract_id: &str, entries: &[ScSpecEntry]) -> Self {
+    pub(crate) fn from_spec(
+        contract_id: &str,
+        executable: ContractExecutableObservation,
+        entries: &[ScSpecEntry],
+    ) -> Self {
         let spec = Spec::new(entries);
         let functions = entries
             .iter()
@@ -103,6 +131,7 @@ impl ContractInterface {
             .collect();
         Self {
             contract_id: contract_id.to_owned(),
+            executable,
             functions,
         }
     }
@@ -435,8 +464,12 @@ pub(crate) async fn contract_interface(
     rpc: &RpcGateway,
     contract_id: &str,
 ) -> Result<ContractInterface, String> {
-    let entries = rpc.contract_spec_entries(contract_id).await?;
-    Ok(ContractInterface::from_spec(contract_id, &entries))
+    let snapshot = rpc.contract_spec_snapshot(contract_id).await?;
+    Ok(ContractInterface::from_spec(
+        contract_id,
+        snapshot.executable,
+        &snapshot.entries,
+    ))
 }
 
 pub(crate) async fn prepare_contract_invoke(
@@ -636,8 +669,20 @@ mod tests {
             ],
         )];
 
-        let interface = ContractInterface::from_spec("CCONTRACT", &entries);
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: Some("ab".repeat(32)),
+            },
+            &entries,
+        );
         let function = interface.function("batch").unwrap();
+        assert_eq!(interface.executable.kind, ContractExecutableKind::Wasm);
+        assert_eq!(
+            interface.executable.wasm_hash.as_deref(),
+            Some("abababababababababababababababababababababababababababababababab")
+        );
         assert_eq!(function.doc, "test function");
         assert_eq!(function.inputs[0].name, "values");
         assert_eq!(function.inputs[0].value_type.name, "vec<u32>");

@@ -13,17 +13,32 @@ use stellar_xdr::{
     ScSpecEntry, ScVal, TransactionEnvelope,
 };
 
+use crate::contract::{ContractExecutableKind, ContractExecutableObservation};
 use crate::network_passphrase;
 use crate::transaction::transaction_xdr_bytes;
 
 pub const TESTNET_RPC_URL: &str = "https://soroban-testnet.stellar.org:443";
 const XDR_DEPTH_LIMIT: u32 = 500;
 
+fn hash_hex(hash: &Hash) -> String {
+    let mut output = String::with_capacity(64);
+    for byte in hash.0 {
+        use std::fmt::Write as _;
+        write!(&mut output, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    output
+}
+
 #[derive(Clone, Debug)]
 pub struct RpcGateway {
     client: StellarRpcClient,
     network: String,
     network_passphrase: &'static str,
+}
+
+pub(crate) struct ContractSpecSnapshot {
+    pub entries: Vec<ScSpecEntry>,
+    pub executable: ContractExecutableObservation,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,6 +122,13 @@ impl RpcGateway {
         &self,
         contract_id: &str,
     ) -> Result<Vec<ScSpecEntry>, String> {
+        Ok(self.contract_spec_snapshot(contract_id).await?.entries)
+    }
+
+    pub(crate) async fn contract_spec_snapshot(
+        &self,
+        contract_id: &str,
+    ) -> Result<ContractSpecSnapshot, String> {
         let contract = StrkeyContract::from_str(contract_id)
             .map_err(|_| format!("Invalid Stellar contract address: {contract_id}"))?;
         let instance = self
@@ -116,14 +138,35 @@ impl RpcGateway {
             .map_err(|error| format!("Unable to load contract {contract_id}: {error}"))?;
 
         match instance.executable {
-            ContractExecutable::StellarAsset => {
-                soroban_spec::read::parse_raw(stellar_asset_spec::xdr())
-                    .map_err(|error| format!("Unable to read Stellar Asset Contract spec: {error}"))
+            ContractExecutable::StellarAsset => Ok(ContractSpecSnapshot {
+                entries: soroban_spec::read::parse_raw(stellar_asset_spec::xdr()).map_err(
+                    |error| format!("Unable to read Stellar Asset Contract spec: {error}"),
+                )?,
+                executable: ContractExecutableObservation {
+                    kind: ContractExecutableKind::StellarAsset,
+                    wasm_hash: None,
+                },
+            }),
+            ContractExecutable::Wasm(hash) => {
+                let wasm_hash = hash_hex(&hash);
+                Ok(ContractSpecSnapshot {
+                    entries: self.contract_spec_for_wasm(hash).await?,
+                    executable: ContractExecutableObservation {
+                        kind: ContractExecutableKind::Wasm,
+                        wasm_hash: Some(wasm_hash),
+                    },
+                })
             }
-            ContractExecutable::Wasm(hash) => self.contract_spec_for_wasm(hash).await,
             ContractExecutable::ExternalRef(reference) => {
                 let hash = self.resolve_external_ref_wasm_hash(&reference).await?;
-                self.contract_spec_for_wasm(hash).await
+                let wasm_hash = hash_hex(&hash);
+                Ok(ContractSpecSnapshot {
+                    entries: self.contract_spec_for_wasm(hash).await?,
+                    executable: ContractExecutableObservation {
+                        kind: ContractExecutableKind::ExternalRef,
+                        wasm_hash: Some(wasm_hash),
+                    },
+                })
             }
         }
     }

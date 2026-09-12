@@ -43,10 +43,10 @@ pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATAL
 pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use contract::{
-    ContractArgumentInput, ContractArgumentReview, ContractFunction, ContractInterface,
-    ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractParameter,
-    ContractParameterType, ContractReadResult, PreparedContractInvoke,
-    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+    ContractArgumentInput, ContractArgumentReview, ContractExecutableKind,
+    ContractExecutableObservation, ContractFunction, ContractInterface, ContractInvokePreparation,
+    ContractInvokeRequest, ContractInvokeReview, ContractParameter, ContractParameterType,
+    ContractReadResult, PreparedContractInvoke, DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
 };
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
