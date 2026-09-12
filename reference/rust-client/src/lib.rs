@@ -17,6 +17,7 @@ pub mod signing_coordination;
 pub mod soroban;
 pub mod storage;
 pub mod system_auth;
+mod token;
 pub mod transaction;
 pub mod trustline;
 pub mod wallet;
@@ -91,6 +92,7 @@ pub use system_auth::{
     prepare_system_auth_enrollment, system_auth_slot, SystemAuthEnrollment, SystemAuthRelease,
     SystemAuthSlot, SystemAuthUnlockProvider, SYSTEM_AUTH_UNLOCK_KEY_LENGTH,
 };
+pub use token::{resolve_token, ResolvedToken, ResolvedTokenSource};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
