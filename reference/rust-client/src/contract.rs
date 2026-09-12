@@ -22,6 +22,7 @@ use crate::system_auth::SystemAuthUnlockProvider;
 use crate::transaction::TransactionSubmission;
 
 pub const DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS: u32 = 100;
+pub const SEP41_INTERFACE_VERSION: &str = "0.5.1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractParameterType {
@@ -102,6 +103,101 @@ impl ContractMetadataEntry {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractSep41Evidence {
+    pub native_sac: bool,
+    pub sep47_declared: bool,
+    pub current_interface_compatible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractCapabilities {
+    pub sep41: ContractSep41Evidence,
+}
+
+impl ContractCapabilities {
+    fn from_spec(
+        executable: &ContractExecutableObservation,
+        metadata: &[ContractMetadataEntry],
+        entries: &[ScSpecEntry],
+    ) -> Self {
+        Self {
+            sep41: ContractSep41Evidence {
+                native_sac: executable.kind == ContractExecutableKind::StellarAsset,
+                sep47_declared: metadata_declares_sep(metadata, "41"),
+                current_interface_compatible: sep41_interface_compatible(entries),
+            },
+        }
+    }
+}
+
+fn metadata_declares_sep(metadata: &[ContractMetadataEntry], sep: &str) -> bool {
+    metadata
+        .iter()
+        .filter(|entry| entry.key == "sep")
+        .flat_map(|entry| entry.value.split(','))
+        .map(str::trim)
+        .any(|value| value == sep)
+}
+
+fn sep41_interface_compatible(entries: &[ScSpecEntry]) -> bool {
+    function_signature_matches(entries, "allowance", &["address", "address"], &["i128"])
+        && function_signature_matches(
+            entries,
+            "approve",
+            &["address", "address", "i128", "u32"],
+            &[],
+        )
+        && function_signature_matches(entries, "balance", &["address"], &["i128"])
+        && function_signature_matches(
+            entries,
+            "transfer",
+            &["address", "muxed_address", "i128"],
+            &[],
+        )
+        && function_signature_matches(
+            entries,
+            "transfer_from",
+            &["address", "address", "address", "i128"],
+            &[],
+        )
+        && function_signature_matches(entries, "burn", &["address", "i128"], &[])
+        && function_signature_matches(entries, "burn_from", &["address", "address", "i128"], &[])
+        && function_signature_matches(entries, "decimals", &[], &["u32"])
+        && function_signature_matches(entries, "name", &[], &["string"])
+        && function_signature_matches(entries, "symbol", &[], &["string"])
+}
+
+fn function_signature_matches(
+    entries: &[ScSpecEntry],
+    name: &str,
+    inputs: &[&str],
+    outputs: &[&str],
+) -> bool {
+    entries
+        .iter()
+        .find_map(|entry| match entry {
+            ScSpecEntry::FunctionV0(function) if function.name.to_utf8_string_lossy() == name => {
+                Some(function)
+            }
+            _ => None,
+        })
+        .is_some_and(|function| {
+            function.inputs.len() == inputs.len()
+                && function.outputs.len() == outputs.len()
+                && function
+                    .inputs
+                    .iter()
+                    .zip(inputs)
+                    .all(|(input, expected)| contract_type_name(&input.type_) == *expected)
+                && function
+                    .outputs
+                    .iter()
+                    .zip(outputs)
+                    .all(|(output, expected)| contract_type_name(output) == *expected)
+        })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContractExecutableKind {
     StellarAsset,
@@ -130,6 +226,7 @@ pub struct ContractInterface {
     pub contract_id: String,
     pub executable: ContractExecutableObservation,
     pub metadata: Vec<ContractMetadataEntry>,
+    pub capabilities: ContractCapabilities,
     pub functions: Vec<ContractFunction>,
 }
 
@@ -148,10 +245,12 @@ impl ContractInterface {
                 _ => None,
             })
             .collect();
+        let capabilities = ContractCapabilities::from_spec(&executable, &metadata, entries);
         Self {
             contract_id: contract_id.to_owned(),
             executable,
             metadata,
+            capabilities,
             functions,
         }
     }
@@ -415,6 +514,7 @@ pub struct ContractInvokeReview {
     pub contract_id: String,
     pub executable: ContractExecutableObservation,
     pub metadata: Vec<ContractMetadataEntry>,
+    pub capabilities: ContractCapabilities,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub authorizers: Vec<String>,
@@ -435,6 +535,7 @@ impl ContractInvokeReview {
         review: &SorobanReview,
         executable: ContractExecutableObservation,
         metadata: Vec<ContractMetadataEntry>,
+        capabilities: ContractCapabilities,
         arguments: Vec<ContractArgumentReview>,
     ) -> Self {
         Self {
@@ -444,6 +545,7 @@ impl ContractInvokeReview {
             contract_id: review.contract_id.clone(),
             executable,
             metadata,
+            capabilities,
             function_name: review.function_name.clone(),
             arguments,
             authorizers: review.authorizers.clone(),
@@ -466,6 +568,7 @@ pub struct ContractReadResult {
     pub contract_id: String,
     pub executable: ContractExecutableObservation,
     pub metadata: Vec<ContractMetadataEntry>,
+    pub capabilities: ContractCapabilities,
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub output: Option<Value>,
@@ -531,6 +634,11 @@ pub(crate) async fn prepare_contract_invoke(
     request: ContractInvokeRequest,
 ) -> Result<PreparedContractInvoke, String> {
     let snapshot = rpc.contract_spec_snapshot(&request.contract_id).await?;
+    let capabilities = ContractCapabilities::from_spec(
+        &snapshot.executable,
+        &snapshot.metadata,
+        &snapshot.entries,
+    );
     let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
     let prepared = prepare_soroban_invoke(storage, rpc, low_level_request).await?;
     let executable = rpc
@@ -541,6 +649,7 @@ pub(crate) async fn prepare_contract_invoke(
         &prepared.review,
         executable,
         snapshot.metadata,
+        capabilities,
         arguments,
     );
     Ok(PreparedContractInvoke { review, prepared })
@@ -552,6 +661,11 @@ pub(crate) async fn prepare_contract_invoke_outcome(
     request: ContractInvokeRequest,
 ) -> Result<ContractInvokePreparation, String> {
     let snapshot = rpc.contract_spec_snapshot(&request.contract_id).await?;
+    let capabilities = ContractCapabilities::from_spec(
+        &snapshot.executable,
+        &snapshot.metadata,
+        &snapshot.entries,
+    );
     let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
     let simulation = simulate_soroban_invoke(rpc, &low_level_request).await?;
     validate_soroban_simulation(&simulation)?;
@@ -566,6 +680,7 @@ pub(crate) async fn prepare_contract_invoke_outcome(
             &prepared.review,
             executable,
             snapshot.metadata,
+            capabilities,
             arguments,
         );
         return Ok(ContractInvokePreparation::Transaction(
@@ -578,6 +693,7 @@ pub(crate) async fn prepare_contract_invoke_outcome(
         contract_id: request.contract_id,
         executable: snapshot.executable,
         metadata: snapshot.metadata,
+        capabilities,
         function_name: request.function_name,
         arguments,
         output,
@@ -702,6 +818,14 @@ mod tests {
     const OTHER_ACCOUNT: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
 
     fn function_entry(name: &str, inputs: &[(&str, ScSpecTypeDef)]) -> ScSpecEntry {
+        function_entry_with_outputs(name, inputs, &[])
+    }
+
+    fn function_entry_with_outputs(
+        name: &str,
+        inputs: &[(&str, ScSpecTypeDef)],
+        outputs: &[ScSpecTypeDef],
+    ) -> ScSpecEntry {
         ScSpecEntry::FunctionV0(ScSpecFunctionV0 {
             doc: StringM::try_from("test function").unwrap(),
             name: ScSymbol::try_from(name).unwrap(),
@@ -716,8 +840,70 @@ mod tests {
                     .collect::<Vec<_>>(),
             )
             .unwrap(),
-            outputs: VecM::default(),
+            outputs: VecM::try_from(outputs.to_vec()).unwrap(),
         })
+    }
+
+    fn sep41_entries() -> Vec<ScSpecEntry> {
+        vec![
+            function_entry_with_outputs(
+                "allowance",
+                &[
+                    ("from", ScSpecTypeDef::Address),
+                    ("spender", ScSpecTypeDef::Address),
+                ],
+                &[ScSpecTypeDef::I128],
+            ),
+            function_entry(
+                "approve",
+                &[
+                    ("from", ScSpecTypeDef::Address),
+                    ("spender", ScSpecTypeDef::Address),
+                    ("amount", ScSpecTypeDef::I128),
+                    ("live_until_ledger", ScSpecTypeDef::U32),
+                ],
+            ),
+            function_entry_with_outputs(
+                "balance",
+                &[("id", ScSpecTypeDef::Address)],
+                &[ScSpecTypeDef::I128],
+            ),
+            function_entry(
+                "transfer",
+                &[
+                    ("from", ScSpecTypeDef::Address),
+                    ("to", ScSpecTypeDef::MuxedAddress),
+                    ("amount", ScSpecTypeDef::I128),
+                ],
+            ),
+            function_entry(
+                "transfer_from",
+                &[
+                    ("spender", ScSpecTypeDef::Address),
+                    ("from", ScSpecTypeDef::Address),
+                    ("to", ScSpecTypeDef::Address),
+                    ("amount", ScSpecTypeDef::I128),
+                ],
+            ),
+            function_entry(
+                "burn",
+                &[
+                    ("from", ScSpecTypeDef::Address),
+                    ("amount", ScSpecTypeDef::I128),
+                ],
+            ),
+            function_entry(
+                "burn_from",
+                &[
+                    ("spender", ScSpecTypeDef::Address),
+                    ("from", ScSpecTypeDef::Address),
+                    ("amount", ScSpecTypeDef::I128),
+                ],
+            ),
+            function_entry_with_outputs("decimals", &[], &[ScSpecTypeDef::U32]),
+            function_entry_with_outputs("name", &[], &[ScSpecTypeDef::String]),
+            function_entry_with_outputs("symbol", &[], &[ScSpecTypeDef::String]),
+        ]
     }
 
     fn vec_of(type_: ScSpecTypeDef) -> ScSpecTypeDef {
@@ -798,14 +984,77 @@ mod tests {
             key: "sep".to_owned(),
             value: "41".to_owned(),
         }];
+        let capabilities =
+            ContractCapabilities::from_spec(&executable, &metadata, &sep41_entries());
         let result = ContractInvokeReview::from_soroban(
             &review,
             executable.clone(),
             metadata.clone(),
+            capabilities.clone(),
             Vec::new(),
         );
         assert_eq!(result.executable, executable);
         assert_eq!(result.metadata, metadata);
+        assert_eq!(result.capabilities, capabilities);
+    }
+
+    #[test]
+    fn sep41_capability_keeps_declaration_and_interface_evidence_separate() {
+        let executable = ContractExecutableObservation {
+            kind: ContractExecutableKind::Wasm,
+            wasm_hash: Some("ab".repeat(32)),
+        };
+        let metadata = vec![
+            ContractMetadataEntry {
+                key: "sep".to_owned(),
+                value: "40".to_owned(),
+            },
+            ContractMetadataEntry {
+                key: "sep".to_owned(),
+                value: "47, 41".to_owned(),
+            },
+        ];
+        let compatible = ContractCapabilities::from_spec(&executable, &metadata, &sep41_entries());
+        assert!(!compatible.sep41.native_sac);
+        assert!(compatible.sep41.sep47_declared);
+        assert!(compatible.sep41.current_interface_compatible);
+
+        let declared_only = ContractCapabilities::from_spec(&executable, &metadata, &[]);
+        assert!(declared_only.sep41.sep47_declared);
+        assert!(!declared_only.sep41.current_interface_compatible);
+
+        let shape_only = ContractCapabilities::from_spec(&executable, &[], &sep41_entries());
+        assert!(!shape_only.sep41.sep47_declared);
+        assert!(shape_only.sep41.current_interface_compatible);
+    }
+
+    #[test]
+    fn sep47_requires_the_canonical_sep_41_identifier() {
+        let metadata = vec![ContractMetadataEntry {
+            key: "sep".to_owned(),
+            value: "041,410,41x".to_owned(),
+        }];
+        assert!(!metadata_declares_sep(&metadata, "41"));
+        assert!(metadata_declares_sep(
+            &[ContractMetadataEntry {
+                key: "sep".to_owned(),
+                value: "40,41".to_owned(),
+            }],
+            "41"
+        ));
+    }
+
+    #[test]
+    fn current_stellar_asset_spec_is_sep41_interface_compatible() {
+        let entries = soroban_spec::read::parse_raw(stellar_asset_spec::xdr()).unwrap();
+        let executable = ContractExecutableObservation {
+            kind: ContractExecutableKind::StellarAsset,
+            wasm_hash: None,
+        };
+        let capabilities = ContractCapabilities::from_spec(&executable, &[], &entries);
+        assert!(capabilities.sep41.native_sac);
+        assert!(!capabilities.sep41.sep47_declared);
+        assert!(capabilities.sep41.current_interface_compatible);
     }
 
     #[test]
