@@ -4,8 +4,8 @@ use serde_json::Value;
 use soroban_spec_tools::{sanitize, Spec};
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_xdr::{
-    ContractEvent, ContractEventType, DiagnosticEvent, ScMetaEntry, ScMetaV0, ScSpecEntry,
-    ScSpecFunctionV0, ScSpecTypeDef, ScVal,
+    ContractEvent, ContractEventType, DiagnosticEvent, Limits, ReadXdr, ScMetaEntry, ScMetaV0,
+    ScSpecEntry, ScSpecFunctionV0, ScSpecTypeDef, ScVal,
 };
 
 use crate::horizon_gateway::HorizonGateway;
@@ -23,6 +23,7 @@ use crate::transaction::TransactionSubmission;
 
 pub const DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS: u32 = 100;
 pub const SEP41_INTERFACE_VERSION: &str = "0.5.1";
+const CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT: u32 = 500;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractParameterType {
@@ -345,6 +346,7 @@ pub struct ContractInvokeRequest {
     pub function_name: String,
     pub arguments: Vec<ContractArgumentInput>,
     positional_arguments: Option<Vec<String>>,
+    scval_xdr_arguments: Vec<ContractArgumentInput>,
     pub inclusion_fee_stroops: Option<u32>,
     pub authorization_lifetime_ledgers: u32,
     address_names: ContractAddressNames,
@@ -362,6 +364,7 @@ impl ContractInvokeRequest {
             function_name: function_name.into(),
             arguments,
             positional_arguments: None,
+            scval_xdr_arguments: Vec::new(),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
             address_names: ContractAddressNames::default(),
@@ -379,6 +382,7 @@ impl ContractInvokeRequest {
             function_name: function_name.into(),
             arguments: Vec::new(),
             positional_arguments: Some(arguments),
+            scval_xdr_arguments: Vec::new(),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
             address_names: ContractAddressNames::default(),
@@ -403,6 +407,15 @@ impl ContractInvokeRequest {
         self.address_names.add(name, address)
     }
 
+    pub fn add_scval_xdr_argument(
+        &mut self,
+        name: impl Into<String>,
+        xdr_base64: impl Into<String>,
+    ) {
+        self.scval_xdr_arguments
+            .push(ContractArgumentInput::new(name, xdr_base64));
+    }
+
     pub(crate) fn set_address_names(&mut self, address_names: ContractAddressNames) {
         self.address_names = address_names;
     }
@@ -413,6 +426,11 @@ impl ContractInvokeRequest {
     ) -> Result<(SorobanInvokeRequest, Vec<ContractArgumentReview>), String> {
         let spec = Spec::new(spec_entries);
         let function = find_function(&spec, &self.function_name)?;
+        if self.positional_arguments.is_some() && !self.scval_xdr_arguments.is_empty() {
+            return Err(
+                "pre-encoded ScVal XDR arguments require named contract invocation".to_owned(),
+            );
+        }
         let function_name = function.name.to_utf8_string_lossy();
         let (scvals, review_arguments) = match &self.positional_arguments {
             Some(arguments) => {
@@ -459,7 +477,24 @@ impl ContractInvokeRequest {
                 let mut supplied = BTreeMap::new();
                 for argument in &self.arguments {
                     if supplied
-                        .insert(argument.name.clone(), argument.value.clone())
+                        .insert(
+                            argument.name.clone(),
+                            ContractArgumentSource::SpecValue(argument.value.clone()),
+                        )
+                        .is_some()
+                    {
+                        return Err(format!(
+                            "contract argument --{} was provided more than once",
+                            argument.name
+                        ));
+                    }
+                }
+                for argument in &self.scval_xdr_arguments {
+                    if supplied
+                        .insert(
+                            argument.name.clone(),
+                            ContractArgumentSource::ScValXdrBase64(argument.value.clone()),
+                        )
                         .is_some()
                     {
                         return Err(format!(
@@ -475,8 +510,11 @@ impl ContractInvokeRequest {
                     let name = sanitize(&input.name.to_utf8_string_lossy());
                     let value_type = contract_type_name(&input.type_);
                     let parsed = match remove_argument(&mut supplied, &name) {
-                        Some(value) => {
+                        Some(ContractArgumentSource::SpecValue(value)) => {
                             parse_argument(&spec, &name, &value, &input.type_, &self.address_names)?
+                        }
+                        Some(ContractArgumentSource::ScValXdrBase64(value)) => {
+                            parse_scval_xdr_argument(&name, &value)?
                         }
                         None if matches!(input.type_, ScSpecTypeDef::Option(_)) => ScVal::Void,
                         None => {
@@ -517,7 +555,16 @@ impl ContractInvokeRequest {
     }
 }
 
-fn remove_argument(arguments: &mut BTreeMap<String, String>, spec_name: &str) -> Option<String> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ContractArgumentSource {
+    SpecValue(String),
+    ScValXdrBase64(String),
+}
+
+fn remove_argument(
+    arguments: &mut BTreeMap<String, ContractArgumentSource>,
+    spec_name: &str,
+) -> Option<ContractArgumentSource> {
     arguments.remove(spec_name).or_else(|| {
         let kebab = spec_name.replace('_', "-");
         if kebab == spec_name {
@@ -584,6 +631,14 @@ fn parse_argument(
             ));
         }
     }
+}
+
+fn parse_scval_xdr_argument(name: &str, value: &str) -> Result<ScVal, String> {
+    ScVal::from_xdr_base64(
+        value.trim(),
+        Limits::depth(CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT),
+    )
+    .map_err(|error| format!("invalid ScVal XDR for contract argument --{name}: {error}"))
 }
 
 fn address_name_key(name: &str) -> String {
@@ -906,8 +961,8 @@ mod tests {
     use serde_json::json;
     use stellar_strkey::Contract as StrkeyContract;
     use stellar_xdr::{
-        ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeBytesN, ScSpecTypeOption, ScSpecTypeVec,
-        ScSymbol, StringM, VecM,
+        ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeBytesN, ScSpecTypeOption,
+        ScSpecTypeTuple, ScSpecTypeVec, ScSymbol, StringM, VecM,
     };
 
     use super::*;
@@ -1015,6 +1070,22 @@ mod tests {
             value_type: Box::new(type_),
         }))
     }
+
+    fn tuple_of(types: Vec<ScSpecTypeDef>) -> ScSpecTypeDef {
+        ScSpecTypeDef::Tuple(Box::new(ScSpecTypeTuple {
+            value_types: VecM::try_from(types).unwrap(),
+        }))
+    }
+
+    fn aqua_swaps_chain_type() -> ScSpecTypeDef {
+        vec_of(tuple_of(vec![
+            vec_of(ScSpecTypeDef::Address),
+            ScSpecTypeDef::BytesN(ScSpecTypeBytesN { n: 32 }),
+            ScSpecTypeDef::Address,
+        ]))
+    }
+
+    const AQUA_TESTNET_SWAP_CHAIN_XDR: &str = "AAAAEAAAAAEAAAAEAAAAEAAAAAEAAAADAAAAEAAAAAEAAAACAAAAEgAAAAEzHHTSKEtx/P4wChB3BsQmO9OQVZTMFsEGS0FSLd2VfwAAABIAAAAB15KLcsJwPM/q9+uf9O9NUEpVqLl5/JtFDqLIQrTRzmEAAAANAAAAIEkTYzg4CRHdqPOcwUH82/sAEUn5qf3jDH+moJjmqW/WAAAAEgAAAAHXkotywnA8z+r365/0701QSlWouXn8m0UOoshCtNHOYQAAABAAAAABAAAAAwAAABAAAAABAAAAAgAAABIAAAABUEXNXsBymnaP1a0CUFhS308Cjc6DDlrFIgm6SEg7LwEAAAASAAAAAdeSi3LCcDzP6vfrn/TvTVBKVai5efybRQ6iyEK00c5hAAAADQAAACCy4C/PymyW+K1cvYTneEp3ezbZyWokWUAsT0WEYqq38AAAABIAAAABUEXNXsBymnaP1a0CUFhS308Cjc6DDlrFIgm6SEg7LwEAAAAQAAAAAQAAAAMAAAAQAAAAAQAAAAIAAAASAAAAAVBFzV7Acpp2j9WtAlBYUt9PAo3Ogw5axSIJukhIOy8BAAAAEgAAAAHbWFucFs4F4bWHJODfHSWxM1cXv5LyScuAwBSjpRdXOAAAAA0AAAAgmsepzeI6wq2hEQXuqkLkPC6oMyygqo9B9Y1xYCdNcY4AAAASAAAAAdtYW5wWzgXhtYck4N8dJbEzVxe/kvJJy4DAFKOlF1c4AAAAEAAAAAEAAAADAAAAEAAAAAEAAAACAAAAEgAAAAFX5Q9LKxYKKKWzW3s65W/2YF1kByzExXDq/+GzE2bVaAAAABIAAAAB21hbnBbOBeG1hyTg3x0lsTNXF7+S8knLgMAUo6UXVzgAAAANAAAAIJrHqc3iOsKtoREF7qpC5DwuqDMsoKqPQfWNcWAnTXGOAAAAEgAAAAFX5Q9LKxYKKKWzW3s65W/2YF1kByzExXDq/+GzE2bVaA==";
 
     #[test]
     fn contract_interface_preserves_names_docs_types_and_official_examples() {
@@ -1409,6 +1480,48 @@ mod tests {
             .resolve(&entries)
             .unwrap_err()
             .contains("unknown contract argument"));
+    }
+
+    #[test]
+    fn scval_xdr_argument_accepts_real_aqua_swap_chain_under_spec_type() {
+        let entries = vec![function_entry(
+            "swap_chained",
+            &[("swaps_chain", aqua_swaps_chain_type())],
+        )];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "swap_chained",
+            vec![],
+        );
+        request.add_scval_xdr_argument("swaps_chain", AQUA_TESTNET_SWAP_CHAIN_XDR);
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Vec(Some(_))));
+        assert_eq!(review[0].name, "swaps_chain");
+        assert_eq!(review[0].value.as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn scval_xdr_argument_rejects_invalid_base64() {
+        let entries = vec![function_entry("set", &[("value", ScSpecTypeDef::U32)])];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "set", vec![]);
+        request.add_scval_xdr_argument("value", "not-xdr");
+        let error = request.resolve(&entries).unwrap_err();
+        assert!(error.contains("invalid ScVal XDR for contract argument --value"));
+    }
+
+    #[test]
+    fn scval_xdr_argument_must_match_contract_spec_type() {
+        let entries = vec![function_entry("set", &[("value", ScSpecTypeDef::U32)])];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "set", vec![]);
+        request.add_scval_xdr_argument("value", AQUA_TESTNET_SWAP_CHAIN_XDR);
+        let error = request.resolve(&entries).unwrap_err();
+        assert!(
+            error.contains("unable to normalize contract argument --value (u32)"),
+            "{error}"
+        );
     }
 
     #[test]
