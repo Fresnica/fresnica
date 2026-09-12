@@ -163,6 +163,7 @@ pub struct ContractInvokeRequest {
     pub arguments: Vec<ContractArgumentInput>,
     pub inclusion_fee_stroops: Option<u32>,
     pub authorization_lifetime_ledgers: u32,
+    address_names: BTreeMap<String, String>,
 }
 
 impl ContractInvokeRequest {
@@ -178,7 +179,32 @@ impl ContractInvokeRequest {
             arguments,
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+            address_names: BTreeMap::new(),
         }
+    }
+
+    pub fn add_address_name(&mut self, name: &str, address: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("contract address name cannot be empty".to_owned());
+        }
+        let address = address.trim();
+        if address.is_empty() {
+            return Err(format!(
+                "contract address name {name:?} cannot resolve to an empty address"
+            ));
+        }
+        let key = address_name_key(name);
+        if let Some(existing) = self.address_names.get(&key) {
+            if existing == address {
+                return Ok(());
+            }
+            return Err(format!(
+                "contract address name {name:?} is ambiguous: {existing} or {address}"
+            ));
+        }
+        self.address_names.insert(key, address.to_owned());
+        Ok(())
     }
 
     fn resolve(
@@ -207,7 +233,9 @@ impl ContractInvokeRequest {
             let name = sanitize(&input.name.to_utf8_string_lossy());
             let value_type = contract_type_name(&input.type_);
             let parsed = match remove_argument(&mut supplied, &name) {
-                Some(value) => parse_argument(&spec, &name, &value, &input.type_)?,
+                Some(value) => {
+                    parse_argument(&spec, &name, &value, &input.type_, &self.address_names)?
+                }
                 None if matches!(input.type_, ScSpecTypeDef::Option(_)) => ScVal::Void,
                 None => {
                     return Err(format!(
@@ -284,17 +312,50 @@ fn parse_argument(
     name: &str,
     value: &str,
     type_def: &ScSpecTypeDef,
+    address_names: &BTreeMap<String, String>,
 ) -> Result<ScVal, String> {
-    spec.from_string(value, type_def).map_err(|error| {
-        let value_type = contract_type_name(type_def);
-        let example = spec
-            .example(0, type_def)
-            .map(|example| format!("; example: {example}"))
-            .unwrap_or_default();
-        format!(
-            "invalid value for contract argument --{name}; expected {value_type}{example}: {error}"
-        )
-    })
+    match spec.from_string(value, type_def) {
+        Ok(parsed) => return Ok(parsed),
+        Err(direct_error) => {
+            if matches!(
+                type_def,
+                ScSpecTypeDef::Address | ScSpecTypeDef::MuxedAddress
+            ) {
+                let key = address_name_key(value.trim().trim_matches('"'));
+                if let Some(address) = address_names.get(&key) {
+                    return spec.from_string(address, type_def).map_err(|error| {
+                        format!(
+                            "contract address name {value:?} resolved to {address}, but the resolved address is invalid for --{name}: {error}"
+                        )
+                    });
+                }
+            }
+            return Err(contract_argument_parse_error(
+                spec,
+                name,
+                type_def,
+                direct_error,
+            ));
+        }
+    }
+}
+
+fn address_name_key(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+fn contract_argument_parse_error(
+    spec: &Spec,
+    name: &str,
+    type_def: &ScSpecTypeDef,
+    error: soroban_spec_tools::Error,
+) -> String {
+    let value_type = contract_type_name(type_def);
+    let example = spec
+        .example(0, type_def)
+        .map(|example| format!("; example: {example}"))
+        .unwrap_or_default();
+    format!("invalid value for contract argument --{name}; expected {value_type}{example}: {error}")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -532,6 +593,7 @@ mod tests {
     use super::*;
 
     const ACCOUNT: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+    const OTHER_ACCOUNT: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
 
     fn function_entry(name: &str, inputs: &[(&str, ScSpecTypeDef)]) -> ScSpecEntry {
         ScSpecEntry::FunctionV0(ScSpecFunctionV0 {
@@ -608,6 +670,42 @@ mod tests {
         assert_eq!(review[0].value, json!(ACCOUNT));
         assert_eq!(review[1].name, "amount");
         assert_eq!(review[1].value, json!("10000000"));
+    }
+
+    #[test]
+    fn address_names_resolve_after_raw_address_parsing() {
+        let entries = vec![function_entry("balance", &[("id", ScSpecTypeDef::Address)])];
+        let mut named = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "balance",
+            vec![ContractArgumentInput::new("id", "Alice")],
+        );
+        named.add_address_name("alice", ACCOUNT).unwrap();
+        let (_, review) = named.resolve(&entries).unwrap();
+        assert_eq!(review[0].value, json!(ACCOUNT));
+
+        let mut raw = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "balance",
+            vec![ContractArgumentInput::new("id", ACCOUNT)],
+        );
+        raw.add_address_name(ACCOUNT, OTHER_ACCOUNT).unwrap();
+        let (_, review) = raw.resolve(&entries).unwrap();
+        assert_eq!(review[0].value, json!(ACCOUNT));
+    }
+
+    #[test]
+    fn conflicting_address_names_fail_before_contract_parsing() {
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "balance", vec![]);
+        request.add_address_name("Alice", ACCOUNT).unwrap();
+        request.add_address_name("alice", ACCOUNT).unwrap();
+        let error = request
+            .add_address_name("ALICE", OTHER_ACCOUNT)
+            .unwrap_err();
+        assert!(error.contains("ambiguous"));
+        assert!(error.contains(ACCOUNT));
+        assert!(error.contains(OTHER_ACCOUNT));
     }
 
     #[test]
