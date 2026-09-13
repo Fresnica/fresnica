@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fresnica_sdk::{FresnicaSdk, SdkEd25519SigningRequest};
+use fresnica_sdk::{FresnicaSdk, SdkEd25519SigningRequest, SdkErrorCode};
 use stellar_strkey::ed25519::PublicKey;
 use stellar_xdr::TransactionEnvelope;
 
@@ -14,12 +14,19 @@ use crate::transaction::{
     network_passphrase, parse_transaction_xdr, sign_transaction_xdr_with_passcode,
     sign_transaction_xdr_with_unlock_key, transaction_hash_bytes, transaction_xdr_bytes,
 };
-use crate::wallet::verify_passcode;
+use crate::wallet::{record_envelope_json, verify_passcode};
 
 type ExternalEd25519SigningFn = dyn Fn(&SdkEd25519SigningRequest) -> Result<Vec<u8>, String>;
 
 pub const LOCAL_SOFTWARE_PASSPHRASE_REQUIRED: &str =
     "Fresnica passphrase is required for selected local software signers";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sep53MessageSignature {
+    pub wallet_name: String,
+    pub signer_public_key: String,
+    pub signature: Vec<u8>,
+}
 
 pub struct ExternalEd25519SigningProvider {
     public_key: String,
@@ -47,6 +54,90 @@ impl ExternalEd25519SigningProvider {
     fn sign(&self, request: &SdkEd25519SigningRequest) -> Result<Vec<u8>, String> {
         (self.sign_request)(request)
     }
+}
+
+pub fn sign_sep53_message_with_system_auth(
+    record: &WalletRecord,
+    message: &[u8],
+    passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
+) -> Result<Sep53MessageSignature, String> {
+    if record.watch_only() || record.secret.is_none() {
+        return Err(format!(
+            "wallet \"{}\" has no local software signer",
+            record.name
+        ));
+    }
+    let mut matching_provider = None;
+    for provider in system_auth_providers {
+        if provider.public_key() != record.address {
+            continue;
+        }
+        if matching_provider.replace(provider).is_some() {
+            return Err(format!(
+                "duplicate system-auth provider: {}",
+                record.address
+            ));
+        }
+    }
+
+    let sdk = FresnicaSdk::new();
+    let envelope_json = record_envelope_json(record)?;
+    let signature = if let Some(provider) = matching_provider {
+        let slot = system_auth_slot(record)?;
+        match provider.release(&slot).map_err(|error| {
+            format!(
+                "System authentication for {} failed: {error}",
+                record.address
+            )
+        })? {
+            SystemAuthRelease::UnlockKey(unlock_key) => sdk
+                .sign_message(
+                    envelope_json,
+                    unlock_key,
+                    record.address.clone(),
+                    message.to_vec(),
+                )
+                .map_err(|error| match error.code {
+                    SdkErrorCode::InvalidUnlockKey => {
+                        "Unable to unlock wallet: invalid system-auth unlock key".to_owned()
+                    }
+                    _ => format!("Unable to sign SEP-53 message: {error}"),
+                })?,
+            SystemAuthRelease::PassphraseRequired => {
+                return Err(LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned())
+            }
+            SystemAuthRelease::Cancelled => {
+                return Err("System authentication cancelled".to_owned())
+            }
+            SystemAuthRelease::Failed(error) => {
+                return Err(format!(
+                    "System authentication for {} failed: {error}",
+                    record.address
+                ))
+            }
+        }
+    } else {
+        let passcode = passcode.ok_or_else(|| LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned())?;
+        sdk.sign_message_with_passcode(
+            envelope_json,
+            passcode.to_owned(),
+            record.address.clone(),
+            message.to_vec(),
+        )
+        .map_err(|error| match error.code {
+            SdkErrorCode::InvalidPasscode => {
+                "Unable to unlock wallet: invalid Fresnica passphrase".to_owned()
+            }
+            _ => format!("Unable to sign SEP-53 message: {error}"),
+        })?
+    };
+
+    Ok(Sep53MessageSignature {
+        wallet_name: record.name.clone(),
+        signer_public_key: record.address.clone(),
+        signature,
+    })
 }
 
 pub fn review_ledger_authorization(
@@ -417,8 +508,8 @@ mod tests {
     use super::*;
     use crate::{
         build_operation_envelope, import_mnemonic_record, import_secret_record,
-        AccountAuthorizationRequirement, AuthorizationThreshold, AuthorizationUse,
-        ClassicOperationKind, WalletRecord, WeightedLedgerSigner,
+        import_watch_record, AccountAuthorizationRequirement, AuthorizationThreshold,
+        AuthorizationUse, ClassicOperationKind, WalletRecord, WeightedLedgerSigner,
     };
     use serde_json::Map;
     use stellar_xdr::{ManageDataOp, OperationBody, String64};
@@ -1048,6 +1139,54 @@ mod tests {
         };
         assert_eq!(transaction.signatures.len(), 2);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sep53_message_signing_uses_fresnica_passphrase_and_verifies() {
+        let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
+        let message = b"MultiSigTools headless authentication";
+
+        let signed =
+            sign_sep53_message_with_system_auth(&record, message, Some(PASSCODE), &[]).unwrap();
+
+        assert_eq!(signed.wallet_name, "signer-a");
+        assert_eq!(signed.signer_public_key, SIGNER_A);
+        FresnicaSdk::new()
+            .verify_message_signature(message.to_vec(), signed.signer_public_key, signed.signature)
+            .unwrap();
+    }
+
+    #[test]
+    fn sep53_message_signing_accepts_system_auth_unlock_key() {
+        let record = import_secret_record("signer-a", "testnet", SECRET_A, PASSCODE).unwrap();
+        let enrollment = crate::prepare_system_auth_enrollment(&record, PASSCODE).unwrap();
+        let expected_slot = enrollment.slot.storage_id();
+        let unlock_key = enrollment.unlock_key().to_vec();
+        let provider = SystemAuthUnlockProvider::new(SIGNER_A, move |slot| {
+            if slot.storage_id() != expected_slot {
+                return SystemAuthRelease::Failed("unexpected system-auth slot".to_owned());
+            }
+            SystemAuthRelease::UnlockKey(unlock_key.clone())
+        })
+        .unwrap();
+        let message = b"device-authenticated SEP-53";
+
+        let signed =
+            sign_sep53_message_with_system_auth(&record, message, None, &[provider]).unwrap();
+
+        FresnicaSdk::new()
+            .verify_message_signature(message.to_vec(), signed.signer_public_key, signed.signature)
+            .unwrap();
+    }
+
+    #[test]
+    fn sep53_message_signing_rejects_watch_only_wallet() {
+        let record = import_watch_record("watch", "testnet", SIGNER_A).unwrap();
+        assert!(
+            sign_sep53_message_with_system_auth(&record, b"challenge", Some(PASSCODE), &[])
+                .unwrap_err()
+                .contains("no local software signer")
+        );
     }
 
     #[test]

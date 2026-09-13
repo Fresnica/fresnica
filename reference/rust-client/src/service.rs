@@ -16,7 +16,9 @@ use crate::contract::{
 use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
-use crate::signing_coordination::ExternalEd25519SigningProvider;
+use crate::signing_coordination::{
+    sign_sep53_message_with_system_auth, ExternalEd25519SigningProvider, Sep53MessageSignature,
+};
 use crate::soroban::{
     prepare_detached_token_transfer_authorization, sign_detached_token_transfer_authorization,
     sign_detached_token_transfer_authorization_with_system_auth,
@@ -198,6 +200,17 @@ impl FresnicaClient {
             ));
         }
         Ok(record)
+    }
+
+    pub fn sign_sep53_message(
+        &self,
+        name: Option<&str>,
+        message: &[u8],
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+    ) -> Result<Sep53MessageSignature, String> {
+        let record = self.resolve_wallet(name)?;
+        sign_sep53_message_with_system_auth(&record, message, passcode, system_auth_providers)
     }
 
     pub fn ledger_account(&self, address: &str) -> Result<Option<Value>, String> {
