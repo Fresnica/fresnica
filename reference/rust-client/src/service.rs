@@ -16,6 +16,11 @@ use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
 use crate::signing_coordination::ExternalEd25519SigningProvider;
+use crate::soroban::{
+    prepare_detached_token_transfer_authorization, sign_detached_token_transfer_authorization,
+    sign_detached_token_transfer_authorization_with_system_auth,
+    DetachedTokenTransferAuthorizationRequest, PreparedDetachedTokenTransferAuthorization,
+};
 use crate::storage::{WalletRecord, WalletStorage};
 use crate::system_auth::SystemAuthUnlockProvider;
 use crate::transaction::{
@@ -240,6 +245,39 @@ impl FresnicaClient {
 
     pub async fn contract_interface(&self, contract_id: &str) -> Result<ContractInterface, String> {
         contract_interface(self.rpc_gateway()?, contract_id).await
+    }
+
+    pub fn prepare_detached_token_transfer_authorization(
+        &self,
+        request: DetachedTokenTransferAuthorizationRequest,
+    ) -> Result<PreparedDetachedTokenTransferAuthorization, String> {
+        prepare_detached_token_transfer_authorization(
+            &self.storage,
+            self.profile.network(),
+            request,
+        )
+    }
+
+    pub fn sign_detached_token_transfer_authorization(
+        &self,
+        prepared: &PreparedDetachedTokenTransferAuthorization,
+        passcode: &str,
+    ) -> Result<Vec<u8>, String> {
+        sign_detached_token_transfer_authorization(&self.storage, prepared, passcode)
+    }
+
+    pub fn sign_detached_token_transfer_authorization_with_system_auth(
+        &self,
+        prepared: &PreparedDetachedTokenTransferAuthorization,
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+    ) -> Result<Vec<u8>, String> {
+        sign_detached_token_transfer_authorization_with_system_auth(
+            &self.storage,
+            prepared,
+            passcode,
+            system_auth_providers,
+        )
     }
 
     pub async fn prepare_contract_invoke(

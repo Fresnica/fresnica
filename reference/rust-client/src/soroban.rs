@@ -7,10 +7,10 @@ use fresnica_sdk::{FresnicaSdk, SdkErrorCode};
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_strkey::{ed25519::PublicKey as StrkeyPublicKey, Contract as StrkeyContract};
 use stellar_xdr::{
-    ContractId, Hash, HostFunction, InvokeContractArgs, InvokeHostFunctionOp, Limits,
-    OperationBody, PublicKey, ReadXdr, ScAddress, ScSymbol, ScVal, SorobanAddressCredentials,
-    SorobanAuthorizationEntry, SorobanCredentials, TransactionEnvelope, TransactionExt, Uint256,
-    VecM, WriteXdr,
+    ContractId, Hash, HashIdPreimage, HostFunction, InvokeContractArgs, InvokeHostFunctionOp,
+    Limits, OperationBody, PublicKey, ReadXdr, ScAddress, ScSymbol, ScVal,
+    SorobanAddressCredentials, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
+    SorobanCredentials, TransactionEnvelope, TransactionExt, Uint256, VecM, WriteXdr,
 };
 
 use crate::ledger_authorization::load_classic_ledger_authorization_plan;
@@ -56,6 +56,78 @@ impl SorobanInvokeRequest {
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_AUTHORIZATION_LIFETIME_LEDGERS,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetachedTokenTransferAuthorizationRequest {
+    pub wallet: Option<String>,
+    pub token_contract_id: String,
+    pub destination: String,
+    pub amount: i128,
+    pub authorization_preimage_xdr: Vec<u8>,
+}
+
+impl DetachedTokenTransferAuthorizationRequest {
+    pub fn new(
+        token_contract_id: impl Into<String>,
+        destination: impl Into<String>,
+        amount: i128,
+        authorization_preimage_xdr: Vec<u8>,
+    ) -> Self {
+        Self {
+            wallet: None,
+            token_contract_id: token_contract_id.into(),
+            destination: destination.into(),
+            amount,
+            authorization_preimage_xdr,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetachedTokenTransferAuthorizationReview {
+    pub network: String,
+    pub wallet_name: String,
+    pub authorizer: String,
+    pub credential_type: String,
+    pub token_contract_id: String,
+    pub destination: String,
+    pub amount: i128,
+    pub nonce: i64,
+    pub signature_expiration_ledger: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedDetachedTokenTransferAuthorization {
+    pub review: DetachedTokenTransferAuthorizationReview,
+    entry: SorobanAuthorizationEntry,
+    unsigned_entry_xdr: Vec<u8>,
+    authorization_preimage_xdr: Vec<u8>,
+}
+
+impl PreparedDetachedTokenTransferAuthorization {
+    pub fn assert_review_binding(&self) -> Result<(), String> {
+        let current_xdr = authorization_entry_xdr(&self.entry)?;
+        if current_xdr != self.unsigned_entry_xdr {
+            return Err(
+                "Soroban authorization changed after review; prepare and review it again"
+                    .to_owned(),
+            );
+        }
+        let prepared = FresnicaSdk::new()
+            .prepare_soroban_authorization_signing(
+                current_xdr,
+                network_passphrase(&self.review.network)?.to_owned(),
+            )
+            .map_err(|error| format!("Unable to validate Soroban authorization: {error}"))?;
+        if prepared.authorization_preimage_xdr != self.authorization_preimage_xdr {
+            return Err(
+                "Soroban authorization preimage does not match the reviewed network and authorizer"
+                    .to_owned(),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -186,6 +258,278 @@ pub(crate) fn validate_soroban_simulation(
         ));
     }
     Ok(())
+}
+
+pub fn prepare_detached_token_transfer_authorization(
+    storage: &WalletStorage,
+    network: &str,
+    request: DetachedTokenTransferAuthorizationRequest,
+) -> Result<PreparedDetachedTokenTransferAuthorization, String> {
+    if request.amount <= 0 {
+        return Err("detached token transfer amount must be positive".to_owned());
+    }
+    let wallet = resolve_network_wallet(storage, network, request.wallet.as_deref())?;
+    let wallet_address = classic_account_sc_address(&wallet.address)?;
+    let preimage = HashIdPreimage::from_xdr(
+        &request.authorization_preimage_xdr,
+        Limits::depth(XDR_DEPTH_LIMIT),
+    )
+    .map_err(|error| format!("invalid Soroban authorization preimage XDR: {error}"))?;
+    let (credential_type, nonce, signature_expiration_ledger, invocation, credentials) =
+        match preimage {
+            HashIdPreimage::SorobanAuthorization(value) => (
+                "address",
+                value.nonce,
+                value.signature_expiration_ledger,
+                value.invocation,
+                SorobanCredentials::Address(SorobanAddressCredentials {
+                    address: wallet_address.clone(),
+                    nonce: value.nonce,
+                    signature_expiration_ledger: value.signature_expiration_ledger,
+                    signature: ScVal::Void,
+                }),
+            ),
+            HashIdPreimage::SorobanAuthorizationWithAddress(value) => {
+                if value.address != wallet_address {
+                    return Err(
+                        "Soroban authorization preimage authorizer does not match selected wallet"
+                            .to_owned(),
+                    );
+                }
+                (
+                    "address-v2",
+                    value.nonce,
+                    value.signature_expiration_ledger,
+                    value.invocation,
+                    SorobanCredentials::AddressV2(SorobanAddressCredentials {
+                        address: value.address,
+                        nonce: value.nonce,
+                        signature_expiration_ledger: value.signature_expiration_ledger,
+                        signature: ScVal::Void,
+                    }),
+                )
+            }
+            _ => {
+                return Err(
+                    "detached token transfer requires a Soroban authorization preimage".to_owned(),
+                )
+            }
+        };
+
+    let entry = SorobanAuthorizationEntry {
+        credentials,
+        root_invocation: invocation,
+    };
+    if !entry.root_invocation.sub_invocations.is_empty() {
+        return Err(
+            "detached token transfer authorization must not contain sub-invocations".to_owned(),
+        );
+    }
+    let SorobanAuthorizedFunction::ContractFn(call) = &entry.root_invocation.function else {
+        return Err(
+            "detached token transfer authorization must authorize a contract function".to_owned(),
+        );
+    };
+    let contract_id = sc_address_string(&call.contract_address)?;
+    if contract_id != request.token_contract_id {
+        return Err(format!(
+            "detached token transfer contract {contract_id} does not match expected {}",
+            request.token_contract_id
+        ));
+    }
+    if call.function_name.to_utf8_string_lossy() != "transfer" {
+        return Err("detached token transfer authorization must call transfer".to_owned());
+    }
+    if call.args.len() != 3 {
+        return Err(format!(
+            "detached token transfer authorization has {} arguments; expected 3",
+            call.args.len()
+        ));
+    }
+    let from = scval_address_string(&call.args[0], "transfer from")?;
+    if from != wallet.address {
+        return Err(format!(
+            "detached token transfer from {from} does not match wallet {}",
+            wallet.address
+        ));
+    }
+    let destination = scval_address_string(&call.args[1], "transfer destination")?;
+    if destination != request.destination {
+        return Err(format!(
+            "detached token transfer destination {destination} does not match expected {}",
+            request.destination
+        ));
+    }
+    let amount = scval_i128(&call.args[2], "transfer amount")?;
+    if amount != request.amount {
+        return Err(format!(
+            "detached token transfer amount {amount} does not match expected {}",
+            request.amount
+        ));
+    }
+
+    let unsigned_entry_xdr = authorization_entry_xdr(&entry)?;
+    let prepared_signing = FresnicaSdk::new()
+        .prepare_soroban_authorization_signing(
+            unsigned_entry_xdr.clone(),
+            network_passphrase(network)?.to_owned(),
+        )
+        .map_err(|error| format!("Unable to validate Soroban authorization: {error}"))?;
+    if prepared_signing.authorization_preimage_xdr != request.authorization_preimage_xdr {
+        return Err(
+            "Soroban authorization preimage does not match the selected network and authorizer"
+                .to_owned(),
+        );
+    }
+
+    let review = DetachedTokenTransferAuthorizationReview {
+        network: network.to_owned(),
+        wallet_name: wallet.name,
+        authorizer: wallet.address,
+        credential_type: credential_type.to_owned(),
+        token_contract_id: contract_id,
+        destination,
+        amount,
+        nonce,
+        signature_expiration_ledger,
+    };
+    Ok(PreparedDetachedTokenTransferAuthorization {
+        review,
+        entry,
+        unsigned_entry_xdr,
+        authorization_preimage_xdr: request.authorization_preimage_xdr,
+    })
+}
+
+pub fn sign_detached_token_transfer_authorization(
+    storage: &WalletStorage,
+    prepared: &PreparedDetachedTokenTransferAuthorization,
+    passcode: &str,
+) -> Result<Vec<u8>, String> {
+    sign_detached_token_transfer_authorization_with_system_auth(
+        storage,
+        prepared,
+        Some(passcode),
+        &[],
+    )
+}
+
+pub fn sign_detached_token_transfer_authorization_with_system_auth(
+    storage: &WalletStorage,
+    prepared: &PreparedDetachedTokenTransferAuthorization,
+    passcode: Option<&str>,
+    system_auth_providers: &[SystemAuthUnlockProvider],
+) -> Result<Vec<u8>, String> {
+    prepared.assert_review_binding()?;
+    let signers = local_signing_records(storage, &prepared.review.network)?;
+    let system_auth = system_auth_provider_map(&signers, system_auth_providers)?;
+    let signer = signers.get(&prepared.review.authorizer).ok_or_else(|| {
+        format!(
+            "No local signer capability for Soroban authorizer {}",
+            prepared.review.authorizer
+        )
+    })?;
+    let signed = if let Some(provider) = system_auth.get(&prepared.review.authorizer) {
+        let slot = system_auth_slot(signer)?;
+        match provider.release(&slot).map_err(|error| {
+            format!(
+                "System authentication for {} failed: {error}",
+                prepared.review.authorizer
+            )
+        })? {
+            SystemAuthRelease::UnlockKey(unlock_key) => sign_authorization_entry_with_unlock_key(
+                signer,
+                &prepared.review.network,
+                &prepared.review.authorizer,
+                prepared.unsigned_entry_xdr.clone(),
+                unlock_key,
+            )?,
+            SystemAuthRelease::PassphraseRequired => {
+                return Err(LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned())
+            }
+            SystemAuthRelease::Cancelled => {
+                return Err("System authentication cancelled".to_owned());
+            }
+            SystemAuthRelease::Failed(error) => {
+                return Err(format!(
+                    "System authentication for {} failed: {error}",
+                    prepared.review.authorizer
+                ))
+            }
+        }
+    } else {
+        let passcode = passcode.ok_or_else(|| LOCAL_SOFTWARE_PASSPHRASE_REQUIRED.to_owned())?;
+        sign_authorization_entry(
+            signer,
+            &prepared.review.network,
+            &prepared.review.authorizer,
+            prepared.unsigned_entry_xdr.clone(),
+            passcode,
+        )?
+    };
+    let signed_entry = parse_authorization_entry_xdr(&signed)?;
+    validate_signed_authorization(&prepared.entry, &signed_entry)?;
+    extract_standard_ed25519_signature(&signed_entry, &prepared.review.authorizer)
+}
+
+fn classic_account_sc_address(public_key: &str) -> Result<ScAddress, String> {
+    let public = StrkeyPublicKey::from_string(public_key)
+        .map_err(|_| "invalid detached token transfer authorizer".to_owned())?;
+    Ok(ScAddress::Account(stellar_xdr::AccountId(
+        PublicKey::PublicKeyTypeEd25519(Uint256(public.0)),
+    )))
+}
+
+fn extract_standard_ed25519_signature(
+    entry: &SorobanAuthorizationEntry,
+    expected_public_key: &str,
+) -> Result<Vec<u8>, String> {
+    let signature = match &entry.credentials {
+        SorobanCredentials::Address(credentials) | SorobanCredentials::AddressV2(credentials) => {
+            &credentials.signature
+        }
+        _ => return Err("signed Soroban authorization has unsupported credentials".to_owned()),
+    };
+    let ScVal::Vec(Some(values)) = signature else {
+        return Err("signed Soroban authorization has no standard signature vector".to_owned());
+    };
+    if values.len() != 1 {
+        return Err("signed Soroban authorization must contain exactly one signature".to_owned());
+    }
+    let ScVal::Map(Some(fields)) = &values[0] else {
+        return Err("signed Soroban authorization signature is malformed".to_owned());
+    };
+    let mut public_key = None;
+    let mut signature = None;
+    for field in fields.iter() {
+        let ScVal::Symbol(key) = &field.key else {
+            return Err("signed Soroban authorization signature key is malformed".to_owned());
+        };
+        let ScVal::Bytes(value) = &field.val else {
+            return Err("signed Soroban authorization signature value is malformed".to_owned());
+        };
+        match key.to_utf8_string_lossy().as_str() {
+            "public_key" => public_key = Some(value.0.iter().copied().collect::<Vec<_>>()),
+            "signature" => signature = Some(value.0.iter().copied().collect::<Vec<_>>()),
+            _ => {
+                return Err(
+                    "signed Soroban authorization signature contains unknown fields".to_owned(),
+                )
+            }
+        }
+    }
+    let expected = StrkeyPublicKey::from_string(expected_public_key)
+        .map_err(|_| "invalid expected Soroban authorization signer".to_owned())?;
+    if public_key.as_deref() != Some(expected.0.as_slice()) {
+        return Err("signed Soroban authorization was produced by the wrong public key".to_owned());
+    }
+    let signature = signature.ok_or_else(|| {
+        "signed Soroban authorization signature is missing signature bytes".to_owned()
+    })?;
+    if signature.len() != 64 {
+        return Err("signed Soroban authorization signature must contain 64 bytes".to_owned());
+    }
+    Ok(signature)
 }
 
 pub fn authorize_prepared_soroban(
@@ -631,6 +975,20 @@ fn direct_classic_authorizer(credentials: &SorobanAddressCredentials) -> Result<
     }
 }
 
+fn scval_address_string(value: &ScVal, label: &str) -> Result<String, String> {
+    match value {
+        ScVal::Address(address) => sc_address_string(address),
+        _ => Err(format!("detached token {label} must be an address")),
+    }
+}
+
+fn scval_i128(value: &ScVal, label: &str) -> Result<i128, String> {
+    match value {
+        ScVal::I128(parts) => Ok(((parts.hi as i128) << 64) | parts.lo as i128),
+        _ => Err(format!("detached token {label} must be an i128")),
+    }
+}
+
 fn validate_signed_authorization(
     reviewed: &SorobanAuthorizationEntry,
     signed: &SorobanAuthorizationEntry,
@@ -875,15 +1233,19 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{import_secret_record, plan_classic_ledger_authorization, AuthorizationThreshold};
+    use crate::{
+        import_secret_record, import_watch_record, plan_classic_ledger_authorization,
+        AuthorizationThreshold,
+    };
     use stellar_rpc_client::SimulateHostFunctionResultRaw;
     use stellar_xdr::{
-        LedgerFootprint, PublicKey, SequenceNumber, SorobanAuthorizedFunction,
+        Int128Parts, LedgerFootprint, PublicKey, SequenceNumber, SorobanAuthorizedFunction,
         SorobanAuthorizedInvocation, SorobanResources, SorobanTransactionData,
         SorobanTransactionDataExt, WriteXdr,
     };
 
     const ACCOUNT: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
+    const OTHER_ACCOUNT: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
     const SECRET: &str = "SCOWDMM5576VUYF2QRFPJEXMFTCEISOFNF5TE2IZOA52YAY4VZ7WBQNO";
     const PASSCODE: &str = "correct horse battery staple";
     const TESTNET: &str = "testnet";
@@ -942,6 +1304,74 @@ mod tests {
             }),
             root_invocation: source_auth().root_invocation,
         }
+    }
+
+    fn account_address(value: &str) -> ScAddress {
+        let public = StrkeyPublicKey::from_string(value).unwrap();
+        ScAddress::Account(stellar_xdr::AccountId(PublicKey::PublicKeyTypeEd25519(
+            Uint256(public.0),
+        )))
+    }
+
+    fn i128_value(value: i128) -> ScVal {
+        ScVal::I128(Int128Parts {
+            hi: (value >> 64) as i64,
+            lo: value as u64,
+        })
+    }
+
+    fn detached_token_transfer_auth(
+        token: StrkeyContract,
+        destination: &str,
+        amount: i128,
+    ) -> SorobanAuthorizationEntry {
+        SorobanAuthorizationEntry {
+            credentials: SorobanCredentials::AddressV2(SorobanAddressCredentials {
+                address: account_address(ACCOUNT),
+                nonce: 42,
+                signature_expiration_ledger: 123_999,
+                signature: ScVal::Void,
+            }),
+            root_invocation: SorobanAuthorizedInvocation {
+                function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
+                    contract_address: ScAddress::Contract(ContractId(Hash(token.0))),
+                    function_name: ScSymbol::try_from(b"transfer".to_vec()).unwrap(),
+                    args: VecM::try_from(vec![
+                        ScVal::Address(account_address(ACCOUNT)),
+                        ScVal::Address(account_address(destination)),
+                        i128_value(amount),
+                    ])
+                    .unwrap(),
+                }),
+                sub_invocations: VecM::default(),
+            },
+        }
+    }
+
+    fn detached_token_transfer_preimage(
+        auth: &SorobanAuthorizationEntry,
+        network: &str,
+    ) -> Vec<u8> {
+        FresnicaSdk::new()
+            .prepare_soroban_authorization_signing(
+                authorization_entry_xdr(auth).unwrap(),
+                network_passphrase(network).unwrap().to_owned(),
+            )
+            .unwrap()
+            .authorization_preimage_xdr
+    }
+
+    fn legacy_detached_token_transfer_auth(
+        token: StrkeyContract,
+        destination: &str,
+        amount: i128,
+    ) -> SorobanAuthorizationEntry {
+        let mut auth = detached_token_transfer_auth(token, destination, amount);
+        let SorobanCredentials::AddressV2(credentials) = auth.credentials else {
+            unreachable!();
+        };
+        auth.credentials = SorobanCredentials::Address(credentials);
+        auth
     }
 
     fn candidate(request: &SorobanInvokeRequest) -> TransactionEnvelope {
@@ -1028,6 +1458,157 @@ mod tests {
             panic!("expected AddressV2 credentials");
         };
         assert_eq!(credentials.signature_expiration_ledger, 123_556);
+    }
+
+    #[test]
+    fn detached_token_transfer_authorization_validates_semantics_and_signs() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-detached-token-transfer-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let signer = import_secret_record("signer", TESTNET, SECRET, PASSCODE).unwrap();
+        storage.save(&signer, false).unwrap();
+        let token = StrkeyContract([7; 32]);
+        let auth = detached_token_transfer_auth(token.clone(), OTHER_ACCOUNT, 100_000);
+        let mut request = DetachedTokenTransferAuthorizationRequest::new(
+            format!("{token}"),
+            OTHER_ACCOUNT,
+            100_000,
+            detached_token_transfer_preimage(&auth, TESTNET),
+        );
+        request.wallet = Some("signer".to_owned());
+
+        let prepared =
+            prepare_detached_token_transfer_authorization(&storage, TESTNET, request).unwrap();
+        assert_eq!(prepared.review.wallet_name, "signer");
+        assert_eq!(prepared.review.authorizer, ACCOUNT);
+        assert_eq!(prepared.review.token_contract_id, format!("{token}"));
+        assert_eq!(prepared.review.destination, OTHER_ACCOUNT);
+        assert_eq!(prepared.review.amount, 100_000);
+        assert_eq!(prepared.review.nonce, 42);
+        assert_eq!(prepared.review.signature_expiration_ledger, 123_999);
+        prepared.assert_review_binding().unwrap();
+
+        let signature =
+            sign_detached_token_transfer_authorization(&storage, &prepared, PASSCODE).unwrap();
+        assert_eq!(signature.len(), 64);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detached_token_transfer_authorization_returns_x402_legacy_signature_bytes() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-detached-token-transfer-legacy-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let signer = import_secret_record("signer", TESTNET, SECRET, PASSCODE).unwrap();
+        storage.save(&signer, false).unwrap();
+        let token = StrkeyContract([9; 32]);
+        let auth = legacy_detached_token_transfer_auth(token.clone(), OTHER_ACCOUNT, 100_000);
+        let mut request = DetachedTokenTransferAuthorizationRequest::new(
+            format!("{token}"),
+            OTHER_ACCOUNT,
+            100_000,
+            detached_token_transfer_preimage(&auth, TESTNET),
+        );
+        request.wallet = Some("signer".to_owned());
+
+        let prepared =
+            prepare_detached_token_transfer_authorization(&storage, TESTNET, request).unwrap();
+        assert_eq!(prepared.review.credential_type, "address");
+        let signature =
+            sign_detached_token_transfer_authorization(&storage, &prepared, PASSCODE).unwrap();
+        assert_eq!(signature.len(), 64);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detached_token_transfer_authorization_accepts_official_x402_sdk_vector() {
+        const X402_AUTHOR: &str = "GCHEI4PQEFJOA27MNZRPQNLGURS6KASW76X5UZCUZIXCOJLKXYCXOR2W";
+        const X402_TOKEN: &str = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+        const X402_AUTH_ENTRY: &str = "AAAACc7gMC1ZhE0yvcqRXIID3USzP7t+3BkFHqN6vt8o7NRyKXne+SNXzwoARul7AAAAAAAAAAFQRc1ewHKado/VrQJQWFLfTwKNzoMOWsUiCbpISDsvAQAAAAh0cmFuc2ZlcgAAAAMAAAASAAAAAAAAAACORHHwIVLga+xuYvg1ZqRl5QJW/6/aZFTKLiclar4FdwAAABIAAAAAAAAAAI5EcfAhUuBr7G5i+DVmpGXlAlb/r9pkVMouJyVqvgV3AAAACgAAAAAAAAAAAAAAAAABhqAAAAAA";
+
+        let root =
+            std::env::temp_dir().join(format!("fresnica-x402-sdk-vector-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let wallet = import_watch_record("x402", TESTNET, X402_AUTHOR).unwrap();
+        storage.save(&wallet, false).unwrap();
+        let mut request = DetachedTokenTransferAuthorizationRequest::new(
+            X402_TOKEN,
+            X402_AUTHOR,
+            100_000,
+            STANDARD.decode(X402_AUTH_ENTRY).unwrap(),
+        );
+        request.wallet = Some("x402".to_owned());
+
+        let prepared =
+            prepare_detached_token_transfer_authorization(&storage, TESTNET, request).unwrap();
+        assert_eq!(prepared.review.wallet_name, "x402");
+        assert_eq!(prepared.review.authorizer, X402_AUTHOR);
+        assert_eq!(prepared.review.credential_type, "address");
+        assert_eq!(prepared.review.token_contract_id, X402_TOKEN);
+        assert_eq!(prepared.review.destination, X402_AUTHOR);
+        assert_eq!(prepared.review.amount, 100_000);
+        assert!(prepared.review.signature_expiration_ledger > 0);
+        prepared.assert_review_binding().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detached_token_transfer_authorization_rejects_semantic_mismatch() {
+        let root = std::env::temp_dir().join(format!(
+            "fresnica-detached-token-transfer-mismatch-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let storage = WalletStorage::new(&root).unwrap();
+        let signer = import_secret_record("signer", TESTNET, SECRET, PASSCODE).unwrap();
+        storage.save(&signer, false).unwrap();
+        let token = StrkeyContract([8; 32]);
+        let auth = detached_token_transfer_auth(token.clone(), OTHER_ACCOUNT, 100_000);
+        let mut request = DetachedTokenTransferAuthorizationRequest::new(
+            format!("{token}"),
+            OTHER_ACCOUNT,
+            99_999,
+            detached_token_transfer_preimage(&auth, TESTNET),
+        );
+        request.wallet = Some("signer".to_owned());
+
+        let error =
+            prepare_detached_token_transfer_authorization(&storage, TESTNET, request).unwrap_err();
+        assert!(error.contains("amount 100000 does not match expected 99999"));
+
+        let mut auth = detached_token_transfer_auth(token.clone(), OTHER_ACCOUNT, 100_000);
+        auth.root_invocation.sub_invocations =
+            VecM::try_from(vec![source_auth().root_invocation]).unwrap();
+        let mut request = DetachedTokenTransferAuthorizationRequest::new(
+            format!("{token}"),
+            OTHER_ACCOUNT,
+            100_000,
+            detached_token_transfer_preimage(&auth, TESTNET),
+        );
+        request.wallet = Some("signer".to_owned());
+        let error =
+            prepare_detached_token_transfer_authorization(&storage, TESTNET, request).unwrap_err();
+        assert!(error.contains("must not contain sub-invocations"));
+
+        let auth = detached_token_transfer_auth(token.clone(), OTHER_ACCOUNT, 100_000);
+        let mut request = DetachedTokenTransferAuthorizationRequest::new(
+            format!("{token}"),
+            OTHER_ACCOUNT,
+            100_000,
+            detached_token_transfer_preimage(&auth, "mainnet"),
+        );
+        request.wallet = Some("signer".to_owned());
+        let error =
+            prepare_detached_token_transfer_authorization(&storage, TESTNET, request).unwrap_err();
+        assert!(error.contains("does not match the selected network and authorizer"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

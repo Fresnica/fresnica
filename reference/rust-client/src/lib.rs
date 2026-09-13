@@ -85,8 +85,13 @@ pub use signing_coordination::{
 };
 pub use soroban::{
     authorize_prepared_soroban, authorize_prepared_soroban_with_system_auth,
-    prepare_soroban_invoke, sign_prepared_soroban, sign_prepared_soroban_with_providers,
-    submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
+    prepare_detached_token_transfer_authorization, prepare_soroban_invoke,
+    sign_detached_token_transfer_authorization,
+    sign_detached_token_transfer_authorization_with_system_auth, sign_prepared_soroban,
+    sign_prepared_soroban_with_providers, submit_prepared_soroban,
+    DetachedTokenTransferAuthorizationRequest, DetachedTokenTransferAuthorizationReview,
+    PreparedDetachedTokenTransferAuthorization, PreparedSorobanTransaction, SorobanInvokeRequest,
+    SorobanReview,
 };
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
 pub use system_auth::{
