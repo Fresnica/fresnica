@@ -5,7 +5,7 @@ use soroban_spec_tools::{sanitize, Spec};
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_xdr::{
     ContractEvent, ContractEventType, DiagnosticEvent, Limits, ReadXdr, ScMetaEntry, ScMetaV0,
-    ScSpecEntry, ScSpecFunctionV0, ScSpecTypeDef, ScVal,
+    ScSpecEntry, ScSpecFunctionV0, ScSpecTypeDef, ScVal, SorobanTransactionDataExt,
 };
 
 use crate::horizon_gateway::HorizonGateway;
@@ -732,6 +732,7 @@ pub struct ContractReadResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractSimulationEffects {
     pub read_write_entry_count: usize,
+    pub archived_entry_count: usize,
     pub published_event_count: usize,
     pub authorization_entry_count: usize,
     pub restore_required: bool,
@@ -741,6 +742,7 @@ impl ContractSimulationEffects {
     pub fn requires_send(&self) -> bool {
         self.restore_required
             || self.read_write_entry_count > 0
+            || self.archived_entry_count > 0
             || self.published_event_count > 0
             || self.authorization_entry_count > 0
     }
@@ -939,6 +941,10 @@ fn simulation_effects(
     let transaction_data = simulation
         .transaction_data()
         .map_err(|error| format!("Stellar RPC returned invalid transaction data: {error}"))?;
+    let archived_entry_count = match &transaction_data.ext {
+        SorobanTransactionDataExt::V0 => 0,
+        SorobanTransactionDataExt::V1(resources) => resources.archived_soroban_entries.len(),
+    };
     let published_event_count = simulation
         .events()
         .map_err(|error| format!("Stellar RPC returned invalid simulation events: {error}"))?
@@ -958,6 +964,7 @@ fn simulation_effects(
         .sum();
     Ok(ContractSimulationEffects {
         read_write_entry_count: transaction_data.resources.footprint.read_write.len(),
+        archived_entry_count,
         published_event_count,
         authorization_entry_count,
         restore_required: simulation.restore_preamble.is_some(),
@@ -1057,8 +1064,8 @@ mod tests {
         LedgerKeyContractData, ScAddress, ScSpecFunctionInputV0, ScSpecFunctionV0,
         ScSpecTypeBytesN, ScSpecTypeOption, ScSpecTypeTuple, ScSpecTypeVec, ScSymbol,
         SorobanAuthorizationEntry, SorobanAuthorizedFunction, SorobanAuthorizedInvocation,
-        SorobanCredentials, SorobanResources, SorobanTransactionData, SorobanTransactionDataExt,
-        StringM, VecM, WriteXdr,
+        SorobanCredentials, SorobanResources, SorobanResourcesExtV0, SorobanTransactionData,
+        SorobanTransactionDataExt, StringM, VecM, WriteXdr,
     };
 
     use super::*;
@@ -1392,6 +1399,7 @@ mod tests {
             effects,
             ContractSimulationEffects {
                 read_write_entry_count: 0,
+                archived_entry_count: 0,
                 published_event_count: 0,
                 authorization_entry_count: 0,
                 restore_required: false,
@@ -1401,7 +1409,7 @@ mod tests {
     }
 
     #[test]
-    fn simulation_effects_expose_archived_read_restore_without_hiding_it_as_read_only() {
+    fn simulation_effects_expose_restore_preamble() {
         let mut simulation = simulation_response(vec![persistent_contract_data_key()]);
         simulation.restore_preamble = Some(RestorePreamble {
             transaction_data: simulation.transaction_data.clone(),
@@ -1411,7 +1419,25 @@ mod tests {
         validate_contract_simulation_preview(&simulation).unwrap();
         let effects = simulation_effects(&simulation).unwrap();
         assert_eq!(effects.read_write_entry_count, 1);
+        assert_eq!(effects.archived_entry_count, 0);
         assert!(effects.restore_required);
+        assert!(effects.requires_send());
+    }
+
+    #[test]
+    fn simulation_effects_expose_archived_entries_without_restore_preamble() {
+        let mut simulation = simulation_response(vec![persistent_contract_data_key()]);
+        let mut transaction_data = simulation.transaction_data().unwrap();
+        transaction_data.ext = SorobanTransactionDataExt::V1(SorobanResourcesExtV0 {
+            archived_soroban_entries: VecM::try_from(vec![0]).unwrap(),
+        });
+        simulation.transaction_data =
+            STANDARD.encode(transaction_data.to_xdr(Limits::none()).unwrap());
+
+        let effects = simulation_effects(&simulation).unwrap();
+        assert_eq!(effects.read_write_entry_count, 1);
+        assert_eq!(effects.archived_entry_count, 1);
+        assert!(!effects.restore_required);
         assert!(effects.requires_send());
     }
 
