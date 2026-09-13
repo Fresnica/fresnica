@@ -729,6 +729,37 @@ pub struct ContractReadResult {
     pub network: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractSimulationEffects {
+    pub read_write_entry_count: usize,
+    pub published_event_count: usize,
+    pub authorization_entry_count: usize,
+    pub restore_required: bool,
+}
+
+impl ContractSimulationEffects {
+    pub fn requires_send(&self) -> bool {
+        self.restore_required
+            || self.read_write_entry_count > 0
+            || self.published_event_count > 0
+            || self.authorization_entry_count > 0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContractSimulationResult {
+    pub contract_id: String,
+    pub executable: ContractExecutableObservation,
+    pub metadata: Vec<ContractMetadataEntry>,
+    pub capabilities: ContractCapabilities,
+    pub function_name: String,
+    pub arguments: Vec<ContractArgumentReview>,
+    pub output: Option<Value>,
+    pub simulation_ledger: u32,
+    pub network: String,
+    pub effects: ContractSimulationEffects,
+}
+
 #[derive(Clone, Debug)]
 pub enum ContractInvokePreparation {
     ReadOnly(ContractReadResult),
@@ -808,6 +839,35 @@ pub(crate) async fn prepare_contract_invoke(
     Ok(PreparedContractInvoke { review, prepared })
 }
 
+pub(crate) async fn simulate_contract_invoke(
+    rpc: &RpcGateway,
+    request: ContractInvokeRequest,
+) -> Result<ContractSimulationResult, String> {
+    let snapshot = rpc.contract_spec_snapshot(&request.contract_id).await?;
+    let capabilities = ContractCapabilities::from_spec(
+        &snapshot.executable,
+        &snapshot.metadata,
+        &snapshot.entries,
+    );
+    let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
+    let simulation = simulate_soroban_invoke(rpc, &low_level_request).await?;
+    validate_contract_simulation_preview(&simulation)?;
+    let output = decode_simulation_output(&snapshot.entries, &request.function_name, &simulation)?;
+    let effects = simulation_effects(&simulation)?;
+    Ok(ContractSimulationResult {
+        contract_id: request.contract_id,
+        executable: snapshot.executable,
+        metadata: snapshot.metadata,
+        capabilities,
+        function_name: request.function_name,
+        arguments,
+        output,
+        simulation_ledger: simulation.latest_ledger,
+        network: rpc.network().to_owned(),
+        effects,
+    })
+}
+
 pub(crate) async fn prepare_contract_invoke_outcome(
     storage: &WalletStorage,
     rpc: &RpcGateway,
@@ -855,27 +915,57 @@ pub(crate) async fn prepare_contract_invoke_outcome(
     }))
 }
 
-fn simulation_requires_send(simulation: &SimulateTransactionResponse) -> Result<bool, String> {
+fn validate_contract_simulation_preview(
+    simulation: &SimulateTransactionResponse,
+) -> Result<(), String> {
+    if let Some(error) = simulation.error.as_deref() {
+        return Err(format!("Soroban transaction simulation failed: {error}"));
+    }
+    let results = simulation
+        .results()
+        .map_err(|error| format!("Stellar RPC returned invalid simulation result: {error}"))?;
+    if results.len() != 1 {
+        return Err(format!(
+            "Soroban simulation returned {} host-function results; expected one",
+            results.len()
+        ));
+    }
+    Ok(())
+}
+
+fn simulation_effects(
+    simulation: &SimulateTransactionResponse,
+) -> Result<ContractSimulationEffects, String> {
     let transaction_data = simulation
         .transaction_data()
         .map_err(|error| format!("Stellar RPC returned invalid transaction data: {error}"))?;
-    let has_write = !transaction_data.resources.footprint.read_write.is_empty();
-    let has_published_event = simulation
+    let published_event_count = simulation
         .events()
         .map_err(|error| format!("Stellar RPC returned invalid simulation events: {error}"))?
         .iter()
-        .any(
+        .filter(
             |DiagnosticEvent {
                  event: ContractEvent { type_, .. },
                  ..
              }| matches!(type_, ContractEventType::Contract),
-        );
-    let has_auth = simulation
+        )
+        .count();
+    let authorization_entry_count = simulation
         .results()
         .map_err(|error| format!("Stellar RPC returned invalid simulation result: {error}"))?
         .iter()
-        .any(|result| !result.auth.is_empty());
-    Ok(has_write || has_published_event || has_auth)
+        .map(|result| result.auth.len())
+        .sum();
+    Ok(ContractSimulationEffects {
+        read_write_entry_count: transaction_data.resources.footprint.read_write.len(),
+        published_event_count,
+        authorization_entry_count,
+        restore_required: simulation.restore_preamble.is_some(),
+    })
+}
+
+fn simulation_requires_send(simulation: &SimulateTransactionResponse) -> Result<bool, String> {
+    Ok(simulation_effects(simulation)?.requires_send())
 }
 
 fn decode_simulation_output(
@@ -958,17 +1048,70 @@ pub(crate) async fn submit_contract_invoke(
 
 #[cfg(test)]
 mod tests {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use serde_json::json;
+    use stellar_rpc_client::{RestorePreamble, SimulateHostFunctionResultRaw};
     use stellar_strkey::Contract as StrkeyContract;
     use stellar_xdr::{
-        ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeBytesN, ScSpecTypeOption,
-        ScSpecTypeTuple, ScSpecTypeVec, ScSymbol, StringM, VecM,
+        ContractDataDurability, ContractId, Hash, InvokeContractArgs, LedgerFootprint, LedgerKey,
+        LedgerKeyContractData, ScAddress, ScSpecFunctionInputV0, ScSpecFunctionV0,
+        ScSpecTypeBytesN, ScSpecTypeOption, ScSpecTypeTuple, ScSpecTypeVec, ScSymbol,
+        SorobanAuthorizationEntry, SorobanAuthorizedFunction, SorobanAuthorizedInvocation,
+        SorobanCredentials, SorobanResources, SorobanTransactionData, SorobanTransactionDataExt,
+        StringM, VecM, WriteXdr,
     };
 
     use super::*;
 
     const ACCOUNT: &str = "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR";
     const OTHER_ACCOUNT: &str = "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY";
+
+    fn simulation_response(read_write: Vec<LedgerKey>) -> SimulateTransactionResponse {
+        let transaction_data = SorobanTransactionData {
+            resources: SorobanResources {
+                footprint: LedgerFootprint {
+                    read_only: VecM::default(),
+                    read_write: VecM::try_from(read_write).unwrap(),
+                },
+                instructions: 1,
+                disk_read_bytes: 0,
+                write_bytes: 0,
+            },
+            resource_fee: 0,
+            ext: SorobanTransactionDataExt::V0,
+        };
+        SimulateTransactionResponse {
+            results: vec![SimulateHostFunctionResultRaw {
+                auth: Vec::new(),
+                xdr: STANDARD.encode(ScVal::Void.to_xdr(Limits::none()).unwrap()),
+            }],
+            transaction_data: STANDARD.encode(transaction_data.to_xdr(Limits::none()).unwrap()),
+            latest_ledger: 123_456,
+            ..Default::default()
+        }
+    }
+
+    fn persistent_contract_data_key() -> LedgerKey {
+        LedgerKey::ContractData(LedgerKeyContractData {
+            contract: ScAddress::Contract(ContractId(Hash([0; 32]))),
+            key: ScVal::U32(7),
+            durability: ContractDataDurability::Persistent,
+        })
+    }
+
+    fn source_authorization_entry() -> SorobanAuthorizationEntry {
+        SorobanAuthorizationEntry {
+            credentials: SorobanCredentials::SourceAccount,
+            root_invocation: SorobanAuthorizedInvocation {
+                function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
+                    contract_address: ScAddress::Contract(ContractId(Hash([0; 32]))),
+                    function_name: ScSymbol::try_from("read").unwrap(),
+                    args: VecM::default(),
+                }),
+                sub_invocations: VecM::default(),
+            },
+        }
+    }
 
     fn function_entry(name: &str, inputs: &[(&str, ScSpecTypeDef)]) -> ScSpecEntry {
         function_entry_with_outputs(name, inputs, &[])
@@ -1239,6 +1382,65 @@ mod tests {
                 value: "example.org".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn simulation_effects_keep_pure_read_non_sending() {
+        let simulation = simulation_response(Vec::new());
+        let effects = simulation_effects(&simulation).unwrap();
+        assert_eq!(
+            effects,
+            ContractSimulationEffects {
+                read_write_entry_count: 0,
+                published_event_count: 0,
+                authorization_entry_count: 0,
+                restore_required: false,
+            }
+        );
+        assert!(!effects.requires_send());
+    }
+
+    #[test]
+    fn simulation_effects_expose_archived_read_restore_without_hiding_it_as_read_only() {
+        let mut simulation = simulation_response(vec![persistent_contract_data_key()]);
+        simulation.restore_preamble = Some(RestorePreamble {
+            transaction_data: simulation.transaction_data.clone(),
+            min_resource_fee: 100,
+        });
+
+        validate_contract_simulation_preview(&simulation).unwrap();
+        let effects = simulation_effects(&simulation).unwrap();
+        assert_eq!(effects.read_write_entry_count, 1);
+        assert!(effects.restore_required);
+        assert!(effects.requires_send());
+    }
+
+    #[test]
+    fn simulation_effects_count_published_contract_events() {
+        let mut simulation = simulation_response(Vec::new());
+        let event = DiagnosticEvent {
+            in_successful_contract_call: true,
+            event: ContractEvent {
+                type_: ContractEventType::Contract,
+                ..Default::default()
+            },
+        };
+        simulation.events = vec![STANDARD.encode(event.to_xdr(Limits::none()).unwrap())];
+
+        let effects = simulation_effects(&simulation).unwrap();
+        assert_eq!(effects.published_event_count, 1);
+        assert!(effects.requires_send());
+    }
+
+    #[test]
+    fn simulation_effects_count_authorization_entries() {
+        let mut simulation = simulation_response(Vec::new());
+        simulation.results[0].auth =
+            vec![STANDARD.encode(source_authorization_entry().to_xdr(Limits::none()).unwrap())];
+
+        let effects = simulation_effects(&simulation).unwrap();
+        assert_eq!(effects.authorization_entry_count, 1);
+        assert!(effects.requires_send());
     }
 
     #[test]

@@ -9,8 +9,9 @@ use crate::contacts::ContactStore;
 use crate::contract::{
     authorize_contract_invoke, authorize_contract_invoke_with_system_auth, contract_interface,
     prepare_contract_invoke, prepare_contract_invoke_outcome, sign_contract_invoke,
-    sign_contract_invoke_with_providers, submit_contract_invoke, ContractInterface,
-    ContractInvokePreparation, ContractInvokeRequest, PreparedContractInvoke,
+    sign_contract_invoke_with_providers, simulate_contract_invoke, submit_contract_invoke,
+    ContractInterface, ContractInvokePreparation, ContractInvokeRequest, ContractSimulationResult,
+    PreparedContractInvoke,
 };
 use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
@@ -292,6 +293,13 @@ impl FresnicaClient {
         request: ContractInvokeRequest,
     ) -> Result<ContractInvokePreparation, String> {
         prepare_contract_invoke_outcome(&self.storage, self.rpc_gateway()?, request).await
+    }
+
+    pub async fn simulate_contract_invoke(
+        &self,
+        request: ContractInvokeRequest,
+    ) -> Result<ContractSimulationResult, String> {
+        simulate_contract_invoke(self.rpc_gateway()?, request).await
     }
 
     pub fn authorize_contract_invoke(

@@ -48,8 +48,8 @@ pub use contract::{
     ContractExecutableKind, ContractExecutableObservation, ContractFunction, ContractInterface,
     ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry,
     ContractParameter, ContractParameterType, ContractReadResult, ContractSep41Evidence,
-    PreparedContractInvoke, DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
-    SEP41_INTERFACE_VERSION,
+    ContractSimulationEffects, ContractSimulationResult, PreparedContractInvoke,
+    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS, SEP41_INTERFACE_VERSION,
 };
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
