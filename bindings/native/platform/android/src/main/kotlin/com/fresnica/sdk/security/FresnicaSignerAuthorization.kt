@@ -24,6 +24,22 @@ class FresnicaSignerAuthorization(
 
     fun hasSystemAuthDomain(): Boolean = keyStore.hasDomain()
 
+    /** Verify passphrase + protected envelope + expected signer identity without exposing key bytes. */
+    fun verifyProtectedSignerPassphrase(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+    ) {
+        val unlockKey = core.deriveUnlockKey(envelopeJson, appPasscode, expectedSignerPublicKey)
+        try {
+            require(unlockKey.size == WalletUnlockKeyStore.UNLOCK_KEY_BYTES) {
+                "SDK returned an invalid WalletUnlockKey length"
+            }
+        } finally {
+            unlockKey.fill(0)
+        }
+    }
+
     /** Passcode-authenticated signer registration; no biometric operation occurs here. */
     fun registerSignerSystemAuth(
         envelopeJson: String,
