@@ -12,16 +12,21 @@ import os
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 from .errors import InvalidPasswordError, InvalidUnlockKeyError, WalletError
 
 
-AAD = b"fresnica-wallet-secret-v1"
+PASSWORD_AAD_V1 = b"fresnica-wallet-secret-v1"
+PASSWORD_AAD_V2 = b"fresnica-wallet-secret-v2"
 KEY_AAD = b"fresnica-wallet-secret-key-v1"
 SCRYPT_N = 2**15
 SCRYPT_R = 8
 SCRYPT_P = 1
+ARGON2_MEMORY_KIB = 64 * 1024
+ARGON2_ITERATIONS = 3
+ARGON2_PARALLELISM = 1
 
 
 class WalletUnlockKey:
@@ -65,41 +70,80 @@ def _decode_payload(plaintext: bytes) -> dict:
     return json.loads(plaintext.decode("utf-8"))
 
 
-def _password_envelope_material(envelope: dict) -> tuple[bytes, bytes, bytes, int, int, int]:
+def _password_envelope_material(
+    envelope: dict,
+) -> tuple[bytes, bytes, bytes, bytes, dict]:
     try:
-        if envelope.get("version") != 1 or envelope.get("cipher") != "aes-256-gcm":
+        if envelope.get("cipher") != "aes-256-gcm":
             raise WalletError("Unsupported wallet encryption format")
+        version = int(envelope["version"])
         kdf = envelope["kdf"]
-        if kdf.get("name") != "scrypt":
-            raise WalletError("Unsupported wallet key derivation format")
-        n = int(kdf["n"])
-        r = int(kdf["r"])
-        p = int(kdf["p"])
-        if (n, r, p) != (SCRYPT_N, SCRYPT_R, SCRYPT_P):
-            raise WalletError("Unsupported wallet KDF parameters")
+        if not isinstance(kdf, dict):
+            raise TypeError
+        if version == 1:
+            if kdf.get("name") != "scrypt":
+                raise WalletError("Unsupported wallet key derivation format")
+            if (int(kdf["n"]), int(kdf["r"]), int(kdf["p"])) != (SCRYPT_N, SCRYPT_R, SCRYPT_P):
+                raise WalletError("Unsupported wallet KDF parameters")
+            aad = PASSWORD_AAD_V1
+        elif version == 2:
+            if kdf.get("name") != "argon2id":
+                raise WalletError("Unsupported wallet key derivation format")
+            if (
+                int(kdf["memory_kib"]),
+                int(kdf["iterations"]),
+                int(kdf["parallelism"]),
+            ) != (ARGON2_MEMORY_KIB, ARGON2_ITERATIONS, ARGON2_PARALLELISM):
+                raise WalletError("Unsupported wallet KDF parameters")
+            aad = PASSWORD_AAD_V2
+        else:
+            raise WalletError("Unsupported wallet encryption format")
         salt = _unb64(kdf["salt"])
         nonce = _unb64(envelope["nonce"])
         ciphertext = _unb64(envelope["ciphertext"])
         if len(salt) != 16 or len(nonce) != 12:
             raise ValueError
-        return salt, nonce, ciphertext, n, r, p
+        return salt, nonce, ciphertext, aad, kdf
     except (KeyError, ValueError, TypeError, binascii.Error) as exc:
         raise WalletError("Wallet secret data is corrupted") from exc
 
 
+def _derive_envelope_key(envelope: dict, password: str) -> bytes:
+    if not password:
+        raise WalletError("Wallet password cannot be empty")
+    salt, _nonce, _ciphertext, _aad, kdf = _password_envelope_material(envelope)
+    if kdf["name"] == "scrypt":
+        return _derive_key(password, salt, int(kdf["n"]), int(kdf["r"]), int(kdf["p"]))
+    return Argon2id(
+        salt=salt,
+        length=32,
+        iterations=int(kdf["iterations"]),
+        lanes=int(kdf["parallelism"]),
+        memory_cost=int(kdf["memory_kib"]),
+    ).derive(password.encode("utf-8"))
+
+
 def encrypt_secret(payload: dict, password: str) -> dict:
+    if not password:
+        raise WalletError("Wallet password cannot be empty")
     salt = os.urandom(16)
     nonce = os.urandom(12)
-    key = _derive_key(password, salt, SCRYPT_N, SCRYPT_R, SCRYPT_P)
-    ciphertext = AESGCM(key).encrypt(nonce, _encode_payload(payload), AAD)
+    key = Argon2id(
+        salt=salt,
+        length=32,
+        iterations=ARGON2_ITERATIONS,
+        lanes=ARGON2_PARALLELISM,
+        memory_cost=ARGON2_MEMORY_KIB,
+    ).derive(password.encode("utf-8"))
+    ciphertext = AESGCM(key).encrypt(nonce, _encode_payload(payload), PASSWORD_AAD_V2)
     return {
-        "version": 1,
+        "version": 2,
         "cipher": "aes-256-gcm",
         "kdf": {
-            "name": "scrypt",
-            "n": SCRYPT_N,
-            "r": SCRYPT_R,
-            "p": SCRYPT_P,
+            "name": "argon2id",
+            "memory_kib": ARGON2_MEMORY_KIB,
+            "iterations": ARGON2_ITERATIONS,
+            "parallelism": ARGON2_PARALLELISM,
             "salt": _b64(salt),
         },
         "nonce": _b64(nonce),
@@ -108,8 +152,7 @@ def encrypt_secret(payload: dict, password: str) -> dict:
 
 
 def derive_unlock_key(envelope: dict, password: str) -> WalletUnlockKey:
-    salt, _nonce, _ciphertext, n, r, p = _password_envelope_material(envelope)
-    return WalletUnlockKey(_derive_key(password, salt, n, r, p))
+    return WalletUnlockKey(_derive_envelope_key(envelope, password))
 
 
 def decrypt_secret_with_unlock_key(
@@ -117,9 +160,9 @@ def decrypt_secret_with_unlock_key(
 ) -> dict:
     if not isinstance(unlock_key, WalletUnlockKey):
         raise WalletError("Wallet unlock key is invalid")
-    _salt, nonce, ciphertext, _n, _r, _p = _password_envelope_material(envelope)
+    _salt, nonce, ciphertext, aad, _kdf = _password_envelope_material(envelope)
     try:
-        plaintext = AESGCM(unlock_key.as_bytes()).decrypt(nonce, ciphertext, AAD)
+        plaintext = AESGCM(unlock_key.as_bytes()).decrypt(nonce, ciphertext, aad)
         return _decode_payload(plaintext)
     except InvalidTag as exc:
         raise InvalidUnlockKeyError("Invalid wallet unlock key") from exc
@@ -135,8 +178,6 @@ def decrypt_secret(envelope: dict, password: str) -> dict:
         raise InvalidPasswordError("Invalid wallet password") from exc
 
 
-# Low-level key-based AEAD helpers remain only for historical test-vector
-# compatibility. They are not a system-authentication or wallet-protection API.
 def encrypt_secret_with_key(payload: dict, key: bytes) -> dict:
     if not isinstance(key, bytes) or len(key) != 32:
         raise WalletError("Wallet protection key must be 32 bytes")

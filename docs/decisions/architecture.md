@@ -38,9 +38,9 @@ See [Mobile System Authentication](../platforms/mobile/system-auth.md), [Mobile 
 
 **Decision:** Rust Core does not implement, abstract, or store operating-system authentication state. TUI/CLI, desktop, mobile, and future clients own Keychain/Keystore/platform credentials, biometrics, Windows Hello, PAM, session policy, and other OS-specific authorization behavior.
 
-**Software-wallet credential:** the standard Core credential for routine software signing is `WalletUnlockKey`, the exact 32-byte Scrypt output for the canonical password-protected wallet envelope. A client may protect this value with any suitable OS mechanism, but Core only receives the resulting 32-byte key.
+**Software-wallet credential:** the standard Core credential for routine software signing is `WalletUnlockKey`, the exact 32-byte versioned password-KDF output for the canonical protected wallet envelope. A client may protect this value with any suitable OS mechanism, but Core only receives the resulting 32-byte key.
 
-**Enrollment:** clients obtain an unlock key through a verified Core path: app passcode + canonical envelope -> Scrypt key -> decrypt -> reconstruct signer -> verify expected public key -> return `WalletUnlockKey`. This prevents enrollment of an unlock key for substituted or mismatched wallet material.
+**Enrollment:** clients obtain an unlock key through a verified Core path: Fresnica passphrase + canonical envelope -> versioned KDF key -> decrypt -> reconstruct signer -> verify expected public key -> return `WalletUnlockKey`. This prevents enrollment of an unlock key for substituted or mismatched wallet material.
 
 **Signing:** clients submit the canonical encrypted envelope plus `WalletUnlockKey`; Core decrypts the same envelope, re-validates wallet identity, signs, and drops secret-bearing state. No second wallet ciphertext and no independent system wallet key are created.
 

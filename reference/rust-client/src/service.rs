@@ -7,14 +7,25 @@ use crate::asset_catalog::AssetCatalog;
 use crate::balance_state::AssetBalance;
 use crate::contacts::ContactStore;
 use crate::contract::{
-    authorize_contract_invoke, contract_interface, prepare_contract_invoke,
-    prepare_contract_invoke_outcome, sign_contract_invoke, submit_contract_invoke,
-    ContractInterface, ContractInvokePreparation, ContractInvokeRequest, PreparedContractInvoke,
+    authorize_contract_invoke, authorize_contract_invoke_with_system_auth, contract_interface,
+    prepare_contract_invoke, prepare_contract_invoke_outcome, sign_contract_invoke,
+    sign_contract_invoke_with_providers, simulate_contract_invoke, submit_contract_invoke,
+    ContractInterface, ContractInvokePreparation, ContractInvokeRequest, ContractSimulationResult,
+    PreparedContractInvoke,
 };
 use crate::history_state::HistoryOperation;
 use crate::horizon_gateway::{HorizonGateway, MAINNET_HORIZON_URL, TESTNET_HORIZON_URL};
 use crate::rpc_gateway::{RpcGateway, TESTNET_RPC_URL};
+use crate::signing_coordination::{
+    sign_sep53_message_with_system_auth, ExternalEd25519SigningProvider, Sep53MessageSignature,
+};
+use crate::soroban::{
+    prepare_detached_token_transfer_authorization, sign_detached_token_transfer_authorization,
+    sign_detached_token_transfer_authorization_with_system_auth,
+    DetachedTokenTransferAuthorizationRequest, PreparedDetachedTokenTransferAuthorization,
+};
 use crate::storage::{WalletRecord, WalletStorage};
+use crate::system_auth::SystemAuthUnlockProvider;
 use crate::transaction::{
     validate_classic_transaction_timeout_seconds, PendingTransactionStore, TransactionSubmission,
     DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS,
@@ -191,6 +202,17 @@ impl FresnicaClient {
         Ok(record)
     }
 
+    pub fn sign_sep53_message(
+        &self,
+        name: Option<&str>,
+        message: &[u8],
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+    ) -> Result<Sep53MessageSignature, String> {
+        let record = self.resolve_wallet(name)?;
+        sign_sep53_message_with_system_auth(&record, message, passcode, system_auth_providers)
+    }
+
     pub fn ledger_account(&self, address: &str) -> Result<Option<Value>, String> {
         self.gateway.get_account_optional(address)
     }
@@ -239,6 +261,39 @@ impl FresnicaClient {
         contract_interface(self.rpc_gateway()?, contract_id).await
     }
 
+    pub fn prepare_detached_token_transfer_authorization(
+        &self,
+        request: DetachedTokenTransferAuthorizationRequest,
+    ) -> Result<PreparedDetachedTokenTransferAuthorization, String> {
+        prepare_detached_token_transfer_authorization(
+            &self.storage,
+            self.profile.network(),
+            request,
+        )
+    }
+
+    pub fn sign_detached_token_transfer_authorization(
+        &self,
+        prepared: &PreparedDetachedTokenTransferAuthorization,
+        passcode: &str,
+    ) -> Result<Vec<u8>, String> {
+        sign_detached_token_transfer_authorization(&self.storage, prepared, passcode)
+    }
+
+    pub fn sign_detached_token_transfer_authorization_with_system_auth(
+        &self,
+        prepared: &PreparedDetachedTokenTransferAuthorization,
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+    ) -> Result<Vec<u8>, String> {
+        sign_detached_token_transfer_authorization_with_system_auth(
+            &self.storage,
+            prepared,
+            passcode,
+            system_auth_providers,
+        )
+    }
+
     pub async fn prepare_contract_invoke(
         &self,
         request: ContractInvokeRequest,
@@ -253,6 +308,13 @@ impl FresnicaClient {
         prepare_contract_invoke_outcome(&self.storage, self.rpc_gateway()?, request).await
     }
 
+    pub async fn simulate_contract_invoke(
+        &self,
+        request: ContractInvokeRequest,
+    ) -> Result<ContractSimulationResult, String> {
+        simulate_contract_invoke(self.rpc_gateway()?, request).await
+    }
+
     pub fn authorize_contract_invoke(
         &self,
         prepared: &mut PreparedContractInvoke,
@@ -261,12 +323,43 @@ impl FresnicaClient {
         authorize_contract_invoke(&self.storage, prepared, passcode)
     }
 
+    pub fn authorize_contract_invoke_with_system_auth(
+        &self,
+        prepared: &mut PreparedContractInvoke,
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+    ) -> Result<(), String> {
+        authorize_contract_invoke_with_system_auth(
+            &self.storage,
+            prepared,
+            passcode,
+            system_auth_providers,
+        )
+    }
+
     pub fn sign_contract_invoke(
         &self,
         prepared: &mut PreparedContractInvoke,
         passcode: &str,
     ) -> Result<(), String> {
         sign_contract_invoke(&self.storage, prepared, &self.gateway, passcode)
+    }
+
+    pub fn sign_contract_invoke_with_providers(
+        &self,
+        prepared: &mut PreparedContractInvoke,
+        passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
+        external_providers: &[ExternalEd25519SigningProvider],
+    ) -> Result<(), String> {
+        sign_contract_invoke_with_providers(
+            &self.storage,
+            prepared,
+            &self.gateway,
+            passcode,
+            system_auth_providers,
+            external_providers,
+        )
     }
 
     pub async fn submit_contract_invoke(

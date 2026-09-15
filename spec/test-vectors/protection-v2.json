@@ -1,0 +1,25 @@
+{
+  "schema": "fresnica-protection-v2",
+  "source": "Python reference Argon2id encryption semantics with deterministic test salt and nonce",
+  "payload": {
+    "kind": "secret",
+    "secret": "SAMPLE-SECRET"
+  },
+  "password": {
+    "password": "correct horse battery staple",
+    "unlock_key_hex": "0d1a3c6523c8f06e4e0af9c515aa5b5448cfebd6838f2d52c3d8b6ef8ddc3c2e",
+    "envelope": {
+      "version": 2,
+      "cipher": "aes-256-gcm",
+      "kdf": {
+        "name": "argon2id",
+        "memory_kib": 65536,
+        "iterations": 3,
+        "parallelism": 1,
+        "salt": "AAECAwQFBgcICQoLDA0ODw=="
+      },
+      "nonce": "ICEiIyQlJicoKSor",
+      "ciphertext": "/gEam34IHOmryXAQDLviR572g1TWo3OVR8NVzWXNCv4pjxk0Ow/fSUqY2OJHrznr5Hz/0Ple3YQvQw=="
+    }
+  }
+}

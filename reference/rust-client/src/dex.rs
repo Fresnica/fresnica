@@ -5,6 +5,7 @@ use stellar_xdr::{
 };
 
 use crate::asset::AssetId;
+use crate::system_auth::SystemAuthUnlockProvider;
 use crate::transaction::{
     build_operation_envelope_with_timeout, prepared_classic_authorization_snapshot,
 };
@@ -490,6 +491,7 @@ impl FresnicaClient {
         &self,
         prepared: &PreparedOffer,
         passcode: Option<&str>,
+        system_auth_providers: &[SystemAuthUnlockProvider],
         external_providers: &[ExternalEd25519SigningProvider],
     ) -> Result<TransactionSubmission, String> {
         let mut envelope = prepared.envelope.clone();
@@ -501,6 +503,7 @@ impl FresnicaClient {
             &mut envelope,
             self.gateway(),
             passcode,
+            system_auth_providers,
             external_providers,
         )
     }

@@ -26,9 +26,9 @@ See [Client / Core Security Contract](client-security.md) for the cross-client b
 
 The default product model uses one Fresnica passphrase for ordinary local software signers.
 
-The user sees one passphrase, but each signer envelope has its own random Scrypt salt and AES-GCM nonce. Therefore the same passphrase produces a different 32-byte unlock key for each protected signer.
+The user sees one passphrase, but each signer envelope has its own random KDF salt and AES-GCM nonce. Therefore the same passphrase produces a different 32-byte unlock key for each protected signer.
 
-`PasswordProtectionProvider` retains the version-1 Scrypt + AES-256-GCM envelope behavior.
+`PasswordProtectionProvider` writes the current versioned password envelope and continues to read the legacy version-1 Scrypt envelope.
 
 The Core owns:
 
@@ -42,26 +42,24 @@ The Core owns:
 
 Clients must not duplicate those rules.
 
-### New-protection passphrase floor
+### New-protection passphrase guidance
 
-Fresnica product/application policy requires a passphrase of at least 15 Unicode scalar values when creating a new protected software signer or rotating/re-protecting one. This is a Wallet/Application credential policy, not a new Core protection format: Core continues to own KDF/encryption semantics and accepts the credential bytes supplied by its trusted caller.
+Fresnica product/application policy recommends at least 15 Unicode scalar values when creating or rotating a protected software signer. Shorter non-empty passphrases are permitted only after the product presents an explicit offline-guessing warning and the user accepts that risk. Empty passphrases remain invalid. Core does not impose composition rules or silently normalize credential bytes.
 
-The baseline rejects short PIN-style credentials without requiring uppercase/lowercase/digit/symbol mixtures. Products must not silently normalize the passphrase before passing it to Core. The native Rust CLI enforces this reference policy; Mobile and other products must enforce the same policy in their onboarding and protection-settings flows.
+The password envelope is versioned independently from the outer protection wrapper. New protection uses password-envelope v2: Argon2id, 64 MiB memory, 3 iterations, 1 lane, a random 128-bit salt, a 256-bit derived key, and AES-256-GCM. The single-lane profile keeps memory and execution behavior predictable for Mobile/FFI clients while materially increasing offline-guess cost over the legacy profile. Parameters are stored in the envelope and validated before use.
 
-The minimum applies only when establishing new protection. Existing envelopes remain unlockable with their original credential so a user can authenticate an older weak envelope and rotate it to a compliant passphrase instead of being locked out.
-
-The current version-1 Scrypt parameters remain unchanged in this hardening step. A KDF-cost increase must be benchmarked on supported iOS/Android hardware and introduced as an explicit versioned envelope migration rather than silently changing the meaning of version 1.
+Password-envelope v1 remains supported exactly as written: Scrypt N=2^15, r=8, p=1 with its original AAD. Existing wallets are never silently re-encrypted merely because a newer KDF exists; re-protection is an explicit authenticated operation.
 
 Historical public API names such as `appPasscode`, `signWithPasscode` and `invalid-passcode` remain compatibility names until a later API version; they refer to the Fresnica passphrase credential.
 
 ## Standard software-signer unlock key
 
-For a password-protected software signer, `WalletUnlockKey` is the exact 32-byte Scrypt output that encrypts that signer's canonical password envelope. The historical type name is retained because it is already part of the Core vocabulary; semantically the key is scoped to one protected software-signer envelope.
+For a password-protected software signer, `WalletUnlockKey` is the exact 32-byte KDF output that encrypts that signer's canonical password envelope. The historical type name is retained because it is already part of the Core vocabulary; semantically the key is scoped to one protected software-signer envelope.
 
 ```text
 Fresnica Passphrase + signer salt
           |
-        Scrypt
+  Argon2id v2 / Scrypt v1
           |
   WalletUnlockKey (32 bytes)
           |

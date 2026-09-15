@@ -16,6 +16,8 @@ pub mod rpc_gateway;
 pub mod signing_coordination;
 pub mod soroban;
 pub mod storage;
+pub mod system_auth;
+mod token;
 pub mod transaction;
 pub mod trustline;
 pub mod wallet;
@@ -42,10 +44,12 @@ pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATAL
 pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use contract::{
-    ContractArgumentInput, ContractArgumentReview, ContractFunction, ContractInterface,
-    ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractParameter,
-    ContractParameterType, ContractReadResult, PreparedContractInvoke,
-    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
+    ContractAddressNames, ContractArgumentInput, ContractArgumentReview, ContractCapabilities,
+    ContractExecutableKind, ContractExecutableObservation, ContractFunction, ContractInterface,
+    ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry,
+    ContractParameter, ContractParameterType, ContractReadResult, ContractSep41Evidence,
+    ContractSimulationEffects, ContractSimulationResult, PreparedContractInvoke,
+    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS, SEP41_INTERFACE_VERSION,
 };
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
@@ -76,19 +80,35 @@ pub use service::{
 };
 pub use signing_coordination::{
     review_ledger_authorization, select_ed25519_signers, select_local_ed25519_signers,
-    sign_needed_local_ed25519, sign_needed_with_ed25519_providers, sign_with_ed25519_providers,
-    sign_with_local_ed25519, ExternalEd25519SigningProvider,
+    sign_needed_local_ed25519, sign_needed_with_ed25519_providers,
+    sign_sep53_message_with_system_auth, sign_with_ed25519_providers, sign_with_local_ed25519,
+    ExternalEd25519SigningProvider, Sep53MessageSignature, LOCAL_SOFTWARE_PASSPHRASE_REQUIRED,
 };
 pub use soroban::{
-    authorize_prepared_soroban, prepare_soroban_invoke, sign_prepared_soroban,
-    submit_prepared_soroban, PreparedSorobanTransaction, SorobanInvokeRequest, SorobanReview,
+    authorize_prepared_soroban, authorize_prepared_soroban_with_system_auth,
+    prepare_detached_token_transfer_authorization, prepare_soroban_invoke,
+    sign_detached_token_transfer_authorization,
+    sign_detached_token_transfer_authorization_with_system_auth, sign_prepared_soroban,
+    sign_prepared_soroban_with_providers, submit_prepared_soroban,
+    DetachedTokenTransferAuthorizationRequest, DetachedTokenTransferAuthorizationReview,
+    PreparedDetachedTokenTransferAuthorization, PreparedSorobanTransaction, SorobanInvokeRequest,
+    SorobanReview,
 };
 pub use storage::{validate_record, WalletRecord, WalletStorage, BACKUP_FORMAT, BACKUP_VERSION};
+pub use system_auth::{
+    prepare_system_auth_enrollment, system_auth_slot, SystemAuthEnrollment, SystemAuthRelease,
+    SystemAuthSlot, SystemAuthUnlockProvider, SYSTEM_AUTH_UNLOCK_KEY_LENGTH,
+};
+pub use token::{
+    resolve_token, PreparedTokenTransfer, ResolvedToken, ResolvedTokenSource, TokenAmount,
+    TokenBalanceRequest, TokenBalanceResult, TokenTransferRequest, STELLAR_ASSET_TOKEN_DECIMALS,
+};
 pub use transaction::{
     account_sequence, balance_stroops, build_operation_envelope, build_single_operation_envelope,
     build_single_operation_envelope_with_memo, format_stroops, has_valid_transaction_signature,
     minimum_balance_stroops, network_passphrase, parse_positive_stroops, parse_stroops,
-    parse_transaction_xdr, sign_transaction_xdr_with_passcode, TransactionSubmission,
+    parse_transaction_xdr, sign_transaction_xdr_with_passcode,
+    sign_transaction_xdr_with_unlock_key, TransactionSubmission,
     DEFAULT_CLASSIC_TRANSACTION_TIMEOUT_SECONDS, STROOPS_PER_XLM,
 };
 pub(crate) use transaction::{

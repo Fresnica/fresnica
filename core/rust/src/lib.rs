@@ -42,8 +42,9 @@ pub use protection::{
 };
 pub use secret_store::{
     decrypt_secret, decrypt_secret_with_unlock_key, derive_unlock_key, encrypt_secret,
-    PasswordSecretEnvelope, ScryptEnvelope, SecretStoreError, WalletUnlockKey, SCRYPT_N, SCRYPT_P,
-    SCRYPT_R,
+    Argon2idEnvelope, PasswordKdfEnvelope, PasswordSecretEnvelope, ScryptEnvelope,
+    SecretStoreError, WalletUnlockKey, ARGON2_ITERATIONS, ARGON2_MEMORY_KIB, ARGON2_PARALLELISM,
+    SCRYPT_N, SCRYPT_P, SCRYPT_R,
 };
 pub use signer::{
     ClassicSigner, ExternalEd25519Signer, ExternalMessageEd25519Signer,

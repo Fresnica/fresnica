@@ -6,7 +6,7 @@ import Security
 ///
 /// One Keychain-protected EC private key authorizes use of every local software signer on this
 /// installation. Its public key wraps each signer's independent WalletUnlockKey without prompting.
-/// The private key is gated by the current biometric set and is used only to unwrap during signing.
+/// The private key is gated by device user presence and is used only to unwrap during signing.
 public final class FresnicaWalletUnlockKeyStore {
     public static let unlockKeyLength = 32
 
@@ -20,11 +20,14 @@ public final class FresnicaWalletUnlockKeyStore {
         self.signerService = service + ".signers"
     }
 
-    public func canEnrollBiometry() -> Bool {
+    public func canEnrollSystemAuth() -> Bool {
         let context = LAContext()
         var error: NSError?
-        return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+        return context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
     }
+
+    @available(*, deprecated, message: "Use canEnrollSystemAuth()")
+    public func canEnrollBiometry() -> Bool { canEnrollSystemAuth() }
 
     public func hasDomain() throws -> Bool {
         guard let record = try activeDomainRecord() else { return false }
@@ -39,9 +42,9 @@ public final class FresnicaWalletUnlockKeyStore {
         }
 
         let context = LAContext()
-        var biometricError: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &biometricError) else {
-            throw StoreError.biometryUnavailable(biometricError?.localizedDescription)
+        var authenticationError: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authenticationError) else {
+            throw StoreError.biometryUnavailable(authenticationError?.localizedDescription)
         }
 
         let previous = try activeDomainRecord()
@@ -78,7 +81,6 @@ public final class FresnicaWalletUnlockKeyStore {
         }
 
         context.localizedReason = reason
-        context.localizedFallbackTitle = ""
         let authenticatedKey = try loadPrivateKey(tag: tag, context: context)
         cryptoError = nil
         guard var clear = SecKeyCreateDecryptedData(
@@ -169,7 +171,6 @@ public final class FresnicaWalletUnlockKeyStore {
 
         let context = LAContext()
         context.localizedReason = reason
-        context.localizedFallbackTitle = ""
         let privateKey = try loadPrivateKey(tag: domain.tag, context: context)
         guard SecKeyIsAlgorithmSupported(privateKey, .decrypt, algorithm) else {
             throw StoreError.crypto("System-auth private key cannot unwrap WalletUnlockKey")
@@ -206,7 +207,7 @@ public final class FresnicaWalletUnlockKeyStore {
         guard let accessControl = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
-            [.biometryCurrentSet, .privateKeyUsage],
+            [.userPresence],
             &accessError
         ) else {
             throw StoreError.accessControlCreationFailed(
@@ -214,7 +215,7 @@ public final class FresnicaWalletUnlockKeyStore {
             )
         }
 
-        let attributes: [CFString: Any] = [
+        var attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits: 256,
             kSecPrivateKeyAttrs: [
@@ -223,6 +224,7 @@ public final class FresnicaWalletUnlockKeyStore {
                 kSecAttrAccessControl: accessControl,
             ],
         ]
+        useDataProtectionKeychainIfNeeded(&attributes)
         var keyError: Unmanaged<CFError>?
         guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &keyError) else {
             throw StoreError.crypto(keyError?.takeRetainedValue().localizedDescription)
@@ -268,10 +270,11 @@ public final class FresnicaWalletUnlockKeyStore {
             kSecAttrApplicationTag: tag,
             kSecReturnAttributes: true,
             kSecMatchLimit: kSecMatchLimitOne,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
         ]
         useDataProtectionKeychainIfNeeded(&query)
         let status = SecItemCopyMatching(query as CFDictionary, nil)
-        if status == errSecSuccess { return true }
+        if status == errSecSuccess || status == errSecInteractionNotAllowed { return true }
         if status == errSecItemNotFound { return false }
         throw StoreError.keychain(status)
     }

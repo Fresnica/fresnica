@@ -4,19 +4,26 @@ use aes_gcm::{
     aead::{Aead, KeyInit, Nonce, Payload},
     Aes256Gcm,
 };
+use argon2::{
+    Algorithm as Argon2Algorithm, Argon2, Params as Argon2Params, Version as Argon2Version,
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use scrypt::{scrypt, Params};
+use scrypt::{scrypt, Params as ScryptParams};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-const AAD: &[u8] = b"fresnica-wallet-secret-v1";
+const PASSWORD_AAD_V1: &[u8] = b"fresnica-wallet-secret-v1";
+const PASSWORD_AAD_V2: &[u8] = b"fresnica-wallet-secret-v2";
 const KEY_AAD: &[u8] = b"fresnica-wallet-secret-key-v1";
 const SCRYPT_LOG_N: u8 = 15;
 pub const SCRYPT_N: u64 = 1 << SCRYPT_LOG_N;
 pub const SCRYPT_R: u32 = 8;
 pub const SCRYPT_P: u32 = 1;
+pub const ARGON2_MEMORY_KIB: u32 = 64 * 1024;
+pub const ARGON2_ITERATIONS: u32 = 3;
+pub const ARGON2_PARALLELISM: u32 = 1;
 
 pub struct WalletUnlockKey {
     bytes: Zeroizing<[u8; 32]>,
@@ -50,10 +57,26 @@ pub struct ScryptEnvelope {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Argon2idEnvelope {
+    pub name: String,
+    pub memory_kib: u32,
+    pub iterations: u32,
+    pub parallelism: u32,
+    pub salt: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PasswordKdfEnvelope {
+    Scrypt(ScryptEnvelope),
+    Argon2id(Argon2idEnvelope),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PasswordSecretEnvelope {
     pub version: u8,
     pub cipher: String,
-    pub kdf: ScryptEnvelope,
+    pub kdf: PasswordKdfEnvelope,
     pub nonce: String,
     pub ciphertext: String,
 }
@@ -76,7 +99,7 @@ pub fn encrypt_secret(
 
     let salt = random_array::<16>()?;
     let nonce = random_array::<12>()?;
-    encrypt_secret_with_material(payload, password, &salt, &nonce)
+    encrypt_secret_v2_with_material(payload, password, &salt, &nonce)
 }
 
 pub fn decrypt_secret(
@@ -89,11 +112,10 @@ pub fn decrypt_secret(
     }
 
     let key = derive_unlock_key(envelope, password)?;
-    decrypt_secret_with_unlock_key(envelope, &key)
-        .map_err(|error| match error {
-            SecretStoreError::InvalidUnlockKey => SecretStoreError::InvalidPassword,
-            other => other,
-        })
+    decrypt_secret_with_unlock_key(envelope, &key).map_err(|error| match error {
+        SecretStoreError::InvalidUnlockKey => SecretStoreError::InvalidPassword,
+        other => other,
+    })
 }
 
 pub fn derive_unlock_key(
@@ -105,10 +127,17 @@ pub fn derive_unlock_key(
         return Err(SecretStoreError::EmptyPassword);
     }
 
-    let salt = decode_array::<16>(&envelope.kdf.salt)?;
-    Ok(WalletUnlockKey {
-        bytes: derive_key(password, &salt)?,
-    })
+    let bytes = match &envelope.kdf {
+        PasswordKdfEnvelope::Scrypt(kdf) => {
+            let salt = decode_array::<16>(&kdf.salt)?;
+            derive_scrypt_key(password, &salt)?
+        }
+        PasswordKdfEnvelope::Argon2id(kdf) => {
+            let salt = decode_array::<16>(&kdf.salt)?;
+            derive_argon2id_key(password, &salt)?
+        }
+    };
+    Ok(WalletUnlockKey { bytes })
 }
 
 pub fn decrypt_secret_with_unlock_key(
@@ -118,11 +147,13 @@ pub fn decrypt_secret_with_unlock_key(
     validate_password_envelope(envelope)?;
     let nonce = decode_array::<12>(&envelope.nonce)?;
     let ciphertext = decode_base64(&envelope.ciphertext)?;
-    let plaintext = decrypt_aead(unlock_key.as_bytes(), &nonce, AAD, &ciphertext)
-        .map_err(|error| match error {
+    let aad = password_aad(envelope.version)?;
+    let plaintext = decrypt_aead(unlock_key.as_bytes(), &nonce, aad, &ciphertext).map_err(
+        |error| match error {
             SecretStoreError::AuthenticationFailed => SecretStoreError::InvalidUnlockKey,
             other => other,
-        })?;
+        },
+    )?;
     decode_payload(plaintext)
 }
 
@@ -146,6 +177,7 @@ pub fn decrypt_secret_with_key(
     decode_payload(plaintext)
 }
 
+#[cfg(test)]
 fn encrypt_secret_with_material(
     payload: &Value,
     password: &str,
@@ -156,20 +188,49 @@ fn encrypt_secret_with_material(
         return Err(SecretStoreError::EmptyPassword);
     }
 
-    let key = derive_key(password, salt)?;
+    let key = derive_scrypt_key(password, salt)?;
     let plaintext = encode_payload(payload)?;
-    let ciphertext = encrypt_aead(&key, nonce, AAD, &plaintext)?;
+    let ciphertext = encrypt_aead(&key, nonce, PASSWORD_AAD_V1, &plaintext)?;
 
     Ok(PasswordSecretEnvelope {
         version: 1,
         cipher: "aes-256-gcm".to_owned(),
-        kdf: ScryptEnvelope {
+        kdf: PasswordKdfEnvelope::Scrypt(ScryptEnvelope {
             name: "scrypt".to_owned(),
             n: SCRYPT_N,
             r: SCRYPT_R,
             p: SCRYPT_P,
             salt: STANDARD.encode(salt),
-        },
+        }),
+        nonce: STANDARD.encode(nonce),
+        ciphertext: STANDARD.encode(ciphertext),
+    })
+}
+
+fn encrypt_secret_v2_with_material(
+    payload: &Value,
+    password: &str,
+    salt: &[u8; 16],
+    nonce: &[u8; 12],
+) -> Result<PasswordSecretEnvelope, SecretStoreError> {
+    if password.is_empty() {
+        return Err(SecretStoreError::EmptyPassword);
+    }
+
+    let key = derive_argon2id_key(password, salt)?;
+    let plaintext = encode_payload(payload)?;
+    let ciphertext = encrypt_aead(&key, nonce, PASSWORD_AAD_V2, &plaintext)?;
+
+    Ok(PasswordSecretEnvelope {
+        version: 2,
+        cipher: "aes-256-gcm".to_owned(),
+        kdf: PasswordKdfEnvelope::Argon2id(Argon2idEnvelope {
+            name: "argon2id".to_owned(),
+            memory_kib: ARGON2_MEMORY_KIB,
+            iterations: ARGON2_ITERATIONS,
+            parallelism: ARGON2_PARALLELISM,
+            salt: STANDARD.encode(salt),
+        }),
         nonce: STANDARD.encode(nonce),
         ciphertext: STANDARD.encode(ciphertext),
     })
@@ -191,19 +252,31 @@ fn encrypt_secret_with_key_and_nonce(
     })
 }
 
-fn validate_password_envelope(
-    envelope: &PasswordSecretEnvelope,
-) -> Result<(), SecretStoreError> {
-    if envelope.version != 1 || envelope.cipher != "aes-256-gcm" {
+fn validate_password_envelope(envelope: &PasswordSecretEnvelope) -> Result<(), SecretStoreError> {
+    if envelope.cipher != "aes-256-gcm" {
         return Err(SecretStoreError::UnsupportedEncryptionFormat);
     }
-    if envelope.kdf.name != "scrypt" {
-        return Err(SecretStoreError::UnsupportedKdfFormat);
-    }
-    if (envelope.kdf.n, envelope.kdf.r, envelope.kdf.p)
-        != (SCRYPT_N, SCRYPT_R, SCRYPT_P)
-    {
-        return Err(SecretStoreError::UnsupportedKdfParameters);
+    match (&envelope.kdf, envelope.version) {
+        (PasswordKdfEnvelope::Scrypt(kdf), 1) => {
+            if kdf.name != "scrypt" {
+                return Err(SecretStoreError::UnsupportedKdfFormat);
+            }
+            if (kdf.n, kdf.r, kdf.p) != (SCRYPT_N, SCRYPT_R, SCRYPT_P) {
+                return Err(SecretStoreError::UnsupportedKdfParameters);
+            }
+        }
+        (PasswordKdfEnvelope::Argon2id(kdf), 2) => {
+            if kdf.name != "argon2id" {
+                return Err(SecretStoreError::UnsupportedKdfFormat);
+            }
+            if (kdf.memory_kib, kdf.iterations, kdf.parallelism)
+                != (ARGON2_MEMORY_KIB, ARGON2_ITERATIONS, ARGON2_PARALLELISM)
+            {
+                return Err(SecretStoreError::UnsupportedKdfParameters);
+            }
+        }
+        (_, 1 | 2) => return Err(SecretStoreError::UnsupportedKdfFormat),
+        _ => return Err(SecretStoreError::UnsupportedEncryptionFormat),
     }
     Ok(())
 }
@@ -215,11 +288,38 @@ fn validate_key_envelope(envelope: &KeySecretEnvelope) -> Result<(), SecretStore
     Ok(())
 }
 
-fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, SecretStoreError> {
-    let params = Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)
+fn password_aad(version: u8) -> Result<&'static [u8], SecretStoreError> {
+    match version {
+        1 => Ok(PASSWORD_AAD_V1),
+        2 => Ok(PASSWORD_AAD_V2),
+        _ => Err(SecretStoreError::UnsupportedEncryptionFormat),
+    }
+}
+
+fn derive_scrypt_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, SecretStoreError> {
+    let params = ScryptParams::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)
         .map_err(|_| SecretStoreError::CryptoFailure)?;
     let mut key = Zeroizing::new([0u8; 32]);
     scrypt(password.as_bytes(), salt, &params, &mut key[..])
+        .map_err(|_| SecretStoreError::CryptoFailure)?;
+    Ok(key)
+}
+
+fn derive_argon2id_key(
+    password: &str,
+    salt: &[u8],
+) -> Result<Zeroizing<[u8; 32]>, SecretStoreError> {
+    let params = Argon2Params::new(
+        ARGON2_MEMORY_KIB,
+        ARGON2_ITERATIONS,
+        ARGON2_PARALLELISM,
+        Some(32),
+    )
+    .map_err(|_| SecretStoreError::CryptoFailure)?;
+    let argon2 = Argon2::new(Argon2Algorithm::Argon2id, Argon2Version::V0x13, params);
+    let mut key = Zeroizing::new([0u8; 32]);
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut key[..])
         .map_err(|_| SecretStoreError::CryptoFailure)?;
     Ok(key)
 }
@@ -241,10 +341,16 @@ fn encrypt_aead(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, SecretStoreError> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| SecretStoreError::CryptoFailure)?;
-    let nonce = Nonce::<Aes256Gcm>::try_from(&nonce[..])
-        .map_err(|_| SecretStoreError::CryptoFailure)?;
+    let nonce =
+        Nonce::<Aes256Gcm>::try_from(&nonce[..]).map_err(|_| SecretStoreError::CryptoFailure)?;
     cipher
-        .encrypt(&nonce, Payload { msg: plaintext, aad })
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|_| SecretStoreError::CryptoFailure)
 }
 
@@ -255,10 +361,16 @@ fn decrypt_aead(
     ciphertext: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, SecretStoreError> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| SecretStoreError::CryptoFailure)?;
-    let nonce = Nonce::<Aes256Gcm>::try_from(&nonce[..])
-        .map_err(|_| SecretStoreError::Corrupted)?;
+    let nonce =
+        Nonce::<Aes256Gcm>::try_from(&nonce[..]).map_err(|_| SecretStoreError::Corrupted)?;
     cipher
-        .decrypt(&nonce, Payload { msg: ciphertext, aad })
+        .decrypt(
+            &nonce,
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .map(Zeroizing::new)
         .map_err(|_| SecretStoreError::AuthenticationFailed)
 }
@@ -321,7 +433,15 @@ mod tests {
     #[derive(Debug, Deserialize)]
     struct PasswordVector {
         password: String,
+        #[serde(default)]
+        unlock_key_hex: String,
         envelope: PasswordSecretEnvelope,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PasswordOnlyVectors {
+        payload: Value,
+        password: PasswordVector,
     }
 
     #[derive(Debug, Deserialize)]
@@ -331,7 +451,17 @@ mod tests {
     }
 
     fn shared_vectors() -> ProtectionVectors {
-        serde_json::from_str(include_str!("../../../spec/test-vectors/protection-v1.json")).unwrap()
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/protection-v1.json"
+        ))
+        .unwrap()
+    }
+
+    fn shared_v2_vectors() -> PasswordOnlyVectors {
+        serde_json::from_str(include_str!(
+            "../../../spec/test-vectors/protection-v2.json"
+        ))
+        .unwrap()
     }
 
     fn decode_hex_array<const N: usize>(hex: &str) -> [u8; N] {
@@ -394,9 +524,54 @@ mod tests {
     }
 
     #[test]
-    fn password_encryption_matches_shared_python_vector_byte_for_byte() {
+    fn new_password_encryption_uses_argon2id_v2() {
+        let payload = json!({"kind": "secret", "secret": "S..."});
+        let envelope = encrypt_secret(&payload, "correct").unwrap();
+        assert_eq!(envelope.version, 2);
+        match envelope.kdf {
+            PasswordKdfEnvelope::Argon2id(kdf) => {
+                assert_eq!(kdf.name, "argon2id");
+                assert_eq!(kdf.memory_kib, ARGON2_MEMORY_KIB);
+                assert_eq!(kdf.iterations, ARGON2_ITERATIONS);
+                assert_eq!(kdf.parallelism, ARGON2_PARALLELISM);
+            }
+            PasswordKdfEnvelope::Scrypt(_) => panic!("new envelopes must use Argon2id"),
+        }
+    }
+
+    #[test]
+    fn password_encryption_matches_shared_python_v2_vector_byte_for_byte() {
+        let vectors = shared_v2_vectors();
+        let salt = match &vectors.password.envelope.kdf {
+            PasswordKdfEnvelope::Argon2id(kdf) => decode_array::<16>(&kdf.salt).unwrap(),
+            PasswordKdfEnvelope::Scrypt(_) => panic!("v2 vector must use Argon2id"),
+        };
+        let nonce = decode_array::<12>(&vectors.password.envelope.nonce).unwrap();
+        let derived =
+            derive_unlock_key(&vectors.password.envelope, &vectors.password.password).unwrap();
+        assert_eq!(
+            derived.as_bytes(),
+            &decode_hex_array::<32>(&vectors.password.unlock_key_hex)
+        );
+        assert_eq!(
+            encrypt_secret_v2_with_material(
+                &vectors.payload,
+                &vectors.password.password,
+                &salt,
+                &nonce,
+            )
+            .unwrap(),
+            vectors.password.envelope
+        );
+    }
+
+    #[test]
+    fn password_encryption_matches_shared_python_v1_vector_byte_for_byte() {
         let vectors = shared_vectors();
-        let salt = decode_array::<16>(&vectors.password.envelope.kdf.salt).unwrap();
+        let salt = match &vectors.password.envelope.kdf {
+            PasswordKdfEnvelope::Scrypt(kdf) => decode_array::<16>(&kdf.salt).unwrap(),
+            PasswordKdfEnvelope::Argon2id(_) => panic!("v1 vector must use scrypt"),
+        };
         let nonce = decode_array::<12>(&vectors.password.envelope.nonce).unwrap();
 
         assert_eq!(
