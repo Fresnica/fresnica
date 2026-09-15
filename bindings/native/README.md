@@ -63,6 +63,8 @@ The generalized native packages now own the reusable platform security helpers t
 
 These are not framework adapters. They implement the platform-side credential release/signing boundary while the framework adapter only drives platform UI/lifecycle glue.
 
+`FresnicaSignerAuthorization.verifyProtectedSignerPassphrase(...)` verifies the application passphrase against the exact protected signer envelope and expected signer identity, then wipes the derived `WalletUnlockKey` before returning. It has no persistent side effects and does not expose key or signer secret material to the caller.
+
 The Native SDK uses one device/app-level **System Auth Protection Domain** rather than one biometric enrollment per signer. Domain initialization performs one authenticated private-key challenge. Later signer registration derives a verified per-signer `WalletUnlockKey` from the Fresnica passcode and wraps it with the already-created domain public key, so adding a signer does not trigger another biometric prompt. Routine signing authenticates the domain private-key unwrap. Android drives the exact `Cipher` through `BiometricPrompt`; Apple uses the auth-bound `SecKey`/`LAContext` path. System auth remains lower privilege than the Fresnica passcode and cannot authorize Reveal / Export.
 
 ## Apple compiled module
