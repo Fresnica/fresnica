@@ -14,4 +14,16 @@ class NativeSdkSmoke(context: Context) {
     fun sdkApi(): FresnicaSdkApi = api
 
     fun signerAuthorization(): FresnicaSignerAuthorization = authorization
+
+    fun verifyProtectedSignerPassphrase(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+    ) {
+        authorization.verifyProtectedSignerPassphrase(
+            envelopeJson,
+            appPasscode,
+            expectedSignerPublicKey,
+        )
+    }
 }

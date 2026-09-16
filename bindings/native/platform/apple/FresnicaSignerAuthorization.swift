@@ -22,6 +22,23 @@ public final class FresnicaSignerAuthorization {
         try keyStore.initializeDomain(reason: reason)
     }
 
+    /// Verifies passphrase + protected envelope + expected signer identity without exposing key bytes.
+    public func verifyProtectedSignerPassphrase(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String
+    ) throws {
+        var unlockKey = try core.deriveUnlockKey(
+            envelopeJson: envelopeJson,
+            passcode: appPasscode,
+            expectedSignerPublicKey: expectedSignerPublicKey
+        )
+        defer { wipe(&unlockKey) }
+        guard unlockKey.count == FresnicaWalletUnlockKeyStore.unlockKeyLength else {
+            throw AuthorizationError.invalidUnlockKeyLength
+        }
+    }
+
     /// Passcode-authenticated signer registration. This wraps the verified key with the domain
     /// public key and therefore does not trigger Face ID / Touch ID.
     public func registerSignerSystemAuth(
