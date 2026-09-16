@@ -21,6 +21,7 @@ const REQUIRED_METHODS = [
   'hasSystemAuthDomain',
   'initializeSystemAuth',
   'registerSignerSystemAuth',
+  'verifyProtectedSignerPassphrase',
   'hasSignerSystemAuth',
   'removeSignerSystemAuth',
   'removeSystemAuthDomain',
@@ -54,6 +55,7 @@ test('Android adapter targets Native SDK and preserves the reviewed JS surface',
     assert.doesNotMatch(source, new RegExp(`fun ${method}\\(`), `forbidden Android framework method ${method}`);
   }
   assert.match(source, /message\.toByteArray\(Charsets\.UTF_8\)/, 'Android must encode the reviewed dapp message as explicit UTF-8');
+  assert.match(source, /authorization\.verifyProtectedSignerPassphrase\(/, 'Android passphrase verification must stay behind the native authorization facade');
 });
 
 
@@ -91,6 +93,7 @@ test('Apple adapter targets Native SDK and preserves the reviewed bridge surface
     assert.doesNotMatch(shim, new RegExp(`RCT_EXTERN_METHOD\\(${method}(?=[:)])`), `forbidden Apple shim method ${method}`);
   }
   assert.match(source, /Data\(message\.utf8\)/, 'Apple must encode the reviewed dapp message as explicit UTF-8');
+  assert.match(source, /authorization\.verifyProtectedSignerPassphrase\(/, 'Apple passphrase verification must stay behind the native authorization facade');
 });
 
 

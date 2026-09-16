@@ -307,6 +307,26 @@ public final class FresnicaCoreModule: NSObject {
         }
     }
 
+    @objc(verifyProtectedSignerPassphrase:appPasscode:expectedSignerPublicKey:resolver:rejecter:)
+    public func verifyProtectedSignerPassphrase(
+        _ envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        resolver resolve: @escaping FresnicaPromiseResolveBlock,
+        rejecter reject: @escaping FresnicaPromiseRejectBlock
+    ) {
+        do {
+            try authorization.verifyProtectedSignerPassphrase(
+                envelopeJson: envelopeJson,
+                appPasscode: appPasscode,
+                expectedSignerPublicKey: expectedSignerPublicKey
+            )
+            resolve(true)
+        } catch {
+            rejectNativeError(error, with: reject)
+        }
+    }
+
     @objc(hasSignerSystemAuth:resolver:rejecter:)
     public func hasSignerSystemAuth(
         _ expectedSignerPublicKey: String,
