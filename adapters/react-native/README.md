@@ -32,6 +32,7 @@ The canonical adapter exposes the established high-level surface:
 - `hasSystemAuthDomain`
 - `initializeSystemAuth`
 - `registerSignerSystemAuth`
+- `verifyProtectedSignerPassphrase`
 - `hasSignerSystemAuth`
 - `removeSignerSystemAuth`
 - `removeSystemAuthDomain`
@@ -41,6 +42,8 @@ The canonical adapter exposes the established high-level surface:
 - `signWithPasscode`
 
 It intentionally does **not** expose `deriveUnlockKey`, `validateUnlockKey`, or raw routine `signTransactionXdr` to JavaScript.
+
+`verifyProtectedSignerPassphrase` verifies the Fresnica passphrase against one protected signer envelope and the expected signer identity. It resolves only `true` on success or rejects with the Native SDK's stable error; no `WalletUnlockKey`, mnemonic, or secret crosses the React Native boundary. Selecting one signer, the latest two signers, or a full signer set remains application policy.
 
 `initializeSystemAuth` is one device/app-level enrollment. Later `registerSignerSystemAuth` calls verify the Fresnica passcode and wrap a new signer's independent `WalletUnlockKey` with the existing domain public key without another biometric prompt. `signWithSystemAuth` is the use-time biometric/system-auth boundary. System auth is not a substitute for the Fresnica passcode and cannot authorize Reveal / Export.
 

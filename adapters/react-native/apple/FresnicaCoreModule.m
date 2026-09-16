@@ -80,6 +80,12 @@ RCT_EXTERN_METHOD(registerSignerSystemAuth:(NSString *)envelopeJson
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(verifyProtectedSignerPassphrase:(NSString *)envelopeJson
+                  appPasscode:(NSString *)appPasscode
+                  expectedSignerPublicKey:(NSString *)expectedSignerPublicKey
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(hasSignerSystemAuth:(NSString *)expectedSignerPublicKey
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

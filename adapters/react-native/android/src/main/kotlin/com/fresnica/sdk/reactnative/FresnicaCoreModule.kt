@@ -333,6 +333,22 @@ class FresnicaCoreModule(
     }
 
     @ReactMethod
+    fun verifyProtectedSignerPassphrase(
+        envelopeJson: String,
+        appPasscode: String,
+        expectedSignerPublicKey: String,
+        promise: Promise,
+    ) {
+        runCatching {
+            authorization.verifyProtectedSignerPassphrase(
+                envelopeJson,
+                appPasscode,
+                expectedSignerPublicKey,
+            )
+        }.onSuccess { promise.resolve(true) }.onFailure { reject(promise, it) }
+    }
+
+    @ReactMethod
     fun hasSignerSystemAuth(expectedSignerPublicKey: String, promise: Promise) {
         runCatching { authorization.isSignerSystemAuthEnrolled(expectedSignerPublicKey) }
             .onSuccess(promise::resolve)
