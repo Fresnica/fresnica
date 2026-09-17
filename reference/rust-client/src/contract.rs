@@ -521,6 +521,7 @@ pub struct ContractInvokeRequest {
     pub function_name: String,
     pub arguments: Vec<ContractArgumentInput>,
     positional_arguments: Option<Vec<String>>,
+    json_arguments: Vec<(String, Value)>,
     scval_xdr_arguments: Vec<ContractArgumentInput>,
     pub inclusion_fee_stroops: Option<u32>,
     pub authorization_lifetime_ledgers: u32,
@@ -539,6 +540,7 @@ impl ContractInvokeRequest {
             function_name: function_name.into(),
             arguments,
             positional_arguments: None,
+            json_arguments: Vec::new(),
             scval_xdr_arguments: Vec::new(),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
@@ -557,6 +559,7 @@ impl ContractInvokeRequest {
             function_name: function_name.into(),
             arguments: Vec::new(),
             positional_arguments: Some(arguments),
+            json_arguments: Vec::new(),
             scval_xdr_arguments: Vec::new(),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
@@ -582,6 +585,10 @@ impl ContractInvokeRequest {
         self.address_names.add(name, address)
     }
 
+    pub fn add_json_argument(&mut self, name: impl Into<String>, value: Value) {
+        self.json_arguments.push((name.into(), value));
+    }
+
     pub fn add_scval_xdr_argument(
         &mut self,
         name: impl Into<String>,
@@ -601,9 +608,12 @@ impl ContractInvokeRequest {
     ) -> Result<(SorobanInvokeRequest, Vec<ContractArgumentReview>), String> {
         let spec = Spec::new(spec_entries);
         let function = find_function(&spec, &self.function_name)?;
-        if self.positional_arguments.is_some() && !self.scval_xdr_arguments.is_empty() {
+        if self.positional_arguments.is_some()
+            && (!self.json_arguments.is_empty() || !self.scval_xdr_arguments.is_empty())
+        {
             return Err(
-                "pre-encoded ScVal XDR arguments require named contract invocation".to_owned(),
+                "JSON and pre-encoded ScVal XDR arguments require named contract invocation"
+                    .to_owned(),
             );
         }
         let function_name = function.name.to_utf8_string_lossy();
@@ -664,6 +674,16 @@ impl ContractInvokeRequest {
                         ));
                     }
                 }
+                for (name, value) in &self.json_arguments {
+                    if supplied
+                        .insert(name.clone(), ContractArgumentSource::Json(value.clone()))
+                        .is_some()
+                    {
+                        return Err(format!(
+                            "contract argument --{name} was provided more than once"
+                        ));
+                    }
+                }
                 for argument in &self.scval_xdr_arguments {
                     if supplied
                         .insert(
@@ -687,6 +707,9 @@ impl ContractInvokeRequest {
                     let parsed = match remove_argument(&mut supplied, &name) {
                         Some(ContractArgumentSource::SpecValue(value)) => {
                             parse_argument(&spec, &name, &value, &input.type_, &self.address_names)?
+                        }
+                        Some(ContractArgumentSource::Json(value)) => {
+                            parse_json_argument(&spec, &name, &value, &input.type_)?
                         }
                         Some(ContractArgumentSource::ScValXdrBase64(value)) => {
                             parse_scval_xdr_argument(&name, &value)?
@@ -733,6 +756,7 @@ impl ContractInvokeRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ContractArgumentSource {
     SpecValue(String),
+    Json(Value),
     ScValXdrBase64(String),
 }
 
@@ -806,6 +830,16 @@ fn parse_argument(
             ));
         }
     }
+}
+
+fn parse_json_argument(
+    spec: &Spec,
+    name: &str,
+    value: &Value,
+    type_def: &ScSpecTypeDef,
+) -> Result<ScVal, String> {
+    spec.from_json(value, type_def)
+        .map_err(|error| contract_argument_parse_error(spec, name, type_def, error))
 }
 
 fn parse_scval_xdr_argument(name: &str, value: &str) -> Result<ScVal, String> {
@@ -2002,6 +2036,95 @@ mod tests {
         assert_eq!(review[0].value, json!([1, 2, 3]));
         assert_eq!(review[1].value, json!("deadbeef"));
         assert_eq!(review[2].value, json!("42"));
+    }
+
+    #[test]
+    fn structured_json_arguments_use_official_spec_composer_for_nested_udt_values() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::try_from("route definition").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("destination").unwrap(),
+                        name: StringM::try_from("destination").unwrap(),
+                        type_: ScSpecTypeDef::Address,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("intermediate hops").unwrap(),
+                        name: StringM::try_from("hops").unwrap(),
+                        type_: vec_of(ScSpecTypeDef::Address),
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry(
+                "compose",
+                &[(
+                    "routes",
+                    option_of(map_of(ScSpecTypeDef::Address, vec_of(udt("Route")))),
+                )],
+            ),
+        ];
+        let value = json!({
+            ACCOUNT: [{
+                "destination": OTHER_ACCOUNT,
+                "hops": [ACCOUNT]
+            }]
+        });
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "compose", vec![]);
+        request.add_json_argument("routes", value.clone());
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Map(Some(_))));
+        assert_eq!(review[0].name, "routes");
+        assert_eq!(review[0].value, value);
+    }
+
+    #[test]
+    fn structured_json_arguments_fail_closed_on_nested_abi_mismatch() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("hops").unwrap(),
+                    type_: vec_of(ScSpecTypeDef::Address),
+                }])
+                .unwrap(),
+            }),
+            function_entry("compose", &[("route", udt("Route"))]),
+        ];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "compose", vec![]);
+        request.add_json_argument("route", json!({"hops": [7]}));
+
+        let error = request.resolve(&entries).unwrap_err();
+        assert!(
+            error.contains("invalid value for contract argument --route"),
+            "{error}"
+        );
+        assert!(error.contains("expected Route"), "{error}");
+    }
+
+    #[test]
+    fn structured_json_arguments_share_duplicate_detection_with_existing_sources() {
+        let entries = vec![function_entry("set", &[("value", ScSpecTypeDef::U32)])];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "set",
+            vec![ContractArgumentInput::new("value", "7")],
+        );
+        request.add_json_argument("value", json!(8));
+
+        assert!(request
+            .resolve(&entries)
+            .unwrap_err()
+            .contains("provided more than once"));
     }
 
     #[test]
