@@ -86,6 +86,29 @@ impl ContractParameterType {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractInputComposition {
+    TypedJson,
+    DynamicScValJson,
+    ScValXdrSuccessOnly,
+    Unsupported,
+}
+
+impl ContractInputComposition {
+    pub const fn mode(self) -> &'static str {
+        match self {
+            Self::TypedJson => "typed_json",
+            Self::DynamicScValJson => "dynamic_scval_json",
+            Self::ScValXdrSuccessOnly => "scval_xdr_success_only",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    pub const fn guided(self) -> bool {
+        matches!(self, Self::TypedJson)
+    }
+}
+
 fn contract_type_name(type_def: &ScSpecTypeDef) -> String {
     match type_def {
         ScSpecTypeDef::MuxedAddress => "muxed_address".to_owned(),
@@ -123,6 +146,7 @@ pub struct ContractParameter {
     pub name: String,
     pub doc: String,
     pub value_type: ContractParameterType,
+    pub composition: ContractInputComposition,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -256,6 +280,134 @@ fn contract_user_type(entry: &ScSpecEntry) -> Option<ContractUserType> {
                 .collect(),
         }),
         _ => None,
+    }
+}
+
+fn merge_input_composition(
+    left: ContractInputComposition,
+    right: ContractInputComposition,
+) -> ContractInputComposition {
+    use ContractInputComposition::{DynamicScValJson, ScValXdrSuccessOnly, TypedJson, Unsupported};
+    match (left, right) {
+        (Unsupported, _) | (_, Unsupported) => Unsupported,
+        (ScValXdrSuccessOnly, _) | (_, ScValXdrSuccessOnly) => ScValXdrSuccessOnly,
+        (DynamicScValJson, _) | (_, DynamicScValJson) => DynamicScValJson,
+        (TypedJson, TypedJson) => TypedJson,
+    }
+}
+
+fn contract_struct_is_tuple(struct_: &stellar_xdr::ScSpecUdtStructV0) -> Result<bool, String> {
+    let names = struct_
+        .fields
+        .iter()
+        .map(|field| field.name.to_utf8_string_lossy())
+        .collect::<Vec<_>>();
+    let tuple = names.first().is_some_and(|name| name == "0");
+    if tuple {
+        for (index, name) in names.iter().enumerate() {
+            if name != &index.to_string() {
+                return Err(format!(
+                    "tuple struct {} does not use canonical numeric field order",
+                    struct_.name.to_utf8_string_lossy()
+                ));
+            }
+        }
+        return Ok(true);
+    }
+    if names.iter().any(|name| name == "0") {
+        return Err(format!(
+            "tuple struct {} does not begin with field 0",
+            struct_.name.to_utf8_string_lossy()
+        ));
+    }
+    if names.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(format!(
+            "named struct {} does not use canonical field order required for safe Contract-Spec normalization",
+            struct_.name.to_utf8_string_lossy()
+        ));
+    }
+    Ok(false)
+}
+
+fn contract_input_composition(
+    spec: &Spec,
+    type_def: &ScSpecTypeDef,
+    visited_udts: &mut Vec<String>,
+) -> ContractInputComposition {
+    use ContractInputComposition::{DynamicScValJson, ScValXdrSuccessOnly, TypedJson, Unsupported};
+    match type_def {
+        ScSpecTypeDef::Val => DynamicScValJson,
+        ScSpecTypeDef::Error => Unsupported,
+        ScSpecTypeDef::Result(inner) => {
+            if matches!(
+                contract_input_composition(spec, &inner.ok_type, visited_udts),
+                Unsupported
+            ) {
+                Unsupported
+            } else {
+                ScValXdrSuccessOnly
+            }
+        }
+        ScSpecTypeDef::Option(inner) => {
+            contract_input_composition(spec, &inner.value_type, visited_udts)
+        }
+        ScSpecTypeDef::Vec(inner) => {
+            contract_input_composition(spec, &inner.element_type, visited_udts)
+        }
+        ScSpecTypeDef::Map(inner) => merge_input_composition(
+            contract_input_composition(spec, &inner.key_type, visited_udts),
+            contract_input_composition(spec, &inner.value_type, visited_udts),
+        ),
+        ScSpecTypeDef::Tuple(inner) => {
+            inner.value_types.iter().fold(TypedJson, |support, value| {
+                merge_input_composition(
+                    support,
+                    contract_input_composition(spec, value, visited_udts),
+                )
+            })
+        }
+        ScSpecTypeDef::Udt(inner) => {
+            let type_name = inner.name.to_utf8_string_lossy();
+            if visited_udts.iter().any(|visited| visited == &type_name) {
+                return TypedJson;
+            }
+            visited_udts.push(type_name.clone());
+            let support = match spec.find(&type_name) {
+                Ok(ScSpecEntry::UdtStructV0(struct_)) => {
+                    if contract_struct_is_tuple(struct_).is_err() {
+                        Unsupported
+                    } else {
+                        struct_.fields.iter().fold(TypedJson, |support, field| {
+                            merge_input_composition(
+                                support,
+                                contract_input_composition(spec, &field.type_, visited_udts),
+                            )
+                        })
+                    }
+                }
+                Ok(ScSpecEntry::UdtUnionV0(union)) => {
+                    union.cases.iter().fold(TypedJson, |support, case| {
+                        let case_support = match case {
+                            stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(_) => TypedJson,
+                            stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => {
+                                case.type_.iter().fold(TypedJson, |support, value| {
+                                    merge_input_composition(
+                                        support,
+                                        contract_input_composition(spec, value, visited_udts),
+                                    )
+                                })
+                            }
+                        };
+                        merge_input_composition(support, case_support)
+                    })
+                }
+                Ok(ScSpecEntry::UdtEnumV0(_)) => TypedJson,
+                Ok(ScSpecEntry::UdtErrorEnumV0(_)) | Ok(_) | Err(_) => Unsupported,
+            };
+            visited_udts.pop();
+            support
+        }
+        _ => TypedJson,
     }
 }
 
@@ -447,6 +599,7 @@ fn contract_function(spec: &Spec, function: &ScSpecFunctionV0) -> ContractFuncti
                 name: sanitize(&input.name.to_utf8_string_lossy()),
                 doc: input.doc.to_utf8_string_lossy(),
                 value_type: ContractParameterType::from_spec(spec, &input.type_),
+                composition: contract_input_composition(spec, &input.type_, &mut Vec::new()),
             })
             .collect(),
         outputs: function
@@ -786,22 +939,7 @@ fn ensure_contract_type_normalization_safe(
                 format!("unable to resolve user-defined type {type_name}: {error}")
             })? {
                 ScSpecEntry::UdtStructV0(struct_) => {
-                    let tuple_struct = struct_
-                        .fields
-                        .first()
-                        .is_some_and(|field| field.name.to_utf8_string_lossy() == "0");
-                    if !tuple_struct {
-                        let names = struct_
-                            .fields
-                            .iter()
-                            .map(|field| field.name.to_utf8_string_lossy())
-                            .collect::<Vec<_>>();
-                        if names.windows(2).any(|pair| pair[0] >= pair[1]) {
-                            return Err(format!(
-                                "named struct {type_name} does not use canonical field order required for safe Contract-Spec normalization"
-                            ));
-                        }
-                    }
+                    contract_struct_is_tuple(struct_)?;
                     for field in &struct_.fields {
                         ensure_contract_type_normalization_safe(spec, &field.type_, visited_udts)?;
                     }
@@ -1277,10 +1415,7 @@ fn prepare_json_struct_value(
     struct_: &stellar_xdr::ScSpecUdtStructV0,
 ) -> Result<Value, String> {
     let type_name = struct_.name.to_utf8_string_lossy();
-    let tuple_struct = struct_
-        .fields
-        .iter()
-        .any(|field| field.name.to_utf8_string_lossy() == "0");
+    let tuple_struct = contract_struct_is_tuple(struct_)?;
     if tuple_struct {
         return match value {
             Value::Array(values) => {
@@ -2198,8 +2333,155 @@ mod tests {
         assert_eq!(function.doc, "test function");
         assert_eq!(function.inputs[0].name, "values");
         assert_eq!(function.inputs[0].value_type.name, "vec<u32>");
+        assert_eq!(
+            function.inputs[0].composition,
+            ContractInputComposition::TypedJson
+        );
         assert!(function.inputs[0].value_type.example.is_some());
         assert_eq!(function.inputs[1].value_type.name, "bytes[4]");
+    }
+
+    #[test]
+    fn contract_interface_exposes_machine_readable_input_composition_support() {
+        let entries = vec![
+            ScSpecEntry::UdtErrorEnumV0(ScSpecUdtErrorEnumV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ComposeError").unwrap(),
+                cases: VecM::try_from(vec![ScSpecUdtErrorEnumCaseV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("Rejected").unwrap(),
+                    value: 7,
+                }])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("DynamicBox").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("label").unwrap(),
+                        type_: ScSpecTypeDef::String,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("value").unwrap(),
+                        type_: ScSpecTypeDef::Val,
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ResultBox").unwrap(),
+                fields: VecM::try_from(vec![ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("outcome").unwrap(),
+                    type_: result_of(ScSpecTypeDef::U32, udt("ComposeError")),
+                }])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ErrorBox").unwrap(),
+                fields: VecM::try_from(vec![ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("error").unwrap(),
+                    type_: udt("ComposeError"),
+                }])
+                .unwrap(),
+            }),
+            function_entry(
+                "modes",
+                &[
+                    ("amount", ScSpecTypeDef::U32),
+                    ("dynamic", vec_of(ScSpecTypeDef::Val)),
+                    ("wrapped_dynamic", udt("DynamicBox")),
+                    ("result", result_of(ScSpecTypeDef::U32, udt("ComposeError"))),
+                    ("wrapped_result", udt("ResultBox")),
+                    ("error", ScSpecTypeDef::Error),
+                    ("error_enum", udt("ComposeError")),
+                    ("wrapped_error", udt("ErrorBox")),
+                ],
+            ),
+        ];
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        let inputs = &interface.function("modes").unwrap().inputs;
+        let modes = inputs
+            .iter()
+            .map(|input| (input.composition.mode(), input.composition.guided()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            modes,
+            vec![
+                ("typed_json", true),
+                ("dynamic_scval_json", false),
+                ("dynamic_scval_json", false),
+                ("scval_xdr_success_only", false),
+                ("scval_xdr_success_only", false),
+                ("unsupported", false),
+                ("unsupported", false),
+                ("unsupported", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_tuple_struct_is_unsupported_and_fails_closed_before_official_parser() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("BrokenTuple").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("0").unwrap(),
+                        type_: ScSpecTypeDef::U32,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("2").unwrap(),
+                        type_: ScSpecTypeDef::String,
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry("accept", &[("value", udt("BrokenTuple"))]),
+        ];
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        assert_eq!(
+            interface.function("accept").unwrap().inputs[0].composition,
+            ContractInputComposition::Unsupported
+        );
+
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "accept", vec![]);
+        request.add_json_argument("value", json!({"0": 7, "2": "x"}));
+        let result = std::panic::catch_unwind(|| request.resolve(&entries));
+        assert!(result.is_ok(), "malformed tuple spec must not panic");
+        let error = result.unwrap().unwrap_err();
+        assert!(error.contains("canonical numeric field order"), "{error}");
     }
 
     #[test]
@@ -3110,6 +3392,54 @@ mod tests {
         let error = result.unwrap().unwrap_err();
         assert!(error.contains("result"), "{error}");
         assert!(error.contains("no stable composed input form"), "{error}");
+    }
+
+    #[test]
+    fn scval_xdr_result_success_matches_advertised_composition_mode() {
+        let entries = vec![function_entry(
+            "accept_result",
+            &[("value", result_of(ScSpecTypeDef::U32, ScSpecTypeDef::Error))],
+        )];
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        assert_eq!(
+            interface.function("accept_result").unwrap().inputs[0].composition,
+            ContractInputComposition::ScValXdrSuccessOnly
+        );
+
+        let mut success = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_result",
+            vec![],
+        );
+        success.add_scval_xdr_argument(
+            "value",
+            ScVal::U32(7).to_xdr_base64(Limits::none()).unwrap(),
+        );
+        let (low_level, review) = success.resolve(&entries).unwrap();
+        assert_eq!(low_level.args, vec![ScVal::U32(7)]);
+        assert_eq!(review[0].value, json!(7));
+
+        let mut error = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_result",
+            vec![],
+        );
+        error.add_scval_xdr_argument(
+            "value",
+            ScVal::Error(stellar_xdr::ScError::Contract(7))
+                .to_xdr_base64(Limits::none())
+                .unwrap(),
+        );
+        let error = error.resolve(&entries).unwrap_err();
+        assert!(error.contains("Result error values"), "{error}");
     }
 
     #[test]

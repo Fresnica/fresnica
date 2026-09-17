@@ -47,11 +47,11 @@ pub use contract::{
     ContractAbiEnumCase, ContractAbiField, ContractAbiType, ContractAbiUnionCase,
     ContractAbiUnionCasePayload, ContractAddressNames, ContractArgumentInput,
     ContractArgumentReview, ContractCapabilities, ContractExecutableKind,
-    ContractExecutableObservation, ContractFunction, ContractInterface, ContractInvokePreparation,
-    ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry, ContractParameter,
-    ContractParameterType, ContractReadResult, ContractSep41Evidence, ContractSimulationEffects,
-    ContractSimulationResult, ContractUserType, PreparedContractInvoke, CONTRACT_ABI_SCHEMA,
-    DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS, SEP41_INTERFACE_VERSION,
+    ContractExecutableObservation, ContractFunction, ContractInputComposition, ContractInterface,
+    ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry,
+    ContractParameter, ContractParameterType, ContractReadResult, ContractSep41Evidence,
+    ContractSimulationEffects, ContractSimulationResult, ContractUserType, PreparedContractInvoke,
+    CONTRACT_ABI_SCHEMA, DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS, SEP41_INTERFACE_VERSION,
 };
 pub use dex::{
     AccountFillsSnapshot, CandleSnapshot, DexTradeSide, FillSegment, OfferAction, OfferOperation,
