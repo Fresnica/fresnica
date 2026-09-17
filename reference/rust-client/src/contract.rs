@@ -23,12 +23,57 @@ use crate::transaction::TransactionSubmission;
 
 pub const DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS: u32 = 100;
 pub const SEP41_INTERFACE_VERSION: &str = "0.5.1";
+pub const CONTRACT_ABI_SCHEMA: &str = "fresnica-soroban-abi-v1";
 const CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT: u32 = 500;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractAbiType {
+    Primitive(String),
+    Option(Box<ContractAbiType>),
+    Result {
+        ok: Box<ContractAbiType>,
+        error: Box<ContractAbiType>,
+    },
+    Vec(Box<ContractAbiType>),
+    Map {
+        key: Box<ContractAbiType>,
+        value: Box<ContractAbiType>,
+    },
+    Tuple(Vec<ContractAbiType>),
+    BytesN(u32),
+    Udt(String),
+}
+
+impl ContractAbiType {
+    fn from_spec(type_def: &ScSpecTypeDef) -> Self {
+        match type_def {
+            ScSpecTypeDef::Option(inner) => {
+                Self::Option(Box::new(Self::from_spec(&inner.value_type)))
+            }
+            ScSpecTypeDef::Result(inner) => Self::Result {
+                ok: Box::new(Self::from_spec(&inner.ok_type)),
+                error: Box::new(Self::from_spec(&inner.error_type)),
+            },
+            ScSpecTypeDef::Vec(inner) => Self::Vec(Box::new(Self::from_spec(&inner.element_type))),
+            ScSpecTypeDef::Map(inner) => Self::Map {
+                key: Box::new(Self::from_spec(&inner.key_type)),
+                value: Box::new(Self::from_spec(&inner.value_type)),
+            },
+            ScSpecTypeDef::Tuple(inner) => {
+                Self::Tuple(inner.value_types.iter().map(Self::from_spec).collect())
+            }
+            ScSpecTypeDef::BytesN(inner) => Self::BytesN(inner.n),
+            ScSpecTypeDef::Udt(inner) => Self::Udt(inner.name.to_utf8_string_lossy()),
+            other => Self::Primitive(contract_type_name(other)),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractParameterType {
     pub name: String,
     pub example: Option<String>,
+    pub abi: ContractAbiType,
 }
 
 impl ContractParameterType {
@@ -36,6 +81,7 @@ impl ContractParameterType {
         Self {
             name: contract_type_name(type_def),
             example: spec.example(0, type_def),
+            abi: ContractAbiType::from_spec(type_def),
         }
     }
 }
@@ -85,6 +131,132 @@ pub struct ContractFunction {
     pub doc: String,
     pub inputs: Vec<ContractParameter>,
     pub outputs: Vec<ContractParameterType>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractAbiField {
+    pub name: String,
+    pub doc: String,
+    pub value_type: ContractAbiType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractAbiUnionCasePayload {
+    Void,
+    Tuple(Vec<ContractAbiType>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractAbiUnionCase {
+    pub name: String,
+    pub doc: String,
+    pub payload: ContractAbiUnionCasePayload,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractAbiEnumCase {
+    pub name: String,
+    pub doc: String,
+    pub value: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractUserType {
+    Struct {
+        name: String,
+        doc: String,
+        lib: String,
+        fields: Vec<ContractAbiField>,
+    },
+    Union {
+        name: String,
+        doc: String,
+        lib: String,
+        cases: Vec<ContractAbiUnionCase>,
+    },
+    Enum {
+        name: String,
+        doc: String,
+        lib: String,
+        cases: Vec<ContractAbiEnumCase>,
+    },
+    ErrorEnum {
+        name: String,
+        doc: String,
+        lib: String,
+        cases: Vec<ContractAbiEnumCase>,
+    },
+}
+
+fn contract_user_type(entry: &ScSpecEntry) -> Option<ContractUserType> {
+    match entry {
+        ScSpecEntry::UdtStructV0(value) => Some(ContractUserType::Struct {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            fields: value
+                .fields
+                .iter()
+                .map(|field| ContractAbiField {
+                    name: field.name.to_utf8_string_lossy(),
+                    doc: field.doc.to_utf8_string_lossy(),
+                    value_type: ContractAbiType::from_spec(&field.type_),
+                })
+                .collect(),
+        }),
+        ScSpecEntry::UdtUnionV0(value) => Some(ContractUserType::Union {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            cases: value
+                .cases
+                .iter()
+                .map(|case| match case {
+                    stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(case) => ContractAbiUnionCase {
+                        name: case.name.to_utf8_string_lossy(),
+                        doc: case.doc.to_utf8_string_lossy(),
+                        payload: ContractAbiUnionCasePayload::Void,
+                    },
+                    stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => ContractAbiUnionCase {
+                        name: case.name.to_utf8_string_lossy(),
+                        doc: case.doc.to_utf8_string_lossy(),
+                        payload: ContractAbiUnionCasePayload::Tuple(
+                            case.type_.iter().map(ContractAbiType::from_spec).collect(),
+                        ),
+                    },
+                })
+                .collect(),
+        }),
+        ScSpecEntry::UdtEnumV0(value) => Some(ContractUserType::Enum {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            cases: value
+                .cases
+                .iter()
+                .map(|case| ContractAbiEnumCase {
+                    name: case.name.to_utf8_string_lossy(),
+                    doc: case.doc.to_utf8_string_lossy(),
+                    value: case.value,
+                })
+                .collect(),
+        }),
+        ScSpecEntry::UdtErrorEnumV0(value) => Some(ContractUserType::ErrorEnum {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            cases: value
+                .cases
+                .iter()
+                .map(|case| ContractAbiEnumCase {
+                    name: case.name.to_utf8_string_lossy(),
+                    doc: case.doc.to_utf8_string_lossy(),
+                    value: case.value,
+                })
+                .collect(),
+        }),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,6 +401,7 @@ pub struct ContractInterface {
     pub metadata: Vec<ContractMetadataEntry>,
     pub capabilities: ContractCapabilities,
     pub functions: Vec<ContractFunction>,
+    pub user_types: Vec<ContractUserType>,
 }
 
 impl ContractInterface {
@@ -246,6 +419,7 @@ impl ContractInterface {
                 _ => None,
             })
             .collect();
+        let user_types = entries.iter().filter_map(contract_user_type).collect();
         let capabilities = ContractCapabilities::from_spec(&executable, &metadata, entries);
         Self {
             contract_id: contract_id.to_owned(),
@@ -253,6 +427,7 @@ impl ContractInterface {
             metadata,
             capabilities,
             functions,
+            user_types,
         }
     }
 
@@ -1062,10 +1237,13 @@ mod tests {
     use stellar_xdr::{
         ContractDataDurability, ContractId, Hash, InvokeContractArgs, LedgerFootprint, LedgerKey,
         LedgerKeyContractData, ScAddress, ScSpecFunctionInputV0, ScSpecFunctionV0,
-        ScSpecTypeBytesN, ScSpecTypeOption, ScSpecTypeTuple, ScSpecTypeVec, ScSymbol,
-        SorobanAuthorizationEntry, SorobanAuthorizedFunction, SorobanAuthorizedInvocation,
-        SorobanCredentials, SorobanResources, SorobanResourcesExtV0, SorobanTransactionData,
-        SorobanTransactionDataExt, StringM, VecM, WriteXdr,
+        ScSpecTypeBytesN, ScSpecTypeMap, ScSpecTypeOption, ScSpecTypeResult, ScSpecTypeTuple,
+        ScSpecTypeUdt, ScSpecTypeVec, ScSpecUdtEnumCaseV0, ScSpecUdtEnumV0,
+        ScSpecUdtErrorEnumCaseV0, ScSpecUdtErrorEnumV0, ScSpecUdtStructFieldV0, ScSpecUdtStructV0,
+        ScSpecUdtUnionCaseTupleV0, ScSpecUdtUnionCaseV0, ScSpecUdtUnionCaseVoidV0,
+        ScSpecUdtUnionV0, ScSymbol, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
+        SorobanAuthorizedInvocation, SorobanCredentials, SorobanResources, SorobanResourcesExtV0,
+        SorobanTransactionData, SorobanTransactionDataExt, StringM, VecM, WriteXdr,
     };
 
     use super::*;
@@ -1221,6 +1399,26 @@ mod tests {
         }))
     }
 
+    fn map_of(key: ScSpecTypeDef, value: ScSpecTypeDef) -> ScSpecTypeDef {
+        ScSpecTypeDef::Map(Box::new(ScSpecTypeMap {
+            key_type: Box::new(key),
+            value_type: Box::new(value),
+        }))
+    }
+
+    fn result_of(ok: ScSpecTypeDef, error: ScSpecTypeDef) -> ScSpecTypeDef {
+        ScSpecTypeDef::Result(Box::new(ScSpecTypeResult {
+            ok_type: Box::new(ok),
+            error_type: Box::new(error),
+        }))
+    }
+
+    fn udt(name: &str) -> ScSpecTypeDef {
+        ScSpecTypeDef::Udt(ScSpecTypeUdt {
+            name: StringM::try_from(name).unwrap(),
+        })
+    }
+
     fn tuple_of(types: Vec<ScSpecTypeDef>) -> ScSpecTypeDef {
         ScSpecTypeDef::Tuple(Box::new(ScSpecTypeTuple {
             value_types: VecM::try_from(types).unwrap(),
@@ -1272,6 +1470,147 @@ mod tests {
         assert_eq!(function.inputs[0].value_type.name, "vec<u32>");
         assert!(function.inputs[0].value_type.example.is_some());
         assert_eq!(function.inputs[1].value_type.name, "bytes[4]");
+    }
+
+    #[test]
+    fn contract_interface_preserves_recursive_types_and_all_udt_definitions() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::try_from("route definition").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("destination").unwrap(),
+                        name: StringM::try_from("destination").unwrap(),
+                        type_: ScSpecTypeDef::Address,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("intermediate hops").unwrap(),
+                        name: StringM::try_from("hops").unwrap(),
+                        type_: vec_of(ScSpecTypeDef::Address),
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtUnionV0(ScSpecUdtUnionV0 {
+                doc: StringM::try_from("action choice").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Action").unwrap(),
+                cases: VecM::try_from(vec![
+                    ScSpecUdtUnionCaseV0::VoidV0(ScSpecUdtUnionCaseVoidV0 {
+                        doc: StringM::try_from("do nothing").unwrap(),
+                        name: StringM::try_from("None").unwrap(),
+                    }),
+                    ScSpecUdtUnionCaseV0::TupleV0(ScSpecUdtUnionCaseTupleV0 {
+                        doc: StringM::try_from("route transfer").unwrap(),
+                        name: StringM::try_from("Transfer").unwrap(),
+                        type_: VecM::try_from(vec![ScSpecTypeDef::Address, udt("Route")]).unwrap(),
+                    }),
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtEnumV0(ScSpecUdtEnumV0 {
+                doc: StringM::try_from("execution mode").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Mode").unwrap(),
+                cases: VecM::try_from(vec![
+                    ScSpecUdtEnumCaseV0 {
+                        doc: StringM::try_from("exact").unwrap(),
+                        name: StringM::try_from("Exact").unwrap(),
+                        value: 1,
+                    },
+                    ScSpecUdtEnumCaseV0 {
+                        doc: StringM::try_from("flexible").unwrap(),
+                        name: StringM::try_from("Flexible").unwrap(),
+                        value: 2,
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtErrorEnumV0(ScSpecUdtErrorEnumV0 {
+                doc: StringM::try_from("routing errors").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("RouteError").unwrap(),
+                cases: VecM::try_from(vec![ScSpecUdtErrorEnumCaseV0 {
+                    doc: StringM::try_from("bad route").unwrap(),
+                    name: StringM::try_from("BadRoute").unwrap(),
+                    value: 7,
+                }])
+                .unwrap(),
+            }),
+            function_entry_with_outputs(
+                "compose",
+                &[(
+                    "routes",
+                    option_of(map_of(ScSpecTypeDef::Address, vec_of(udt("Route")))),
+                )],
+                &[result_of(udt("Mode"), udt("RouteError"))],
+            ),
+        ];
+
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        let function = interface.function("compose").unwrap();
+        assert_eq!(
+            function.inputs[0].value_type.abi,
+            ContractAbiType::Option(Box::new(ContractAbiType::Map {
+                key: Box::new(ContractAbiType::Primitive("address".to_owned())),
+                value: Box::new(ContractAbiType::Vec(Box::new(ContractAbiType::Udt(
+                    "Route".to_owned()
+                )))),
+            }))
+        );
+        assert_eq!(
+            function.outputs[0].abi,
+            ContractAbiType::Result {
+                ok: Box::new(ContractAbiType::Udt("Mode".to_owned())),
+                error: Box::new(ContractAbiType::Udt("RouteError".to_owned())),
+            }
+        );
+        assert_eq!(interface.user_types.len(), 4);
+        assert!(matches!(
+            &interface.user_types[0],
+            ContractUserType::Struct { name, lib, fields, .. }
+                if name == "Route"
+                    && lib == "routing"
+                    && fields.len() == 2
+                    && fields[1].value_type
+                        == ContractAbiType::Vec(Box::new(ContractAbiType::Primitive(
+                            "address".to_owned()
+                        )))
+        ));
+        assert!(matches!(
+            &interface.user_types[1],
+            ContractUserType::Union { name, cases, .. }
+                if name == "Action"
+                    && matches!(cases[0].payload, ContractAbiUnionCasePayload::Void)
+                    && matches!(
+                        &cases[1].payload,
+                        ContractAbiUnionCasePayload::Tuple(values)
+                            if values == &vec![
+                                ContractAbiType::Primitive("address".to_owned()),
+                                ContractAbiType::Udt("Route".to_owned()),
+                            ]
+                    )
+        ));
+        assert!(matches!(
+            &interface.user_types[2],
+            ContractUserType::Enum { name, cases, .. }
+                if name == "Mode" && cases[1].name == "Flexible" && cases[1].value == 2
+        ));
+        assert!(matches!(
+            &interface.user_types[3],
+            ContractUserType::ErrorEnum { name, cases, .. }
+                if name == "RouteError" && cases[0].name == "BadRoute" && cases[0].value == 7
+        ));
     }
 
     #[test]

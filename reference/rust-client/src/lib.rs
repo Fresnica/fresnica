@@ -44,11 +44,13 @@ pub use asset_catalog::{AssetCatalogEntry, AssetCatalogSnapshot, MAX_ASSET_CATAL
 pub use balance_state::{AssetBalance, BalanceAsset};
 pub use contacts::{resolve_destination, Contact, ContactStore, ResolvedDestination};
 pub use contract::{
-    ContractAddressNames, ContractArgumentInput, ContractArgumentReview, ContractCapabilities,
-    ContractExecutableKind, ContractExecutableObservation, ContractFunction, ContractInterface,
-    ContractInvokePreparation, ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry,
-    ContractParameter, ContractParameterType, ContractReadResult, ContractSep41Evidence,
-    ContractSimulationEffects, ContractSimulationResult, PreparedContractInvoke,
+    ContractAbiEnumCase, ContractAbiField, ContractAbiType, ContractAbiUnionCase,
+    ContractAbiUnionCasePayload, ContractAddressNames, ContractArgumentInput,
+    ContractArgumentReview, ContractCapabilities, ContractExecutableKind,
+    ContractExecutableObservation, ContractFunction, ContractInterface, ContractInvokePreparation,
+    ContractInvokeRequest, ContractInvokeReview, ContractMetadataEntry, ContractParameter,
+    ContractParameterType, ContractReadResult, ContractSep41Evidence, ContractSimulationEffects,
+    ContractSimulationResult, ContractUserType, PreparedContractInvoke, CONTRACT_ABI_SCHEMA,
     DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS, SEP41_INTERFACE_VERSION,
 };
 pub use dex::{
