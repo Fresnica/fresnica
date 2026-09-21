@@ -5,7 +5,7 @@ use soroban_spec_tools::{sanitize, Spec};
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_xdr::{
     ContractEvent, ContractEventType, DiagnosticEvent, Limits, ReadXdr, ScMetaEntry, ScMetaV0,
-    ScSpecEntry, ScSpecFunctionV0, ScSpecTypeDef, ScVal, SorobanTransactionDataExt,
+    ScSpecEntry, ScSpecFunctionV0, ScSpecTypeDef, ScVal, SorobanTransactionDataExt, WriteXdr,
 };
 
 use crate::horizon_gateway::HorizonGateway;
@@ -23,12 +23,57 @@ use crate::transaction::TransactionSubmission;
 
 pub const DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS: u32 = 100;
 pub const SEP41_INTERFACE_VERSION: &str = "0.5.1";
+pub const CONTRACT_ABI_SCHEMA: &str = "fresnica-soroban-abi-v1";
 const CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT: u32 = 500;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractAbiType {
+    Primitive(String),
+    Option(Box<ContractAbiType>),
+    Result {
+        ok: Box<ContractAbiType>,
+        error: Box<ContractAbiType>,
+    },
+    Vec(Box<ContractAbiType>),
+    Map {
+        key: Box<ContractAbiType>,
+        value: Box<ContractAbiType>,
+    },
+    Tuple(Vec<ContractAbiType>),
+    BytesN(u32),
+    Udt(String),
+}
+
+impl ContractAbiType {
+    fn from_spec(type_def: &ScSpecTypeDef) -> Self {
+        match type_def {
+            ScSpecTypeDef::Option(inner) => {
+                Self::Option(Box::new(Self::from_spec(&inner.value_type)))
+            }
+            ScSpecTypeDef::Result(inner) => Self::Result {
+                ok: Box::new(Self::from_spec(&inner.ok_type)),
+                error: Box::new(Self::from_spec(&inner.error_type)),
+            },
+            ScSpecTypeDef::Vec(inner) => Self::Vec(Box::new(Self::from_spec(&inner.element_type))),
+            ScSpecTypeDef::Map(inner) => Self::Map {
+                key: Box::new(Self::from_spec(&inner.key_type)),
+                value: Box::new(Self::from_spec(&inner.value_type)),
+            },
+            ScSpecTypeDef::Tuple(inner) => {
+                Self::Tuple(inner.value_types.iter().map(Self::from_spec).collect())
+            }
+            ScSpecTypeDef::BytesN(inner) => Self::BytesN(inner.n),
+            ScSpecTypeDef::Udt(inner) => Self::Udt(inner.name.to_utf8_string_lossy()),
+            other => Self::Primitive(contract_type_name(other)),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractParameterType {
     pub name: String,
     pub example: Option<String>,
+    pub abi: ContractAbiType,
 }
 
 impl ContractParameterType {
@@ -36,7 +81,31 @@ impl ContractParameterType {
         Self {
             name: contract_type_name(type_def),
             example: spec.example(0, type_def),
+            abi: ContractAbiType::from_spec(type_def),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractInputComposition {
+    TypedJson,
+    DynamicScValJson,
+    ScValXdrSuccessOnly,
+    Unsupported,
+}
+
+impl ContractInputComposition {
+    pub const fn mode(self) -> &'static str {
+        match self {
+            Self::TypedJson => "typed_json",
+            Self::DynamicScValJson => "dynamic_scval_json",
+            Self::ScValXdrSuccessOnly => "scval_xdr_success_only",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    pub const fn guided(self) -> bool {
+        matches!(self, Self::TypedJson)
     }
 }
 
@@ -77,6 +146,7 @@ pub struct ContractParameter {
     pub name: String,
     pub doc: String,
     pub value_type: ContractParameterType,
+    pub composition: ContractInputComposition,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +155,260 @@ pub struct ContractFunction {
     pub doc: String,
     pub inputs: Vec<ContractParameter>,
     pub outputs: Vec<ContractParameterType>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractAbiField {
+    pub name: String,
+    pub doc: String,
+    pub value_type: ContractAbiType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractAbiUnionCasePayload {
+    Void,
+    Tuple(Vec<ContractAbiType>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractAbiUnionCase {
+    pub name: String,
+    pub doc: String,
+    pub payload: ContractAbiUnionCasePayload,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractAbiEnumCase {
+    pub name: String,
+    pub doc: String,
+    pub value: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractUserType {
+    Struct {
+        name: String,
+        doc: String,
+        lib: String,
+        fields: Vec<ContractAbiField>,
+    },
+    Union {
+        name: String,
+        doc: String,
+        lib: String,
+        cases: Vec<ContractAbiUnionCase>,
+    },
+    Enum {
+        name: String,
+        doc: String,
+        lib: String,
+        cases: Vec<ContractAbiEnumCase>,
+    },
+    ErrorEnum {
+        name: String,
+        doc: String,
+        lib: String,
+        cases: Vec<ContractAbiEnumCase>,
+    },
+}
+
+fn contract_user_type(entry: &ScSpecEntry) -> Option<ContractUserType> {
+    match entry {
+        ScSpecEntry::UdtStructV0(value) => Some(ContractUserType::Struct {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            fields: value
+                .fields
+                .iter()
+                .map(|field| ContractAbiField {
+                    name: field.name.to_utf8_string_lossy(),
+                    doc: field.doc.to_utf8_string_lossy(),
+                    value_type: ContractAbiType::from_spec(&field.type_),
+                })
+                .collect(),
+        }),
+        ScSpecEntry::UdtUnionV0(value) => Some(ContractUserType::Union {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            cases: value
+                .cases
+                .iter()
+                .map(|case| match case {
+                    stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(case) => ContractAbiUnionCase {
+                        name: case.name.to_utf8_string_lossy(),
+                        doc: case.doc.to_utf8_string_lossy(),
+                        payload: ContractAbiUnionCasePayload::Void,
+                    },
+                    stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => ContractAbiUnionCase {
+                        name: case.name.to_utf8_string_lossy(),
+                        doc: case.doc.to_utf8_string_lossy(),
+                        payload: ContractAbiUnionCasePayload::Tuple(
+                            case.type_.iter().map(ContractAbiType::from_spec).collect(),
+                        ),
+                    },
+                })
+                .collect(),
+        }),
+        ScSpecEntry::UdtEnumV0(value) => Some(ContractUserType::Enum {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            cases: value
+                .cases
+                .iter()
+                .map(|case| ContractAbiEnumCase {
+                    name: case.name.to_utf8_string_lossy(),
+                    doc: case.doc.to_utf8_string_lossy(),
+                    value: case.value,
+                })
+                .collect(),
+        }),
+        ScSpecEntry::UdtErrorEnumV0(value) => Some(ContractUserType::ErrorEnum {
+            name: value.name.to_utf8_string_lossy(),
+            doc: value.doc.to_utf8_string_lossy(),
+            lib: value.lib.to_utf8_string_lossy(),
+            cases: value
+                .cases
+                .iter()
+                .map(|case| ContractAbiEnumCase {
+                    name: case.name.to_utf8_string_lossy(),
+                    doc: case.doc.to_utf8_string_lossy(),
+                    value: case.value,
+                })
+                .collect(),
+        }),
+        _ => None,
+    }
+}
+
+fn merge_input_composition(
+    left: ContractInputComposition,
+    right: ContractInputComposition,
+) -> ContractInputComposition {
+    use ContractInputComposition::{DynamicScValJson, ScValXdrSuccessOnly, TypedJson, Unsupported};
+    match (left, right) {
+        (Unsupported, _) | (_, Unsupported) => Unsupported,
+        (ScValXdrSuccessOnly, _) | (_, ScValXdrSuccessOnly) => ScValXdrSuccessOnly,
+        (DynamicScValJson, _) | (_, DynamicScValJson) => DynamicScValJson,
+        (TypedJson, TypedJson) => TypedJson,
+    }
+}
+
+fn contract_struct_is_tuple(struct_: &stellar_xdr::ScSpecUdtStructV0) -> Result<bool, String> {
+    let names = struct_
+        .fields
+        .iter()
+        .map(|field| field.name.to_utf8_string_lossy())
+        .collect::<Vec<_>>();
+    let tuple = names.first().is_some_and(|name| name == "0");
+    if tuple {
+        for (index, name) in names.iter().enumerate() {
+            if name != &index.to_string() {
+                return Err(format!(
+                    "tuple struct {} does not use canonical numeric field order",
+                    struct_.name.to_utf8_string_lossy()
+                ));
+            }
+        }
+        return Ok(true);
+    }
+    if names.iter().any(|name| name == "0") {
+        return Err(format!(
+            "tuple struct {} does not begin with field 0",
+            struct_.name.to_utf8_string_lossy()
+        ));
+    }
+    if names.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(format!(
+            "named struct {} does not use canonical field order required for safe Contract-Spec normalization",
+            struct_.name.to_utf8_string_lossy()
+        ));
+    }
+    Ok(false)
+}
+
+fn contract_input_composition(
+    spec: &Spec,
+    type_def: &ScSpecTypeDef,
+    visited_udts: &mut Vec<String>,
+) -> ContractInputComposition {
+    use ContractInputComposition::{DynamicScValJson, ScValXdrSuccessOnly, TypedJson, Unsupported};
+    match type_def {
+        ScSpecTypeDef::Val => DynamicScValJson,
+        ScSpecTypeDef::Error => Unsupported,
+        ScSpecTypeDef::Result(inner) => {
+            if matches!(
+                contract_input_composition(spec, &inner.ok_type, visited_udts),
+                Unsupported
+            ) {
+                Unsupported
+            } else {
+                ScValXdrSuccessOnly
+            }
+        }
+        ScSpecTypeDef::Option(inner) => {
+            contract_input_composition(spec, &inner.value_type, visited_udts)
+        }
+        ScSpecTypeDef::Vec(inner) => {
+            contract_input_composition(spec, &inner.element_type, visited_udts)
+        }
+        ScSpecTypeDef::Map(inner) => merge_input_composition(
+            contract_input_composition(spec, &inner.key_type, visited_udts),
+            contract_input_composition(spec, &inner.value_type, visited_udts),
+        ),
+        ScSpecTypeDef::Tuple(inner) => {
+            inner.value_types.iter().fold(TypedJson, |support, value| {
+                merge_input_composition(
+                    support,
+                    contract_input_composition(spec, value, visited_udts),
+                )
+            })
+        }
+        ScSpecTypeDef::Udt(inner) => {
+            let type_name = inner.name.to_utf8_string_lossy();
+            if visited_udts.iter().any(|visited| visited == &type_name) {
+                return TypedJson;
+            }
+            visited_udts.push(type_name.clone());
+            let support = match spec.find(&type_name) {
+                Ok(ScSpecEntry::UdtStructV0(struct_)) => {
+                    if contract_struct_is_tuple(struct_).is_err() {
+                        Unsupported
+                    } else {
+                        struct_.fields.iter().fold(TypedJson, |support, field| {
+                            merge_input_composition(
+                                support,
+                                contract_input_composition(spec, &field.type_, visited_udts),
+                            )
+                        })
+                    }
+                }
+                Ok(ScSpecEntry::UdtUnionV0(union)) => {
+                    union.cases.iter().fold(TypedJson, |support, case| {
+                        let case_support = match case {
+                            stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(_) => TypedJson,
+                            stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => {
+                                case.type_.iter().fold(TypedJson, |support, value| {
+                                    merge_input_composition(
+                                        support,
+                                        contract_input_composition(spec, value, visited_udts),
+                                    )
+                                })
+                            }
+                        };
+                        merge_input_composition(support, case_support)
+                    })
+                }
+                Ok(ScSpecEntry::UdtEnumV0(_)) => TypedJson,
+                Ok(ScSpecEntry::UdtErrorEnumV0(_)) | Ok(_) | Err(_) => Unsupported,
+            };
+            visited_udts.pop();
+            support
+        }
+        _ => TypedJson,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,6 +553,7 @@ pub struct ContractInterface {
     pub metadata: Vec<ContractMetadataEntry>,
     pub capabilities: ContractCapabilities,
     pub functions: Vec<ContractFunction>,
+    pub user_types: Vec<ContractUserType>,
 }
 
 impl ContractInterface {
@@ -246,6 +571,7 @@ impl ContractInterface {
                 _ => None,
             })
             .collect();
+        let user_types = entries.iter().filter_map(contract_user_type).collect();
         let capabilities = ContractCapabilities::from_spec(&executable, &metadata, entries);
         Self {
             contract_id: contract_id.to_owned(),
@@ -253,6 +579,7 @@ impl ContractInterface {
             metadata,
             capabilities,
             functions,
+            user_types,
         }
     }
 
@@ -272,6 +599,7 @@ fn contract_function(spec: &Spec, function: &ScSpecFunctionV0) -> ContractFuncti
                 name: sanitize(&input.name.to_utf8_string_lossy()),
                 doc: input.doc.to_utf8_string_lossy(),
                 value_type: ContractParameterType::from_spec(spec, &input.type_),
+                composition: contract_input_composition(spec, &input.type_, &mut Vec::new()),
             })
             .collect(),
         outputs: function
@@ -302,6 +630,7 @@ pub struct ContractArgumentReview {
     pub name: String,
     pub value_type: String,
     pub value: Value,
+    pub scval_xdr: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -346,6 +675,7 @@ pub struct ContractInvokeRequest {
     pub function_name: String,
     pub arguments: Vec<ContractArgumentInput>,
     positional_arguments: Option<Vec<String>>,
+    json_arguments: Vec<(String, Value)>,
     scval_xdr_arguments: Vec<ContractArgumentInput>,
     pub inclusion_fee_stroops: Option<u32>,
     pub authorization_lifetime_ledgers: u32,
@@ -364,6 +694,7 @@ impl ContractInvokeRequest {
             function_name: function_name.into(),
             arguments,
             positional_arguments: None,
+            json_arguments: Vec::new(),
             scval_xdr_arguments: Vec::new(),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
@@ -382,6 +713,7 @@ impl ContractInvokeRequest {
             function_name: function_name.into(),
             arguments: Vec::new(),
             positional_arguments: Some(arguments),
+            json_arguments: Vec::new(),
             scval_xdr_arguments: Vec::new(),
             inclusion_fee_stroops: None,
             authorization_lifetime_ledgers: DEFAULT_CONTRACT_AUTHORIZATION_LIFETIME_LEDGERS,
@@ -407,6 +739,10 @@ impl ContractInvokeRequest {
         self.address_names.add(name, address)
     }
 
+    pub fn add_json_argument(&mut self, name: impl Into<String>, value: Value) {
+        self.json_arguments.push((name.into(), value));
+    }
+
     pub fn add_scval_xdr_argument(
         &mut self,
         name: impl Into<String>,
@@ -426,9 +762,12 @@ impl ContractInvokeRequest {
     ) -> Result<(SorobanInvokeRequest, Vec<ContractArgumentReview>), String> {
         let spec = Spec::new(spec_entries);
         let function = find_function(&spec, &self.function_name)?;
-        if self.positional_arguments.is_some() && !self.scval_xdr_arguments.is_empty() {
+        if self.positional_arguments.is_some()
+            && (!self.json_arguments.is_empty() || !self.scval_xdr_arguments.is_empty())
+        {
             return Err(
-                "pre-encoded ScVal XDR arguments require named contract invocation".to_owned(),
+                "JSON and pre-encoded ScVal XDR arguments require named contract invocation"
+                    .to_owned(),
             );
         }
         let function_name = function.name.to_utf8_string_lossy();
@@ -459,17 +798,10 @@ impl ContractInvokeRequest {
                             ));
                         }
                     };
-                    let normalized = spec.xdr_to_json(&parsed, &input.type_).map_err(|error| {
-                        format!(
-                            "unable to normalize contract argument {name} ({value_type}): {error}"
-                        )
-                    })?;
+                    let review =
+                        contract_argument_review(&spec, name, value_type, &input.type_, &parsed)?;
                     scvals.push(parsed);
-                    review_arguments.push(ContractArgumentReview {
-                        name,
-                        value_type,
-                        value: normalized,
-                    });
+                    review_arguments.push(review);
                 }
                 (scvals, review_arguments)
             }
@@ -486,6 +818,16 @@ impl ContractInvokeRequest {
                         return Err(format!(
                             "contract argument --{} was provided more than once",
                             argument.name
+                        ));
+                    }
+                }
+                for (name, value) in &self.json_arguments {
+                    if supplied
+                        .insert(name.clone(), ContractArgumentSource::Json(value.clone()))
+                        .is_some()
+                    {
+                        return Err(format!(
+                            "contract argument --{name} was provided more than once"
                         ));
                     }
                 }
@@ -513,6 +855,9 @@ impl ContractInvokeRequest {
                         Some(ContractArgumentSource::SpecValue(value)) => {
                             parse_argument(&spec, &name, &value, &input.type_, &self.address_names)?
                         }
+                        Some(ContractArgumentSource::Json(value)) => {
+                            parse_json_argument(&spec, &name, &value, &input.type_)?
+                        }
                         Some(ContractArgumentSource::ScValXdrBase64(value)) => {
                             parse_scval_xdr_argument(&name, &value)?
                         }
@@ -523,17 +868,10 @@ impl ContractInvokeRequest {
                             ));
                         }
                     };
-                    let normalized = spec.xdr_to_json(&parsed, &input.type_).map_err(|error| {
-                        format!(
-                            "unable to normalize contract argument --{name} ({value_type}): {error}"
-                        )
-                    })?;
+                    let review =
+                        contract_argument_review(&spec, name, value_type, &input.type_, &parsed)?;
                     scvals.push(parsed);
-                    review_arguments.push(ContractArgumentReview {
-                        name,
-                        value_type,
-                        value: normalized,
-                    });
+                    review_arguments.push(review);
                 }
 
                 if let Some((name, _)) = supplied.first_key_value() {
@@ -558,7 +896,324 @@ impl ContractInvokeRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ContractArgumentSource {
     SpecValue(String),
+    Json(Value),
     ScValXdrBase64(String),
+}
+
+fn ensure_contract_type_normalization_safe(
+    spec: &Spec,
+    type_def: &ScSpecTypeDef,
+    visited_udts: &mut Vec<String>,
+) -> Result<(), String> {
+    match type_def {
+        ScSpecTypeDef::Option(inner) => {
+            ensure_contract_type_normalization_safe(spec, &inner.value_type, visited_udts)
+        }
+        ScSpecTypeDef::Result(inner) => {
+            ensure_contract_type_normalization_safe(spec, &inner.ok_type, visited_udts)
+        }
+        ScSpecTypeDef::Vec(inner) => {
+            ensure_contract_type_normalization_safe(spec, &inner.element_type, visited_udts)
+        }
+        ScSpecTypeDef::Map(inner) => {
+            ensure_contract_type_normalization_safe(spec, &inner.key_type, visited_udts)?;
+            ensure_contract_type_normalization_safe(spec, &inner.value_type, visited_udts)
+        }
+        ScSpecTypeDef::Tuple(inner) => {
+            for value_type in &inner.value_types {
+                ensure_contract_type_normalization_safe(spec, value_type, visited_udts)?;
+            }
+            Ok(())
+        }
+        ScSpecTypeDef::Error => Err(
+            "Contract Spec Error values cannot be safely normalized as ordinary contract values"
+                .to_owned(),
+        ),
+        ScSpecTypeDef::Udt(inner) => {
+            let type_name = inner.name.to_utf8_string_lossy();
+            if visited_udts.iter().any(|visited| visited == &type_name) {
+                return Ok(());
+            }
+            visited_udts.push(type_name.clone());
+            let result = match spec.find(&type_name).map_err(|error| {
+                format!("unable to resolve user-defined type {type_name}: {error}")
+            })? {
+                ScSpecEntry::UdtStructV0(struct_) => {
+                    contract_struct_is_tuple(struct_)?;
+                    for field in &struct_.fields {
+                        ensure_contract_type_normalization_safe(spec, &field.type_, visited_udts)?;
+                    }
+                    Ok(())
+                }
+                ScSpecEntry::UdtUnionV0(union) => {
+                    for case in &union.cases {
+                        if let stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) = case {
+                            for value_type in &case.type_ {
+                                ensure_contract_type_normalization_safe(
+                                    spec,
+                                    value_type,
+                                    visited_udts,
+                                )?;
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                ScSpecEntry::UdtEnumV0(_) => Ok(()),
+                ScSpecEntry::UdtErrorEnumV0(_) => Err(format!(
+                    "error enum {type_name} cannot be safely normalized as an ordinary contract value"
+                )),
+                _ => Err(format!(
+                    "Contract Spec entry {type_name} is not a user-defined value type"
+                )),
+            };
+            visited_udts.pop();
+            result
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_scval_against_type(
+    spec: &Spec,
+    value: &ScVal,
+    type_def: &ScSpecTypeDef,
+    depth: u32,
+) -> Result<(), String> {
+    if depth > CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT {
+        return Err("contract value exceeds the supported nesting depth".to_owned());
+    }
+    let next = depth + 1;
+    let mismatch = || {
+        Err(format!(
+            "ScVal does not match Contract Spec type {}",
+            contract_type_name(type_def)
+        ))
+    };
+    match type_def {
+        ScSpecTypeDef::Val => Ok(()),
+        ScSpecTypeDef::Bool if matches!(value, ScVal::Bool(_)) => Ok(()),
+        ScSpecTypeDef::Void if matches!(value, ScVal::Void) => Ok(()),
+        ScSpecTypeDef::Error if matches!(value, ScVal::Error(_)) => Ok(()),
+        ScSpecTypeDef::U32 if matches!(value, ScVal::U32(_)) => Ok(()),
+        ScSpecTypeDef::I32 if matches!(value, ScVal::I32(_)) => Ok(()),
+        ScSpecTypeDef::U64 if matches!(value, ScVal::U64(_)) => Ok(()),
+        ScSpecTypeDef::I64 if matches!(value, ScVal::I64(_)) => Ok(()),
+        ScSpecTypeDef::Timepoint if matches!(value, ScVal::Timepoint(_)) => Ok(()),
+        ScSpecTypeDef::Duration if matches!(value, ScVal::Duration(_)) => Ok(()),
+        ScSpecTypeDef::U128 if matches!(value, ScVal::U128(_)) => Ok(()),
+        ScSpecTypeDef::I128 if matches!(value, ScVal::I128(_)) => Ok(()),
+        ScSpecTypeDef::U256 if matches!(value, ScVal::U256(_)) => Ok(()),
+        ScSpecTypeDef::I256 if matches!(value, ScVal::I256(_)) => Ok(()),
+        ScSpecTypeDef::Bytes if matches!(value, ScVal::Bytes(_)) => Ok(()),
+        ScSpecTypeDef::BytesN(expected) => match value {
+            ScVal::Bytes(bytes) if bytes.as_slice().len() == expected.n as usize => Ok(()),
+            _ => mismatch(),
+        },
+        ScSpecTypeDef::String if matches!(value, ScVal::String(_)) => Ok(()),
+        ScSpecTypeDef::Symbol if matches!(value, ScVal::Symbol(_)) => Ok(()),
+        ScSpecTypeDef::Address | ScSpecTypeDef::MuxedAddress
+            if matches!(value, ScVal::Address(_)) =>
+        {
+            Ok(())
+        }
+        ScSpecTypeDef::Option(inner) => {
+            if matches!(value, ScVal::Void) {
+                Ok(())
+            } else {
+                validate_scval_against_type(spec, value, &inner.value_type, next)
+            }
+        }
+        ScSpecTypeDef::Result(inner) => {
+            if matches!(value, ScVal::Error(_)) {
+                return Err(
+                    "Result error values cannot be normalized as successful contract values"
+                        .to_owned(),
+                );
+            }
+            validate_scval_against_type(spec, value, &inner.ok_type, next)
+        }
+        ScSpecTypeDef::Vec(inner) => match value {
+            ScVal::Vec(Some(values)) => {
+                for value in values.iter() {
+                    validate_scval_against_type(spec, value, &inner.element_type, next)?;
+                }
+                Ok(())
+            }
+            _ => mismatch(),
+        },
+        ScSpecTypeDef::Map(inner) => match value {
+            ScVal::Map(Some(values)) => {
+                for entry in values.iter() {
+                    validate_scval_against_type(spec, &entry.key, &inner.key_type, next)?;
+                    validate_scval_against_type(spec, &entry.val, &inner.value_type, next)?;
+                }
+                Ok(())
+            }
+            _ => mismatch(),
+        },
+        ScSpecTypeDef::Tuple(inner) => match value {
+            ScVal::Vec(Some(values)) if values.len() == inner.value_types.len() => {
+                for (value, type_def) in values.iter().zip(inner.value_types.iter()) {
+                    validate_scval_against_type(spec, value, type_def, next)?;
+                }
+                Ok(())
+            }
+            _ => mismatch(),
+        },
+        ScSpecTypeDef::Udt(inner) => {
+            let type_name = inner.name.to_utf8_string_lossy();
+            match spec.find(&type_name).map_err(|error| {
+                format!("unable to resolve user-defined type {type_name}: {error}")
+            })? {
+                ScSpecEntry::UdtStructV0(struct_) => {
+                    let tuple_struct = struct_
+                        .fields
+                        .first()
+                        .is_some_and(|field| field.name.to_utf8_string_lossy() == "0");
+                    if tuple_struct {
+                        let ScVal::Vec(Some(values)) = value else {
+                            return mismatch();
+                        };
+                        if values.len() != struct_.fields.len() {
+                            return Err(format!(
+                                "tuple struct {type_name} requires {} values but ScVal contains {}",
+                                struct_.fields.len(),
+                                values.len()
+                            ));
+                        }
+                        for (value, field) in values.iter().zip(struct_.fields.iter()) {
+                            validate_scval_against_type(spec, value, &field.type_, next)?;
+                        }
+                        return Ok(());
+                    }
+
+                    let ScVal::Map(Some(values)) = value else {
+                        return mismatch();
+                    };
+                    if values.len() != struct_.fields.len() {
+                        return Err(format!(
+                            "struct {type_name} requires {} fields but ScVal contains {}",
+                            struct_.fields.len(),
+                            values.len()
+                        ));
+                    }
+                    for entry in values.iter() {
+                        let ScVal::Symbol(key) = &entry.key else {
+                            return Err(format!(
+                                "struct {type_name} contains a non-symbol field key"
+                            ));
+                        };
+                        let key = key.to_utf8_string_lossy();
+                        let field = struct_
+                            .fields
+                            .iter()
+                            .find(|field| field.name.to_utf8_string_lossy() == key)
+                            .ok_or_else(|| {
+                                format!("unknown field {key:?} for struct {type_name}")
+                            })?;
+                        validate_scval_against_type(spec, &entry.val, &field.type_, next)?;
+                    }
+                    Ok(())
+                }
+                ScSpecEntry::UdtUnionV0(union) => {
+                    let ScVal::Vec(Some(values)) = value else {
+                        return mismatch();
+                    };
+                    let Some(ScVal::Symbol(case_name)) = values.first() else {
+                        return Err(format!(
+                            "union {type_name} requires a symbol case discriminator"
+                        ));
+                    };
+                    let case_name = case_name.to_utf8_string_lossy();
+                    let case = union
+                        .cases
+                        .iter()
+                        .find(|case| match case {
+                            stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(case) => {
+                                case.name.to_utf8_string_lossy() == case_name
+                            }
+                            stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => {
+                                case.name.to_utf8_string_lossy() == case_name
+                            }
+                        })
+                        .ok_or_else(|| {
+                            format!("unknown case {case_name:?} for union {type_name}")
+                        })?;
+                    match case {
+                        stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(_) => {
+                            if values.len() == 1 {
+                                Ok(())
+                            } else {
+                                Err(format!(
+                                    "void case {case_name:?} for union {type_name} contains an unexpected payload"
+                                ))
+                            }
+                        }
+                        stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => {
+                            if values.len() != case.type_.len() + 1 {
+                                return Err(format!(
+                                    "case {case_name:?} for union {type_name} requires {} payload values but ScVal contains {}",
+                                    case.type_.len(),
+                                    values.len().saturating_sub(1)
+                                ));
+                            }
+                            for (value, type_def) in values.iter().skip(1).zip(case.type_.iter()) {
+                                validate_scval_against_type(spec, value, type_def, next)?;
+                            }
+                            Ok(())
+                        }
+                    }
+                }
+                ScSpecEntry::UdtEnumV0(enum_) => match value {
+                    ScVal::U32(value) if enum_.cases.iter().any(|case| case.value == *value) => {
+                        Ok(())
+                    }
+                    _ => mismatch(),
+                },
+                ScSpecEntry::UdtErrorEnumV0(enum_) => match value {
+                    ScVal::Error(stellar_xdr::ScError::Contract(value))
+                        if enum_.cases.iter().any(|case| case.value == *value) =>
+                    {
+                        Ok(())
+                    }
+                    _ => mismatch(),
+                },
+                _ => Err(format!(
+                    "Contract Spec entry {type_name} is not a user-defined value type"
+                )),
+            }
+        }
+        _ => mismatch(),
+    }
+}
+
+fn contract_argument_review(
+    spec: &Spec,
+    name: String,
+    value_type: String,
+    type_def: &ScSpecTypeDef,
+    parsed: &ScVal,
+) -> Result<ContractArgumentReview, String> {
+    validate_scval_against_type(spec, parsed, type_def, 0)
+        .map_err(|detail| format!("invalid contract argument --{name} ({value_type}): {detail}"))?;
+    ensure_contract_type_normalization_safe(spec, type_def, &mut Vec::new()).map_err(|detail| {
+        format!("unable to normalize contract argument --{name} ({value_type}): {detail}")
+    })?;
+    let value = spec.xdr_to_json(parsed, type_def).map_err(|error| {
+        format!("unable to normalize contract argument --{name} ({value_type}): {error}")
+    })?;
+    let scval_xdr = parsed
+        .to_xdr_base64(Limits::depth(CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT))
+        .map_err(|error| {
+            format!("unable to encode contract argument --{name} as ScVal XDR: {error}")
+        })?;
+    Ok(ContractArgumentReview {
+        name,
+        value_type,
+        value,
+        scval_xdr,
+    })
 }
 
 fn remove_argument(
@@ -630,6 +1285,297 @@ fn parse_argument(
                 direct_error,
             ));
         }
+    }
+}
+
+fn parse_json_argument(
+    spec: &Spec,
+    name: &str,
+    value: &Value,
+    type_def: &ScSpecTypeDef,
+) -> Result<ScVal, String> {
+    let prepared = prepare_json_argument_value(spec, value, type_def).map_err(|detail| {
+        format!(
+            "invalid value for contract argument --{name}; expected {}: {detail}",
+            contract_type_name(type_def)
+        )
+    })?;
+    spec.from_json(&prepared, type_def)
+        .map_err(|error| contract_argument_parse_error(spec, name, type_def, error))
+}
+
+fn prepare_json_argument_value(
+    spec: &Spec,
+    value: &Value,
+    type_def: &ScSpecTypeDef,
+) -> Result<Value, String> {
+    match type_def {
+        ScSpecTypeDef::Void if value.is_null() => Ok(Value::String("void".to_owned())),
+        ScSpecTypeDef::Timepoint | ScSpecTypeDef::Duration if value.is_number() => {
+            let key = if matches!(type_def, ScSpecTypeDef::Timepoint) {
+                "timepoint"
+            } else {
+                "duration"
+            };
+            let mut tagged = serde_json::Map::new();
+            tagged.insert(key.to_owned(), Value::String(value.to_string()));
+            Ok(Value::Object(tagged))
+        }
+        ScSpecTypeDef::Error => Err(
+            "Contract Spec Error values are runtime error metadata and have no stable composed input form"
+                .to_owned(),
+        ),
+        ScSpecTypeDef::Result(_) => Err(
+            "Contract Spec Result values have no stable composed input form in the pinned official parser"
+                .to_owned(),
+        ),
+        ScSpecTypeDef::Option(_inner) if value.is_null() => Ok(Value::Null),
+        ScSpecTypeDef::Option(inner) => {
+            prepare_json_argument_value(spec, value, &inner.value_type)
+        }
+        ScSpecTypeDef::Vec(inner) => match value {
+            Value::Array(values) => values
+                .iter()
+                .map(|value| prepare_json_argument_value(spec, value, &inner.element_type))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array),
+            _ => Ok(value.clone()),
+        },
+        ScSpecTypeDef::Map(inner) => match value {
+            Value::Object(values) => {
+                let mut prepared = serde_json::Map::new();
+                for (key, value) in values {
+                    let key_value = serde_json::from_str(key)
+                        .unwrap_or_else(|_| Value::String(key.clone()));
+                    let prepared_key =
+                        prepare_json_argument_value(spec, &key_value, &inner.key_type)?;
+                    let prepared_key = serde_json::to_string(&prepared_key)
+                        .map_err(|error| format!("unable to encode map key {key:?}: {error}"))?;
+                    let prepared_key = if spec.from_string(&prepared_key, &inner.key_type).is_ok() {
+                        prepared_key
+                    } else {
+                        key.clone()
+                    };
+                    prepared.insert(
+                        prepared_key,
+                        prepare_json_argument_value(spec, value, &inner.value_type)?,
+                    );
+                }
+                Ok(Value::Object(prepared))
+            }
+            _ => Ok(value.clone()),
+        },
+        ScSpecTypeDef::Tuple(inner) => match value {
+            Value::Array(values) => {
+                if values.len() != inner.value_types.len() {
+                    return Err(format!(
+                        "tuple requires {} values but {} were provided",
+                        inner.value_types.len(),
+                        values.len()
+                    ));
+                }
+                values
+                    .iter()
+                    .zip(inner.value_types.iter())
+                    .map(|(value, type_def)| prepare_json_argument_value(spec, value, type_def))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::Array)
+            }
+            _ => Ok(value.clone()),
+        },
+        ScSpecTypeDef::Udt(inner) => {
+            let type_name = inner.name.to_utf8_string_lossy();
+            match spec
+                .find(&type_name)
+                .map_err(|error| format!("unable to resolve user-defined type {type_name}: {error}"))?
+            {
+                ScSpecEntry::UdtStructV0(struct_) => {
+                    prepare_json_struct_value(spec, value, struct_)
+                }
+                ScSpecEntry::UdtUnionV0(union) => prepare_json_union_value(spec, value, union),
+                ScSpecEntry::UdtEnumV0(enum_) => {
+                    validate_json_enum_shape(value, enum_)?;
+                    Ok(value.clone())
+                }
+                ScSpecEntry::UdtErrorEnumV0(_) => Err(format!(
+                    "error enum {type_name} is contract error metadata and cannot be supplied as a function argument"
+                )),
+                _ => Err(format!(
+                    "Contract Spec entry {type_name} is not a user-defined value type"
+                )),
+            }
+        }
+        _ => Ok(value.clone()),
+    }
+}
+
+fn prepare_json_struct_value(
+    spec: &Spec,
+    value: &Value,
+    struct_: &stellar_xdr::ScSpecUdtStructV0,
+) -> Result<Value, String> {
+    let type_name = struct_.name.to_utf8_string_lossy();
+    let tuple_struct = contract_struct_is_tuple(struct_)?;
+    if tuple_struct {
+        return match value {
+            Value::Array(values) => {
+                if values.len() != struct_.fields.len() {
+                    return Err(format!(
+                        "tuple struct {type_name} requires {} values but {} were provided",
+                        struct_.fields.len(),
+                        values.len()
+                    ));
+                }
+                values
+                    .iter()
+                    .zip(struct_.fields.iter())
+                    .map(|(value, field)| prepare_json_argument_value(spec, value, &field.type_))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::Array)
+            }
+            Value::Object(values) => {
+                if values.len() != struct_.fields.len() {
+                    return Err(format!(
+                        "tuple struct {type_name} requires {} values but {} were provided",
+                        struct_.fields.len(),
+                        values.len()
+                    ));
+                }
+                let mut prepared = serde_json::Map::new();
+                for field in &struct_.fields {
+                    let field_name = field.name.to_utf8_string_lossy();
+                    let field_value = values.get(&field_name).ok_or_else(|| {
+                        format!("missing field {field_name:?} for tuple struct {type_name}")
+                    })?;
+                    prepared.insert(
+                        field_name,
+                        prepare_json_argument_value(spec, field_value, &field.type_)?,
+                    );
+                }
+                Ok(Value::Object(prepared))
+            }
+            _ => Err(format!(
+                "tuple struct {type_name} requires a JSON array or numeric-key object"
+            )),
+        };
+    }
+
+    let Value::Object(values) = value else {
+        return Err(format!("struct {type_name} requires a JSON object"));
+    };
+    for key in values.keys() {
+        if !struct_
+            .fields
+            .iter()
+            .any(|field| field.name.to_utf8_string_lossy() == *key)
+        {
+            return Err(format!("unknown field {key:?} for struct {type_name}"));
+        }
+    }
+    let mut prepared = serde_json::Map::new();
+    for field in &struct_.fields {
+        let field_name = field.name.to_utf8_string_lossy();
+        let field_value = values
+            .get(&field_name)
+            .ok_or_else(|| format!("missing field {field_name:?} for struct {type_name}"))?;
+        prepared.insert(
+            field_name,
+            prepare_json_argument_value(spec, field_value, &field.type_)?,
+        );
+    }
+    Ok(Value::Object(prepared))
+}
+
+fn prepare_json_union_value(
+    spec: &Spec,
+    value: &Value,
+    union: &stellar_xdr::ScSpecUdtUnionV0,
+) -> Result<Value, String> {
+    let type_name = union.name.to_utf8_string_lossy();
+    let (case_name, payload) = match value {
+        Value::String(case_name) => (case_name.as_str(), None),
+        Value::Object(values) if values.len() == 1 => {
+            let (case_name, payload) = values.iter().next().expect("single union case");
+            (case_name.as_str(), Some(payload))
+        }
+        _ => {
+            return Err(format!(
+                "union {type_name} requires a void-case string or a single-key case object"
+            ))
+        }
+    };
+    let case = union
+        .cases
+        .iter()
+        .find(|case| match case {
+            stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(case) => {
+                case.name.to_utf8_string_lossy() == case_name
+            }
+            stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => {
+                case.name.to_utf8_string_lossy() == case_name
+            }
+        })
+        .ok_or_else(|| format!("unknown case {case_name:?} for union {type_name}"))?;
+
+    match case {
+        stellar_xdr::ScSpecUdtUnionCaseV0::VoidV0(_) => {
+            if payload.is_some() {
+                return Err(format!(
+                    "void case {case_name:?} for union {type_name} must be a JSON string"
+                ));
+            }
+            Ok(Value::String(case_name.to_owned()))
+        }
+        stellar_xdr::ScSpecUdtUnionCaseV0::TupleV0(case) => {
+            let payload = payload.ok_or_else(|| {
+                format!("case {case_name:?} for union {type_name} requires a payload")
+            })?;
+            let prepared_payload = if case.type_.len() == 1 {
+                prepare_json_argument_value(spec, payload, &case.type_[0])?
+            } else {
+                let Value::Array(values) = payload else {
+                    return Err(format!(
+                        "case {case_name:?} for union {type_name} requires a JSON array with {} values",
+                        case.type_.len()
+                    ));
+                };
+                if values.len() != case.type_.len() {
+                    return Err(format!(
+                        "case {case_name:?} for union {type_name} requires {} values but {} were provided",
+                        case.type_.len(),
+                        values.len()
+                    ));
+                }
+                Value::Array(
+                    values
+                        .iter()
+                        .zip(case.type_.iter())
+                        .map(|(value, type_def)| prepare_json_argument_value(spec, value, type_def))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            };
+            Ok(Value::Object(
+                [(case_name.to_owned(), prepared_payload)]
+                    .into_iter()
+                    .collect(),
+            ))
+        }
+    }
+}
+
+fn validate_json_enum_shape(
+    value: &Value,
+    enum_: &stellar_xdr::ScSpecUdtEnumV0,
+) -> Result<(), String> {
+    let type_name = enum_.name.to_utf8_string_lossy();
+    let value = value
+        .as_u64()
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| format!("enum {type_name} requires its numeric u32 case value"))?;
+    if enum_.cases.iter().any(|case| case.value == value) {
+        Ok(())
+    } else {
+        Err(format!("unknown numeric case {value} for enum {type_name}"))
     }
 }
 
@@ -725,6 +1671,7 @@ pub struct ContractReadResult {
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub output: Option<Value>,
+    pub output_xdr: Option<String>,
     pub simulation_ledger: u32,
     pub network: String,
 }
@@ -757,6 +1704,7 @@ pub struct ContractSimulationResult {
     pub function_name: String,
     pub arguments: Vec<ContractArgumentReview>,
     pub output: Option<Value>,
+    pub output_xdr: Option<String>,
     pub simulation_ledger: u32,
     pub network: String,
     pub effects: ContractSimulationEffects,
@@ -854,7 +1802,8 @@ pub(crate) async fn simulate_contract_invoke(
     let (low_level_request, arguments) = request.resolve(&snapshot.entries)?;
     let simulation = simulate_soroban_invoke(rpc, &low_level_request).await?;
     validate_contract_simulation_preview(&simulation)?;
-    let output = decode_simulation_output(&snapshot.entries, &request.function_name, &simulation)?;
+    let (output, output_xdr) =
+        decode_simulation_output(&snapshot.entries, &request.function_name, &simulation)?;
     let effects = simulation_effects(&simulation)?;
     Ok(ContractSimulationResult {
         contract_id: request.contract_id,
@@ -864,6 +1813,7 @@ pub(crate) async fn simulate_contract_invoke(
         function_name: request.function_name,
         arguments,
         output,
+        output_xdr,
         simulation_ledger: simulation.latest_ledger,
         network: rpc.network().to_owned(),
         effects,
@@ -903,7 +1853,8 @@ pub(crate) async fn prepare_contract_invoke_outcome(
         ));
     }
 
-    let output = decode_simulation_output(&snapshot.entries, &request.function_name, &simulation)?;
+    let (output, output_xdr) =
+        decode_simulation_output(&snapshot.entries, &request.function_name, &simulation)?;
     Ok(ContractInvokePreparation::ReadOnly(ContractReadResult {
         contract_id: request.contract_id,
         executable: snapshot.executable,
@@ -912,6 +1863,7 @@ pub(crate) async fn prepare_contract_invoke_outcome(
         function_name: request.function_name,
         arguments,
         output,
+        output_xdr,
         simulation_ledger: simulation.latest_ledger,
         network: rpc.network().to_owned(),
     }))
@@ -979,11 +1931,11 @@ fn decode_simulation_output(
     spec_entries: &[ScSpecEntry],
     function_name: &str,
     simulation: &SimulateTransactionResponse,
-) -> Result<Option<Value>, String> {
+) -> Result<(Option<Value>, Option<String>), String> {
     let spec = Spec::new(spec_entries);
     let function = find_function(&spec, function_name)?;
     let Some(output_type) = function.outputs.first() else {
-        return Ok(None);
+        return Ok((None, None));
     };
     let results = simulation
         .results()
@@ -991,9 +1943,19 @@ fn decode_simulation_output(
     let result = results
         .first()
         .ok_or_else(|| "Soroban simulation did not return a contract result".to_owned())?;
-    spec.xdr_to_json(&result.xdr, output_type)
-        .map(Some)
-        .map_err(|error| format!("unable to decode contract return value: {error}"))
+    validate_scval_against_type(&spec, &result.xdr, output_type, 0).map_err(|detail| {
+        format!("contract return value does not match its Contract Spec: {detail}")
+    })?;
+    ensure_contract_type_normalization_safe(&spec, output_type, &mut Vec::new())
+        .map_err(|detail| format!("unable to normalize contract return value: {detail}"))?;
+    let value = spec
+        .xdr_to_json(&result.xdr, output_type)
+        .map_err(|error| format!("unable to decode contract return value: {error}"))?;
+    let scval_xdr = result
+        .xdr
+        .to_xdr_base64(Limits::depth(CONTRACT_ARGUMENT_XDR_DEPTH_LIMIT))
+        .map_err(|error| format!("unable to encode contract return value as ScVal XDR: {error}"))?;
+    Ok((Some(value), Some(scval_xdr)))
 }
 
 pub(crate) fn authorize_contract_invoke(
@@ -1062,10 +2024,13 @@ mod tests {
     use stellar_xdr::{
         ContractDataDurability, ContractId, Hash, InvokeContractArgs, LedgerFootprint, LedgerKey,
         LedgerKeyContractData, ScAddress, ScSpecFunctionInputV0, ScSpecFunctionV0,
-        ScSpecTypeBytesN, ScSpecTypeOption, ScSpecTypeTuple, ScSpecTypeVec, ScSymbol,
-        SorobanAuthorizationEntry, SorobanAuthorizedFunction, SorobanAuthorizedInvocation,
-        SorobanCredentials, SorobanResources, SorobanResourcesExtV0, SorobanTransactionData,
-        SorobanTransactionDataExt, StringM, VecM, WriteXdr,
+        ScSpecTypeBytesN, ScSpecTypeMap, ScSpecTypeOption, ScSpecTypeResult, ScSpecTypeTuple,
+        ScSpecTypeUdt, ScSpecTypeVec, ScSpecUdtEnumCaseV0, ScSpecUdtEnumV0,
+        ScSpecUdtErrorEnumCaseV0, ScSpecUdtErrorEnumV0, ScSpecUdtStructFieldV0, ScSpecUdtStructV0,
+        ScSpecUdtUnionCaseTupleV0, ScSpecUdtUnionCaseV0, ScSpecUdtUnionCaseVoidV0,
+        ScSpecUdtUnionV0, ScSymbol, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
+        SorobanAuthorizedInvocation, SorobanCredentials, SorobanResources, SorobanResourcesExtV0,
+        SorobanTransactionData, SorobanTransactionDataExt, StringM, VecM, WriteXdr,
     };
 
     use super::*;
@@ -1221,6 +2186,26 @@ mod tests {
         }))
     }
 
+    fn map_of(key: ScSpecTypeDef, value: ScSpecTypeDef) -> ScSpecTypeDef {
+        ScSpecTypeDef::Map(Box::new(ScSpecTypeMap {
+            key_type: Box::new(key),
+            value_type: Box::new(value),
+        }))
+    }
+
+    fn result_of(ok: ScSpecTypeDef, error: ScSpecTypeDef) -> ScSpecTypeDef {
+        ScSpecTypeDef::Result(Box::new(ScSpecTypeResult {
+            ok_type: Box::new(ok),
+            error_type: Box::new(error),
+        }))
+    }
+
+    fn udt(name: &str) -> ScSpecTypeDef {
+        ScSpecTypeDef::Udt(ScSpecTypeUdt {
+            name: StringM::try_from(name).unwrap(),
+        })
+    }
+
     fn tuple_of(types: Vec<ScSpecTypeDef>) -> ScSpecTypeDef {
         ScSpecTypeDef::Tuple(Box::new(ScSpecTypeTuple {
             value_types: VecM::try_from(types).unwrap(),
@@ -1233,6 +2218,84 @@ mod tests {
             ScSpecTypeDef::BytesN(ScSpecTypeBytesN { n: 32 }),
             ScSpecTypeDef::Address,
         ]))
+    }
+
+    fn composer_boundary_entries() -> Vec<ScSpecEntry> {
+        vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("destination").unwrap(),
+                        type_: ScSpecTypeDef::Address,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("hops").unwrap(),
+                        type_: vec_of(ScSpecTypeDef::Address),
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtUnionV0(ScSpecUdtUnionV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("Action").unwrap(),
+                cases: VecM::try_from(vec![
+                    ScSpecUdtUnionCaseV0::VoidV0(ScSpecUdtUnionCaseVoidV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("None").unwrap(),
+                    }),
+                    ScSpecUdtUnionCaseV0::TupleV0(ScSpecUdtUnionCaseTupleV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("Transfer").unwrap(),
+                        type_: VecM::try_from(vec![ScSpecTypeDef::Address, udt("Route")]).unwrap(),
+                    }),
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtEnumV0(ScSpecUdtEnumV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("Mode").unwrap(),
+                cases: VecM::try_from(vec![
+                    ScSpecUdtEnumCaseV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("Exact").unwrap(),
+                        value: 1,
+                    },
+                    ScSpecUdtEnumCaseV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("Flexible").unwrap(),
+                        value: 2,
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtErrorEnumV0(ScSpecUdtErrorEnumV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("RouteError").unwrap(),
+                cases: VecM::try_from(vec![ScSpecUdtErrorEnumCaseV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("BadRoute").unwrap(),
+                    value: 7,
+                }])
+                .unwrap(),
+            }),
+            function_entry(
+                "compose_all",
+                &[
+                    ("action", udt("Action")),
+                    ("mode", udt("Mode")),
+                    ("routes", map_of(ScSpecTypeDef::Address, udt("Route"))),
+                ],
+            ),
+            function_entry("accept_error", &[("error", udt("RouteError"))]),
+        ]
     }
 
     const AQUA_TESTNET_SWAP_CHAIN_XDR: &str = "AAAAEAAAAAEAAAAEAAAAEAAAAAEAAAADAAAAEAAAAAEAAAACAAAAEgAAAAEzHHTSKEtx/P4wChB3BsQmO9OQVZTMFsEGS0FSLd2VfwAAABIAAAAB15KLcsJwPM/q9+uf9O9NUEpVqLl5/JtFDqLIQrTRzmEAAAANAAAAIEkTYzg4CRHdqPOcwUH82/sAEUn5qf3jDH+moJjmqW/WAAAAEgAAAAHXkotywnA8z+r365/0701QSlWouXn8m0UOoshCtNHOYQAAABAAAAABAAAAAwAAABAAAAABAAAAAgAAABIAAAABUEXNXsBymnaP1a0CUFhS308Cjc6DDlrFIgm6SEg7LwEAAAASAAAAAdeSi3LCcDzP6vfrn/TvTVBKVai5efybRQ6iyEK00c5hAAAADQAAACCy4C/PymyW+K1cvYTneEp3ezbZyWokWUAsT0WEYqq38AAAABIAAAABUEXNXsBymnaP1a0CUFhS308Cjc6DDlrFIgm6SEg7LwEAAAAQAAAAAQAAAAMAAAAQAAAAAQAAAAIAAAASAAAAAVBFzV7Acpp2j9WtAlBYUt9PAo3Ogw5axSIJukhIOy8BAAAAEgAAAAHbWFucFs4F4bWHJODfHSWxM1cXv5LyScuAwBSjpRdXOAAAAA0AAAAgmsepzeI6wq2hEQXuqkLkPC6oMyygqo9B9Y1xYCdNcY4AAAASAAAAAdtYW5wWzgXhtYck4N8dJbEzVxe/kvJJy4DAFKOlF1c4AAAAEAAAAAEAAAADAAAAEAAAAAEAAAACAAAAEgAAAAFX5Q9LKxYKKKWzW3s65W/2YF1kByzExXDq/+GzE2bVaAAAABIAAAAB21hbnBbOBeG1hyTg3x0lsTNXF7+S8knLgMAUo6UXVzgAAAANAAAAIJrHqc3iOsKtoREF7qpC5DwuqDMsoKqPQfWNcWAnTXGOAAAAEgAAAAFX5Q9LKxYKKKWzW3s65W/2YF1kByzExXDq/+GzE2bVaA==";
@@ -1270,8 +2333,296 @@ mod tests {
         assert_eq!(function.doc, "test function");
         assert_eq!(function.inputs[0].name, "values");
         assert_eq!(function.inputs[0].value_type.name, "vec<u32>");
+        assert_eq!(
+            function.inputs[0].composition,
+            ContractInputComposition::TypedJson
+        );
         assert!(function.inputs[0].value_type.example.is_some());
         assert_eq!(function.inputs[1].value_type.name, "bytes[4]");
+    }
+
+    #[test]
+    fn contract_interface_exposes_machine_readable_input_composition_support() {
+        let entries = vec![
+            ScSpecEntry::UdtErrorEnumV0(ScSpecUdtErrorEnumV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ComposeError").unwrap(),
+                cases: VecM::try_from(vec![ScSpecUdtErrorEnumCaseV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("Rejected").unwrap(),
+                    value: 7,
+                }])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("DynamicBox").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("label").unwrap(),
+                        type_: ScSpecTypeDef::String,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("value").unwrap(),
+                        type_: ScSpecTypeDef::Val,
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ResultBox").unwrap(),
+                fields: VecM::try_from(vec![ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("outcome").unwrap(),
+                    type_: result_of(ScSpecTypeDef::U32, udt("ComposeError")),
+                }])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ErrorBox").unwrap(),
+                fields: VecM::try_from(vec![ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("error").unwrap(),
+                    type_: udt("ComposeError"),
+                }])
+                .unwrap(),
+            }),
+            function_entry(
+                "modes",
+                &[
+                    ("amount", ScSpecTypeDef::U32),
+                    ("dynamic", vec_of(ScSpecTypeDef::Val)),
+                    ("wrapped_dynamic", udt("DynamicBox")),
+                    ("result", result_of(ScSpecTypeDef::U32, udt("ComposeError"))),
+                    ("wrapped_result", udt("ResultBox")),
+                    ("error", ScSpecTypeDef::Error),
+                    ("error_enum", udt("ComposeError")),
+                    ("wrapped_error", udt("ErrorBox")),
+                ],
+            ),
+        ];
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        let inputs = &interface.function("modes").unwrap().inputs;
+        let modes = inputs
+            .iter()
+            .map(|input| (input.composition.mode(), input.composition.guided()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            modes,
+            vec![
+                ("typed_json", true),
+                ("dynamic_scval_json", false),
+                ("dynamic_scval_json", false),
+                ("scval_xdr_success_only", false),
+                ("scval_xdr_success_only", false),
+                ("unsupported", false),
+                ("unsupported", false),
+                ("unsupported", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_tuple_struct_is_unsupported_and_fails_closed_before_official_parser() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("BrokenTuple").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("0").unwrap(),
+                        type_: ScSpecTypeDef::U32,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("2").unwrap(),
+                        type_: ScSpecTypeDef::String,
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry("accept", &[("value", udt("BrokenTuple"))]),
+        ];
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        assert_eq!(
+            interface.function("accept").unwrap().inputs[0].composition,
+            ContractInputComposition::Unsupported
+        );
+
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "accept", vec![]);
+        request.add_json_argument("value", json!({"0": 7, "2": "x"}));
+        let result = std::panic::catch_unwind(|| request.resolve(&entries));
+        assert!(result.is_ok(), "malformed tuple spec must not panic");
+        let error = result.unwrap().unwrap_err();
+        assert!(error.contains("canonical numeric field order"), "{error}");
+    }
+
+    #[test]
+    fn contract_interface_preserves_recursive_types_and_all_udt_definitions() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::try_from("route definition").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("destination").unwrap(),
+                        name: StringM::try_from("destination").unwrap(),
+                        type_: ScSpecTypeDef::Address,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("intermediate hops").unwrap(),
+                        name: StringM::try_from("hops").unwrap(),
+                        type_: vec_of(ScSpecTypeDef::Address),
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtUnionV0(ScSpecUdtUnionV0 {
+                doc: StringM::try_from("action choice").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Action").unwrap(),
+                cases: VecM::try_from(vec![
+                    ScSpecUdtUnionCaseV0::VoidV0(ScSpecUdtUnionCaseVoidV0 {
+                        doc: StringM::try_from("do nothing").unwrap(),
+                        name: StringM::try_from("None").unwrap(),
+                    }),
+                    ScSpecUdtUnionCaseV0::TupleV0(ScSpecUdtUnionCaseTupleV0 {
+                        doc: StringM::try_from("route transfer").unwrap(),
+                        name: StringM::try_from("Transfer").unwrap(),
+                        type_: VecM::try_from(vec![ScSpecTypeDef::Address, udt("Route")]).unwrap(),
+                    }),
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtEnumV0(ScSpecUdtEnumV0 {
+                doc: StringM::try_from("execution mode").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Mode").unwrap(),
+                cases: VecM::try_from(vec![
+                    ScSpecUdtEnumCaseV0 {
+                        doc: StringM::try_from("exact").unwrap(),
+                        name: StringM::try_from("Exact").unwrap(),
+                        value: 1,
+                    },
+                    ScSpecUdtEnumCaseV0 {
+                        doc: StringM::try_from("flexible").unwrap(),
+                        name: StringM::try_from("Flexible").unwrap(),
+                        value: 2,
+                    },
+                ])
+                .unwrap(),
+            }),
+            ScSpecEntry::UdtErrorEnumV0(ScSpecUdtErrorEnumV0 {
+                doc: StringM::try_from("routing errors").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("RouteError").unwrap(),
+                cases: VecM::try_from(vec![ScSpecUdtErrorEnumCaseV0 {
+                    doc: StringM::try_from("bad route").unwrap(),
+                    name: StringM::try_from("BadRoute").unwrap(),
+                    value: 7,
+                }])
+                .unwrap(),
+            }),
+            function_entry_with_outputs(
+                "compose",
+                &[(
+                    "routes",
+                    option_of(map_of(ScSpecTypeDef::Address, vec_of(udt("Route")))),
+                )],
+                &[result_of(udt("Mode"), udt("RouteError"))],
+            ),
+        ];
+
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        let function = interface.function("compose").unwrap();
+        assert_eq!(
+            function.inputs[0].value_type.abi,
+            ContractAbiType::Option(Box::new(ContractAbiType::Map {
+                key: Box::new(ContractAbiType::Primitive("address".to_owned())),
+                value: Box::new(ContractAbiType::Vec(Box::new(ContractAbiType::Udt(
+                    "Route".to_owned()
+                )))),
+            }))
+        );
+        assert_eq!(
+            function.outputs[0].abi,
+            ContractAbiType::Result {
+                ok: Box::new(ContractAbiType::Udt("Mode".to_owned())),
+                error: Box::new(ContractAbiType::Udt("RouteError".to_owned())),
+            }
+        );
+        assert_eq!(interface.user_types.len(), 4);
+        assert!(matches!(
+            &interface.user_types[0],
+            ContractUserType::Struct { name, lib, fields, .. }
+                if name == "Route"
+                    && lib == "routing"
+                    && fields.len() == 2
+                    && fields[1].value_type
+                        == ContractAbiType::Vec(Box::new(ContractAbiType::Primitive(
+                            "address".to_owned()
+                        )))
+        ));
+        assert!(matches!(
+            &interface.user_types[1],
+            ContractUserType::Union { name, cases, .. }
+                if name == "Action"
+                    && matches!(cases[0].payload, ContractAbiUnionCasePayload::Void)
+                    && matches!(
+                        &cases[1].payload,
+                        ContractAbiUnionCasePayload::Tuple(values)
+                            if values == &vec![
+                                ContractAbiType::Primitive("address".to_owned()),
+                                ContractAbiType::Udt("Route".to_owned()),
+                            ]
+                    )
+        ));
+        assert!(matches!(
+            &interface.user_types[2],
+            ContractUserType::Enum { name, cases, .. }
+                if name == "Mode" && cases[1].name == "Flexible" && cases[1].value == 2
+        ));
+        assert!(matches!(
+            &interface.user_types[3],
+            ContractUserType::ErrorEnum { name, cases, .. }
+                if name == "RouteError" && cases[0].name == "BadRoute" && cases[0].value == 7
+        ));
     }
 
     #[test]
@@ -1666,6 +3017,572 @@ mod tests {
     }
 
     #[test]
+    fn structured_json_arguments_use_official_spec_composer_for_nested_udt_values() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::try_from("route definition").unwrap(),
+                lib: StringM::try_from("routing").unwrap(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("destination").unwrap(),
+                        name: StringM::try_from("destination").unwrap(),
+                        type_: ScSpecTypeDef::Address,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::try_from("intermediate hops").unwrap(),
+                        name: StringM::try_from("hops").unwrap(),
+                        type_: vec_of(ScSpecTypeDef::Address),
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry(
+                "compose",
+                &[(
+                    "routes",
+                    option_of(map_of(ScSpecTypeDef::Address, vec_of(udt("Route")))),
+                )],
+            ),
+        ];
+        let value = json!({
+            ACCOUNT: [{
+                "destination": OTHER_ACCOUNT,
+                "hops": [ACCOUNT]
+            }]
+        });
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "compose", vec![]);
+        request.add_json_argument("routes", value.clone());
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Map(Some(_))));
+        assert_eq!(review[0].name, "routes");
+        assert_eq!(review[0].value, value);
+    }
+
+    #[test]
+    fn structured_json_arguments_fail_closed_on_nested_abi_mismatch() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("Route").unwrap(),
+                fields: VecM::try_from(vec![ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: StringM::try_from("hops").unwrap(),
+                    type_: vec_of(ScSpecTypeDef::Address),
+                }])
+                .unwrap(),
+            }),
+            function_entry("compose", &[("route", udt("Route"))]),
+        ];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "compose", vec![]);
+        request.add_json_argument("route", json!({"hops": [7]}));
+
+        let error = request.resolve(&entries).unwrap_err();
+        assert!(
+            error.contains("invalid value for contract argument --route"),
+            "{error}"
+        );
+        assert!(error.contains("expected Route"), "{error}");
+    }
+
+    #[test]
+    fn structured_json_arguments_share_duplicate_detection_with_existing_sources() {
+        let entries = vec![function_entry("set", &[("value", ScSpecTypeDef::U32)])];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "set",
+            vec![ContractArgumentInput::new("value", "7")],
+        );
+        request.add_json_argument("value", json!(8));
+
+        assert!(request
+            .resolve(&entries)
+            .unwrap_err()
+            .contains("provided more than once"));
+    }
+
+    #[test]
+    fn structured_json_arguments_compose_union_enum_and_nested_map_udt_values() {
+        let entries = composer_boundary_entries();
+        let route = json!({"destination": OTHER_ACCOUNT, "hops": [ACCOUNT]});
+        let action = json!({"Transfer": [ACCOUNT, route.clone()]});
+        let routes = json!({ACCOUNT: route});
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "compose_all",
+            vec![],
+        );
+        request.add_json_argument("action", action.clone());
+        request.add_json_argument("mode", json!(2));
+        request.add_json_argument("routes", routes.clone());
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Vec(Some(_))));
+        assert!(matches!(low_level.args[1], ScVal::U32(2)));
+        assert!(matches!(low_level.args[2], ScVal::Map(Some(_))));
+        assert_eq!(review[0].value, action);
+        assert_eq!(review[1].value, json!(2));
+        assert_eq!(review[2].value, routes);
+
+        let mut void_case = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "compose_all",
+            vec![],
+        );
+        void_case.add_json_argument("action", json!("None"));
+        void_case.add_json_argument("mode", json!(1));
+        void_case.add_json_argument("routes", json!({}));
+        let (_, review) = void_case.resolve(&entries).unwrap();
+        assert_eq!(review[0].value, json!("None"));
+    }
+
+    #[test]
+    fn structured_json_arguments_fail_closed_on_malformed_udt_shapes() {
+        let entries = composer_boundary_entries();
+
+        let mut malformed_union = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "compose_all",
+            vec![],
+        );
+        malformed_union.add_json_argument(
+            "action",
+            json!({"Transfer": [ACCOUNT, {"destination": OTHER_ACCOUNT, "hops": []}], "None": null}),
+        );
+        malformed_union.add_json_argument("mode", json!(1));
+        malformed_union.add_json_argument("routes", json!({}));
+        let union_result = std::panic::catch_unwind(|| malformed_union.resolve(&entries));
+        assert!(union_result.is_ok(), "malformed union must not panic");
+        assert!(union_result.unwrap().unwrap_err().contains("Action"));
+
+        let mut extra_struct_field = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "compose_all",
+            vec![],
+        );
+        extra_struct_field.add_json_argument(
+            "action",
+            json!({"Transfer": [ACCOUNT, {"destination": OTHER_ACCOUNT, "hops": [], "typo": 7}]}),
+        );
+        extra_struct_field.add_json_argument("mode", json!(1));
+        extra_struct_field.add_json_argument("routes", json!({}));
+        assert!(extra_struct_field
+            .resolve(&entries)
+            .unwrap_err()
+            .contains("typo"));
+
+        let mut malformed_enum = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "compose_all",
+            vec![],
+        );
+        malformed_enum.add_json_argument("action", json!("None"));
+        malformed_enum.add_json_argument("mode", json!("Exact"));
+        malformed_enum.add_json_argument("routes", json!({}));
+        let enum_result = std::panic::catch_unwind(|| malformed_enum.resolve(&entries));
+        assert!(enum_result.is_ok(), "malformed enum must not panic");
+        assert!(enum_result.unwrap().unwrap_err().contains("Mode"));
+
+        let mut error_enum = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_error",
+            vec![],
+        );
+        error_enum.add_json_argument("error", json!(7));
+        let error_result = std::panic::catch_unwind(|| error_enum.resolve(&entries));
+        assert!(error_result.is_ok(), "error enum input must not panic");
+        assert!(error_result.unwrap().unwrap_err().contains("RouteError"));
+    }
+
+    #[test]
+    fn typed_json_supported_static_types_roundtrip_through_semantic_review() {
+        fn assert_roundtrip(type_def: ScSpecTypeDef, value: Value) {
+            let entries = vec![function_entry("echo", &[("value", type_def)])];
+            let mut first =
+                ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "echo", vec![]);
+            first.add_json_argument("value", value);
+            let (first_low_level, first_review) = first.resolve(&entries).unwrap();
+
+            let mut second =
+                ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "echo", vec![]);
+            second.add_json_argument("value", first_review[0].value.clone());
+            let (second_low_level, second_review) = second.resolve(&entries).unwrap();
+
+            assert_eq!(first_low_level.args, second_low_level.args);
+            assert_eq!(first_review[0].value, second_review[0].value);
+            assert_eq!(first_review[0].scval_xdr, second_review[0].scval_xdr);
+        }
+
+        assert_roundtrip(ScSpecTypeDef::Bool, json!(true));
+        assert_roundtrip(ScSpecTypeDef::Void, Value::Null);
+        assert_roundtrip(ScSpecTypeDef::U32, json!(7));
+        assert_roundtrip(ScSpecTypeDef::I32, json!(-7));
+        assert_roundtrip(ScSpecTypeDef::U64, json!(7u64));
+        assert_roundtrip(ScSpecTypeDef::I64, json!(-7i64));
+        assert_roundtrip(ScSpecTypeDef::Timepoint, json!(1_760_501_234u64));
+        assert_roundtrip(ScSpecTypeDef::Duration, json!(1_234_567u64));
+        assert_roundtrip(
+            ScSpecTypeDef::U128,
+            json!("340282366920938463463374607431768211455"),
+        );
+        assert_roundtrip(
+            ScSpecTypeDef::I128,
+            json!("-170141183460469231731687303715884105728"),
+        );
+        assert_roundtrip(ScSpecTypeDef::U256, json!("0xffff"));
+        assert_roundtrip(ScSpecTypeDef::I256, json!("-65535"));
+        assert_roundtrip(ScSpecTypeDef::Bytes, json!("00a0ff"));
+        assert_roundtrip(ScSpecTypeDef::String, json!("hello world"));
+        assert_roundtrip(ScSpecTypeDef::Symbol, json!("hello"));
+        assert_roundtrip(ScSpecTypeDef::Address, json!(ACCOUNT));
+        assert_roundtrip(ScSpecTypeDef::MuxedAddress, json!(ACCOUNT));
+        assert_roundtrip(
+            ScSpecTypeDef::BytesN(ScSpecTypeBytesN { n: 4 }),
+            json!("00a0ff01"),
+        );
+        assert_roundtrip(option_of(ScSpecTypeDef::U32), Value::Null);
+        assert_roundtrip(option_of(ScSpecTypeDef::U32), json!(7));
+        assert_roundtrip(vec_of(ScSpecTypeDef::U32), json!([1, 2, 3]));
+        assert_roundtrip(
+            map_of(ScSpecTypeDef::U32, ScSpecTypeDef::String),
+            json!({"7": "seven"}),
+        );
+        assert_roundtrip(
+            tuple_of(vec![ScSpecTypeDef::U32, ScSpecTypeDef::String]),
+            json!([7, "seven"]),
+        );
+    }
+
+    #[test]
+    fn structured_json_void_uses_json_null() {
+        let entries = vec![function_entry(
+            "accept_void",
+            &[("value", ScSpecTypeDef::Void)],
+        )];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_void",
+            vec![],
+        );
+        request.add_json_argument("value", Value::Null);
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert_eq!(low_level.args[0], ScVal::Void);
+        assert_eq!(review[0].value, Value::Null);
+    }
+
+    #[test]
+    fn structured_json_arguments_cover_time_types_and_special_map_keys() {
+        let entries = vec![function_entry(
+            "edge_values",
+            &[
+                ("when", ScSpecTypeDef::Timepoint),
+                ("for", ScSpecTypeDef::Duration),
+                ("u32_map", map_of(ScSpecTypeDef::U32, ScSpecTypeDef::String)),
+                ("bool_map", map_of(ScSpecTypeDef::Bool, ScSpecTypeDef::U32)),
+                (
+                    "bytes_map",
+                    map_of(
+                        ScSpecTypeDef::BytesN(ScSpecTypeBytesN { n: 2 }),
+                        ScSpecTypeDef::U32,
+                    ),
+                ),
+            ],
+        )];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "edge_values",
+            vec![],
+        );
+        request.add_json_argument("when", json!(1_760_501_234u64));
+        request.add_json_argument("for", json!(1_234_567u64));
+        request.add_json_argument("u32_map", json!({"7": "seven"}));
+        request.add_json_argument("bool_map", json!({"true": 1}));
+        request.add_json_argument("bytes_map", json!({"a0ff": 9}));
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Timepoint(_)));
+        assert!(matches!(low_level.args[1], ScVal::Duration(_)));
+        assert_eq!(review[0].value, json!(1_760_501_234u64));
+        assert_eq!(review[1].value, json!(1_234_567u64));
+        assert_eq!(review[2].value, json!({"7": "seven"}));
+        assert_eq!(review[3].value, json!({"true": 1}));
+        assert_eq!(review[4].value, json!({"a0ff": 9}));
+    }
+
+    #[test]
+    fn structured_json_map_keys_cover_timepoint_and_nested_udt_adaptation() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("ScheduleKey").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("delay").unwrap(),
+                        type_: ScSpecTypeDef::Duration,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("when").unwrap(),
+                        type_: ScSpecTypeDef::Timepoint,
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry(
+                "set_maps",
+                &[
+                    (
+                        "times",
+                        map_of(ScSpecTypeDef::Timepoint, ScSpecTypeDef::U32),
+                    ),
+                    ("schedules", map_of(udt("ScheduleKey"), ScSpecTypeDef::U32)),
+                ],
+            ),
+        ];
+        let mut schedule_map = serde_json::Map::new();
+        schedule_map.insert(
+            r#"{"delay":1234567,"when":1760501234}"#.to_owned(),
+            json!(2),
+        );
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "set_maps", vec![]);
+        request.add_json_argument("times", json!({"1760501234": 1}));
+        request.add_json_argument("schedules", Value::Object(schedule_map));
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert!(matches!(low_level.args[0], ScVal::Map(Some(_))));
+        assert!(matches!(low_level.args[1], ScVal::Map(Some(_))));
+        assert_eq!(review[0].value, json!({"1760501234": 1}));
+        assert_eq!(review[1].value.as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn structured_json_val_accepts_explicit_scval_shape_and_normalizes_payload() {
+        let entries = vec![function_entry("echo", &[("value", ScSpecTypeDef::Val)])];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "echo", vec![]);
+        request.add_json_argument("value", json!({"u32": 7}));
+
+        let (low_level, review) = request.resolve(&entries).unwrap();
+        assert_eq!(low_level.args[0], ScVal::U32(7));
+        assert_eq!(review[0].value, json!(7));
+    }
+
+    #[test]
+    fn structured_json_result_input_fails_closed_without_an_official_encoding() {
+        let entries = vec![function_entry(
+            "accept_result",
+            &[("value", result_of(ScSpecTypeDef::U32, ScSpecTypeDef::U32))],
+        )];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_result",
+            vec![],
+        );
+        request.add_json_argument("value", json!({"ok": 7}));
+
+        let result = std::panic::catch_unwind(|| request.resolve(&entries));
+        assert!(result.is_ok(), "Result input must not panic");
+        let error = result.unwrap().unwrap_err();
+        assert!(error.contains("result"), "{error}");
+        assert!(error.contains("no stable composed input form"), "{error}");
+    }
+
+    #[test]
+    fn scval_xdr_result_success_matches_advertised_composition_mode() {
+        let entries = vec![function_entry(
+            "accept_result",
+            &[("value", result_of(ScSpecTypeDef::U32, ScSpecTypeDef::Error))],
+        )];
+        let interface = ContractInterface::from_spec(
+            "CCONTRACT",
+            ContractExecutableObservation {
+                kind: ContractExecutableKind::Wasm,
+                wasm_hash: None,
+            },
+            vec![],
+            &entries,
+        );
+        assert_eq!(
+            interface.function("accept_result").unwrap().inputs[0].composition,
+            ContractInputComposition::ScValXdrSuccessOnly
+        );
+
+        let mut success = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_result",
+            vec![],
+        );
+        success.add_scval_xdr_argument(
+            "value",
+            ScVal::U32(7).to_xdr_base64(Limits::none()).unwrap(),
+        );
+        let (low_level, review) = success.resolve(&entries).unwrap();
+        assert_eq!(low_level.args, vec![ScVal::U32(7)]);
+        assert_eq!(review[0].value, json!(7));
+
+        let mut error = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_result",
+            vec![],
+        );
+        error.add_scval_xdr_argument(
+            "value",
+            ScVal::Error(stellar_xdr::ScError::Contract(7))
+                .to_xdr_base64(Limits::none())
+                .unwrap(),
+        );
+        let error = error.resolve(&entries).unwrap_err();
+        assert!(error.contains("Result error values"), "{error}");
+    }
+
+    #[test]
+    fn scval_xdr_error_argument_fails_closed_before_official_normalizer_panic() {
+        let entries = vec![function_entry(
+            "accept_error",
+            &[("value", ScSpecTypeDef::Error)],
+        )];
+        let mut request = ContractInvokeRequest::new(
+            format!("{}", StrkeyContract([0; 32])),
+            "accept_error",
+            vec![],
+        );
+        let error = ScVal::Error(stellar_xdr::ScError::Contract(7))
+            .to_xdr_base64(Limits::none())
+            .unwrap();
+        request.add_scval_xdr_argument("value", error);
+        let result = std::panic::catch_unwind(|| request.resolve(&entries));
+        assert!(result.is_ok(), "Error argument must not panic");
+        let error = result.unwrap().unwrap_err();
+        assert!(error.contains("cannot be safely normalized"), "{error}");
+    }
+
+    #[test]
+    fn contract_spec_named_struct_fields_must_follow_canonical_key_order() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("UnsafeOrder").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("zeta").unwrap(),
+                        type_: ScSpecTypeDef::U32,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("alpha").unwrap(),
+                        type_: ScSpecTypeDef::String,
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry("read", &[("value", udt("UnsafeOrder"))]),
+        ];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "read", vec![]);
+        request.add_json_argument("value", json!({"alpha": "x", "zeta": 7}));
+        let result = std::panic::catch_unwind(|| request.resolve(&entries));
+        assert!(result.is_ok(), "noncanonical Contract Spec must not panic");
+        let error = result.unwrap().unwrap_err();
+        assert!(error.contains("UnsafeOrder"), "{error}");
+        assert!(error.contains("canonical field order"), "{error}");
+    }
+
+    #[test]
+    fn structured_json_nested_time_and_void_values_are_adapted_before_official_encoding() {
+        let entries = vec![
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name: StringM::try_from("Schedule").unwrap(),
+                fields: VecM::try_from(vec![
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("delay").unwrap(),
+                        type_: ScSpecTypeDef::Duration,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("marker").unwrap(),
+                        type_: ScSpecTypeDef::Void,
+                    },
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: StringM::try_from("when").unwrap(),
+                        type_: ScSpecTypeDef::Timepoint,
+                    },
+                ])
+                .unwrap(),
+            }),
+            function_entry("schedule", &[("value", udt("Schedule"))]),
+        ];
+        let value = json!({
+            "when": 1_760_501_234u64,
+            "delay": 1_234_567u64,
+            "marker": null,
+        });
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "schedule", vec![]);
+        request.add_json_argument("value", value.clone());
+
+        let (_, review) = request.resolve(&entries).unwrap();
+        assert_eq!(review[0].value, value);
+    }
+
+    #[test]
+    fn dynamic_val_review_keeps_exact_scval_identity() {
+        let entries = vec![function_entry("echo", &[("value", ScSpecTypeDef::Val)])];
+
+        let mut unsigned =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "echo", vec![]);
+        unsigned.add_json_argument("value", json!({"u32": 7}));
+        let (_, unsigned_review) = unsigned.resolve(&entries).unwrap();
+
+        let mut signed =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "echo", vec![]);
+        signed.add_json_argument("value", json!({"i32": 7}));
+        let (_, signed_review) = signed.resolve(&entries).unwrap();
+
+        assert_eq!(unsigned_review[0].value, json!(7));
+        assert_eq!(signed_review[0].value, json!(7));
+        assert_ne!(unsigned_review[0].scval_xdr, signed_review[0].scval_xdr);
+        assert_eq!(
+            ScVal::from_xdr_base64(&unsigned_review[0].scval_xdr, Limits::none()).unwrap(),
+            ScVal::U32(7)
+        );
+        assert_eq!(
+            ScVal::from_xdr_base64(&signed_review[0].scval_xdr, Limits::none()).unwrap(),
+            ScVal::I32(7)
+        );
+    }
+
+    #[test]
+    fn dynamic_val_output_keeps_exact_scval_identity() {
+        let entries = vec![function_entry_with_outputs(
+            "echo",
+            &[],
+            &[ScSpecTypeDef::Val],
+        )];
+        let mut simulation = simulation_response(vec![]);
+        simulation.results[0].xdr = STANDARD.encode(ScVal::I32(7).to_xdr(Limits::none()).unwrap());
+
+        let (value, scval_xdr) = decode_simulation_output(&entries, "echo", &simulation).unwrap();
+        assert_eq!(value, Some(json!(7)));
+        assert_eq!(
+            ScVal::from_xdr_base64(scval_xdr.unwrap(), Limits::none()).unwrap(),
+            ScVal::I32(7)
+        );
+    }
+
+    #[test]
     fn optional_argument_can_be_omitted_like_stellar_cli() {
         let entries = vec![function_entry(
             "maybe",
@@ -1730,6 +3647,44 @@ mod tests {
     }
 
     #[test]
+    fn scval_xdr_scalar_type_mismatch_fails_closed_without_official_normalizer_panic() {
+        let entries = vec![function_entry("set", &[("value", ScSpecTypeDef::U32)])];
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "set", vec![]);
+        request.add_scval_xdr_argument(
+            "value",
+            ScVal::I32(7).to_xdr_base64(Limits::none()).unwrap(),
+        );
+        let result = std::panic::catch_unwind(|| request.resolve(&entries));
+        assert!(result.is_ok(), "mismatched ScVal must not panic");
+        let error = result.unwrap().unwrap_err();
+        assert!(
+            error.contains("does not match Contract Spec type u32"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn scval_xdr_tuple_arity_is_validated_before_normalization() {
+        let entries = vec![function_entry(
+            "set",
+            &[(
+                "value",
+                tuple_of(vec![ScSpecTypeDef::U32, ScSpecTypeDef::String]),
+            )],
+        )];
+        let value = ScVal::Vec(Some(vec![ScVal::U32(7)].try_into().unwrap()));
+        let mut request =
+            ContractInvokeRequest::new(format!("{}", StrkeyContract([0; 32])), "set", vec![]);
+        request.add_scval_xdr_argument("value", value.to_xdr_base64(Limits::none()).unwrap());
+        let error = request.resolve(&entries).unwrap_err();
+        assert!(
+            error.contains("does not match Contract Spec type (u32,string)"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn scval_xdr_argument_rejects_invalid_base64() {
         let entries = vec![function_entry("set", &[("value", ScSpecTypeDef::U32)])];
         let mut request =
@@ -1747,7 +3702,7 @@ mod tests {
         request.add_scval_xdr_argument("value", AQUA_TESTNET_SWAP_CHAIN_XDR);
         let error = request.resolve(&entries).unwrap_err();
         assert!(
-            error.contains("unable to normalize contract argument --value (u32)"),
+            error.contains("invalid contract argument --value (u32)"),
             "{error}"
         );
     }
