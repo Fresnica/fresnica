@@ -89,7 +89,7 @@ If preparation completed before expiry, the resulting transaction contains absol
 
 Products may require a fresher quote before confirmation as UX policy, but must rebuild the review if they do.
 
-Observed ledger sequence is provenance, not a replacement for the expiry rule.
+Observed ledger sequence is provenance, not a replacement for the expiry rule. `quoted_at` records when Fresnica obtained the quote; it must not make an already stale/unhealthy provider look fresh. Provider freshness remains part of the Network / Gateway boundary.
 
 ## Slippage
 
@@ -120,7 +120,7 @@ source_max =
 
 The result must be positive and representable by Stellar. The exact `destination_min` or `source_max` is transaction truth.
 
-A displayed rate may be derived from quoted amounts. Price impact/spread is not Normative because it requires an independent reference price; if shown, it must not replace the ledger slippage limit.
+Slippage protects execution against movement away from the reviewed quote; it does not prove that the quote itself is fair. Review must expose the exact source/destination amounts and effective rate. A displayed price-impact/spread metric is not Normative because it requires an independent reference price; if shown, its comparison source must be defined and it must not replace the ledger slippage limit.
 
 ## Prepare and review
 
