@@ -6,228 +6,184 @@ Maturity: **Normative**
 
 This capability defines atomic Classic-asset conversion with Stellar Path Payment operations.
 
-A Path Payment can convert one asset into another while paying another Classic account. A **Swap** is the same semantic operation with the destination account equal to the source account. Swap is not a third ledger operation and must not be implemented as a hidden offer workflow.
+A Path Payment can convert one asset while paying another Classic account. A **Swap** is the same operation with destination = source. Swap is not a separate ledger primitive and is not an offer workflow.
 
-This contract covers Classic assets only:
-
-- native XLM;
-- issued assets identified as `CODE:GISSUER`.
-
-Soroban token swaps belong to contract/protocol capabilities, not this contract.
+Scope: XLM and Classic issued assets (`CODE:GISSUER`). Soroban token swaps are outside this contract.
 
 ## Modes
 
-Two user intents are supported.
-
-### Strict send
-
-The source amount is exact. The destination amount is quoted and protected by a minimum:
+`strict_send` fixes the source amount:
 
 ```text
-fixed:  source amount
-quote:  destination amount
-limit:  destination_min
-ledger: PathPaymentStrictSend
+fixed: source amount
+quote: destination amount
+limit: destination_min
+operation: PathPaymentStrictSend
 ```
 
-### Strict receive
-
-The destination amount is exact. The source amount is quoted and protected by a maximum:
+`strict_receive` fixes the destination amount:
 
 ```text
-fixed:  destination amount
-quote:  source amount
-limit:  source_max
-ledger: PathPaymentStrictReceive
+fixed: destination amount
+quote: source amount
+limit: source_max
+operation: PathPaymentStrictReceive
 ```
 
-For a Swap:
+For Swap, strict send means **sell exact** and strict receive means **buy exact**.
 
-- strict send means "sell exactly this much";
-- strict receive means "buy exactly this much".
+## Request
 
-## Semantic request
-
-A request contains the semantic equivalents of:
+A request contains:
 
 - network;
-- source Classic account;
-- destination Classic account;
-- source asset;
-- destination asset;
-- mode: `strict_send` or `strict_receive`;
-- the fixed-side amount;
+- source and destination Classic `G...` accounts;
+- source and destination asset;
+- mode;
+- fixed-side amount;
 - optional transaction memo.
 
-Source and destination assets must differ.
+Source and destination assets must differ. Amounts are positive, exact Stellar seven-decimal values; binary floating point must not determine transaction amounts.
 
-The current shared scope uses Classic `G...` accounts. Muxed-account support must be added explicitly rather than silently demuxed.
-
-A destination must already exist. Path Payment does not inherit Payment Capability's XLM `CreateAccount` behavior.
+The destination must already exist. Path Payment does not inherit Payment Capability's `CreateAccount` behavior. Muxed accounts require a later explicit contract extension.
 
 ## Quote
 
-A quote is a short-lived observation of available path liquidity. It is not a rate guarantee.
+A quote records:
 
-A quote exposes at least:
-
-- network;
-- mode;
-- source and destination account;
-- source and destination asset;
+- request identity: network, accounts, assets and mode;
 - quoted source amount;
 - quoted destination amount;
 - ordered intermediate asset path;
-- quote time;
-- expiry time;
+- `quoted_at` and `expires_at`;
 - observed ledger sequence when the provider exposes one.
 
-Amounts use exact seven-decimal Stellar semantics. Binary floating point must not determine a quoted amount or safety limit.
+`path` contains intermediate assets only; endpoints are omitted. At most five intermediate assets are valid.
 
-The `path` contains **intermediate assets only**. Source and destination assets are not repeated in it. Stellar Path Payment permits at most five intermediate assets; longer paths are invalid.
+The signed operation fixes the asset path, not individual offers or liquidity pools used inside each hop. Do not present a quote as reserved liquidity.
 
-The signed operation commits to this asset path. It does **not** commit to particular offers or liquidity pools inside a hop. A product must not present a quote as if it reserved specific liquidity.
+For candidates from the same request, default ordering is:
 
-If multiple candidates are returned for the same request, the default ordering is deterministic:
-
-1. strict send: larger destination amount first;
-2. strict receive: smaller source amount first;
+1. strict send: larger destination amount;
+2. strict receive: smaller source amount;
 3. fewer intermediate assets;
-4. canonical lexical path identity as the final tie-breaker.
+4. canonical lexical path identity.
 
-A product may let the user select another candidate, but preparation must use the selected candidate exactly.
+A selected candidate must be used exactly during preparation.
 
-## Quote lifetime
+## Expiry
 
-A live quote has a maximum lifetime of **30 seconds**:
+A live quote expires within 30 seconds:
 
 ```text
 expires_at <= quoted_at + 30 seconds
 ```
 
-An implementation may use a shorter lifetime. It must not extend a live quote beyond 30 seconds without producing a new quote.
+Implementations may shorten this window but must not extend it without a new quote.
 
-At or after `expires_at`, preparation fails with `quote_expired`. Re-quoting may change the amounts or asset path and therefore requires a new review.
+At or after `expires_at`, preparation returns `quote_expired`. Re-quoting may change amounts or path and requires a new review.
 
-The prepared transaction TimeBounds must not outlive the quote:
+The transaction must not outlive the quote:
 
 ```text
 transaction.max_time <= quote.expires_at
 ```
 
-If authorization cannot complete inside the remaining window, re-quote before asking the user to authorize.
-
-Observed ledger sequence is quote provenance, not a substitute for the time expiry rule.
+Observed ledger sequence is provenance, not a replacement for the expiry rule.
 
 ## Slippage
 
-Slippage is expressed as integer basis points:
+`slippage_bps` is explicit:
 
 ```text
 0 <= slippage_bps <= 1000
 100 bps = 1%
 ```
 
-The Capability has no silent default. A product Flow may choose a default, but it must pass the selected value into preparation and show it in review.
+The Capability has no hidden default. Product Flows may choose a default, but the selected value must enter preparation and review.
 
-Safety limits are derived in integer stroops.
+Limits are derived with integer stroop arithmetic.
 
-For strict send:
+Strict send:
 
 ```text
 destination_min =
   floor(quoted_destination_stroops * (10000 - slippage_bps) / 10000)
 ```
 
-For strict receive:
+Strict receive:
 
 ```text
 source_max =
   ceil(quoted_source_stroops * (10000 + slippage_bps) / 10000)
 ```
 
-The derived limit must remain positive and representable by Stellar.
+The result must be positive and representable by Stellar. The exact `destination_min` or `source_max` is transaction truth.
 
-The exact derived `destination_min` or `source_max` is part of the transaction truth. A UI percentage is not the safety boundary.
+A displayed rate may be derived from quoted amounts. Price impact/spread is not Normative because it requires an independent reference price; if shown, it must not replace the ledger slippage limit.
 
-A quote at zero slippage is valid but more likely to fail after liquidity changes.
+## Prepare and review
 
-## Price and price impact
-
-The stable quote truth is the pair of source/destination amounts plus the selected path.
-
-A product may derive an effective display rate from those amounts.
-
-"Price impact", "spread", or "savings" are **not** Normative quote fields because they require an independent reference price. If a product shows one, it must define the comparison source and must not use that display metric instead of `destination_min` / `source_max`.
-
-## Preparation and review binding
-
-The lifecycle is:
+Lifecycle:
 
 ```text
-quote -> select quote -> prepare -> review -> confirm -> authorize -> sign -> submit
+quote -> select -> prepare -> review -> confirm -> authorize -> sign -> submit
 ```
 
-Preparation must bind:
+Preparation binds the exact:
 
-- the selected quote;
-- the exact path;
-- the fixed amount;
-- the quoted opposite amount;
-- slippage basis points;
-- derived `destination_min` or `source_max`;
-- quote expiry;
-- transaction TimeBounds;
-- fee and network;
-- memo when present.
+- selected path and quote amounts;
+- fixed amount;
+- slippage basis points and derived limit;
+- quote expiry and transaction TimeBounds;
+- source/destination accounts and assets;
+- fee, network and memo.
 
-Preparation may re-check current account/provider state. It must not silently replace the selected path or derive a new quote under an already-approved review.
+Preparation may refresh account/provider state. It must not silently replace the path or quote.
 
-Any change to path, quote amount, slippage limit, destination, memo, fee policy or network requires a new prepared review.
+Changing path, quote amount, slippage, destination, memo, fee policy or network requires a new prepared review.
 
-## Account and trustline safety
+## Safety checks
 
-Preparation must check the applicable current state before presenting the transaction as executable:
+Before presenting the transaction as executable, check:
 
-- source asset availability after selling liabilities;
-- native balance for fee/reserve requirements;
+- source availability after selling liabilities;
+- native fee/reserve availability;
 - source trustline authorization for an ordinary issued source asset;
-- destination account existence;
-- destination trustline/full authorization/capacity for an ordinary issued destination asset;
-- issuer special cases required by current Stellar semantics.
+- destination existence;
+- destination trustline authorization and capacity for an ordinary issued destination asset;
+- applicable issuer special cases.
 
-Intermediate path assets do not require the source or destination account to hold trustlines for every hop.
+Intermediate assets do not require source/destination trustlines.
 
-Missing destination trustlines are not added implicitly by this Capability. If a product deliberately combines `ChangeTrust` with a same-account Swap, the additional operation, limit, reserve effect and fee must be explicit in the prepared review.
+Missing destination trustlines are not added implicitly. If a same-account Swap deliberately includes `ChangeTrust`, that extra operation, limit, reserve effect and fee must be visible in review.
 
-SEP-29 memo-required safety applies to cross-account Path Payments just as it does to ordinary Payment. A same-account Swap normally has no memo requirement.
+SEP-29 memo-required safety applies to cross-account Path Payments.
 
-The network remains authoritative for path liquidity and operation result codes. In particular, a path can still fail because liquidity changed, an issuer/path became invalid, or execution would cross the source account's own offer.
+The network remains authoritative for liquidity and result codes. A transaction can still fail because liquidity changed, an issuer/path became invalid, or execution would cross the source account's own offer.
 
-## Swap specialization
+## Swap
 
-A Swap is:
+Swap is the specialization:
 
 ```text
 destination_account = source_account
 source_asset != destination_asset
 ```
 
-The same quote, slippage, expiry, review and signing rules apply.
+Use the same quote, expiry, slippage, review and signing rules.
 
-A Swap is intended for immediate bounded conversion. Persistent maker intent remains the SDEX Capability's `ManageBuyOffer` / `ManageSellOffer` domain.
+Swap is immediate bounded conversion. Persistent maker orders remain part of the SDEX Capability.
 
 ## Submission safety
 
-Path Payment uses the common Transaction and Signing Coordination contracts.
+Quote expiry after submission does not prove failure. If submission is uncertain, use normal Transaction reconciliation and do not send a newly quoted replacement until the earlier transaction is known not to have landed.
 
-A quote expiring after submission does not prove submission failure. If submission outcome is uncertain, follow normal pending/reconciliation rules. Do not build and submit a fresh quote until the earlier transaction is known not to have landed.
-
-No Flow or provider adapter may rebuild a different Path Payment after the user reviewed and authorized the prepared transaction.
+No layer may rebuild a different Path Payment after review/authorization.
 
 ## Errors
 
-Stable semantic categories include:
+Stable categories include:
 
 - `invalid_request`;
 - `slippage_out_of_range`;
@@ -242,18 +198,16 @@ Stable semantic categories include:
 - `issuer_missing`;
 - `cross_self`;
 - `slippage_exceeded`;
-- authorization/signing/submission errors from the common Transaction/Signing contracts.
+- common authorization/signing/submission errors.
 
 Protocol `UNDER_DESTMIN` and `OVER_SENDMAX` map to `slippage_exceeded`.
 
 ## Platform boundary
 
-This is a semantic contract, not a shared application implementation.
+This contract standardizes semantics, not source code.
 
-Mobile/Web may use their platform Stellar SDK and provider client. CLI/TUI/Desktop may use the Rust reference implementation when one is available. Native SDK/FFI continues to own shared cryptographic/security behavior and is not expanded merely to centralize Path Payment networking.
-
-Conforming implementations share the request/quote/slippage/review/safety meaning above.
+Mobile/Web implement the capability with their platform Stellar/provider stack. CLI/TUI/Desktop may use a Rust implementation. Native SDK/FFI remains the shared cryptographic/security boundary; Path Payment networking does not move into it.
 
 ## Conformance
 
-Cross-language cases are in [`../../spec/test-vectors/path-payment-v1.json`](../../spec/test-vectors/path-payment-v1.json).
+Vectors: [`../../spec/test-vectors/path-payment-v1.json`](../../spec/test-vectors/path-payment-v1.json).
