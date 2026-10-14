@@ -83,11 +83,11 @@ Implementations may shorten this window but must not extend it without a new quo
 
 At or after `expires_at`, preparation returns `quote_expired`. Re-quoting may change amounts or path and requires a new review.
 
-The transaction must not outlive the quote:
+Quote expiry gates **preparation**, not the lifetime of an already prepared transaction.
 
-```text
-transaction.max_time <= quote.expires_at
-```
+If preparation completed before expiry, the resulting transaction contains absolute `destination_min` / `source_max` protection and follows the common Transaction Capability TimeBounds policy. This keeps Path Payment compatible with hardware and multisig authorization that may take longer than a quote window.
+
+Products may require a fresher quote before confirmation as UX policy, but must rebuild the review if they do.
 
 Observed ledger sequence is provenance, not a replacement for the expiry rule.
 
@@ -135,7 +135,7 @@ Preparation binds the exact:
 - selected path and quote amounts;
 - fixed amount;
 - slippage basis points and derived limit;
-- quote expiry and transaction TimeBounds;
+- quote expiry and the separately chosen Transaction TimeBounds;
 - source/destination accounts and assets;
 - fee, network and memo.
 
