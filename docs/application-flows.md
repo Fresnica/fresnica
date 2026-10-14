@@ -101,6 +101,7 @@ Examples:
 | --- | --- |
 | Send amount input widget | Flow |
 | Amount precision / stroop meaning | Payment Capability |
+| Path quote/slippage/expiry meaning | Path Payment / Swap Capability |
 | Show confirmation as screen vs modal | Flow |
 | Immutable review must match exact transaction | Transaction Capability |
 | BID/ASK panel layout | Flow/UI |
@@ -115,6 +116,7 @@ These names are shared vocabulary, not mandatory product checklists:
 - Onboarding Flow;
 - Account Management Flow;
 - Send Flow;
+- Swap Flow;
 - Trustline Flow;
 - Portfolio Flow;
 - History Flow;
@@ -180,11 +182,12 @@ Contacts / Destination Resolution
 Asset Discovery / Catalog
 Balance / Availability
 Payment
+Path Payment / Swap (when source and destination assets differ)
 Transaction
 Signing Coordination
 ```
 
-It does not independently reimplement destination existence semantics, CreateAccount-vs-Payment selection, reserve/liability preflight, memo meaning or signing rules.
+It does not independently reimplement destination existence semantics, CreateAccount-vs-Payment selection, Path Payment quote/slippage/expiry rules, reserve/liability preflight, memo meaning or signing rules.
 
 ## 9. Cross-flow composition
 
