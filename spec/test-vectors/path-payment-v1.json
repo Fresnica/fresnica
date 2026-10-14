@@ -3,7 +3,8 @@
   "quote_ttl": {
     "maximum_seconds": 30,
     "expires_when_now_equals_expires_at": true,
-    "transaction_max_time_must_not_exceed_quote_expiry": true
+    "expiry_gates_preparation": true,
+    "prepared_transaction_uses_transaction_capability_timebounds": true
   },
   "path": {
     "endpoints_are_excluded_from_intermediate_path": true,
