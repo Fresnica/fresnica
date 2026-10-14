@@ -28,6 +28,7 @@ Implementation evidence may come from another Fresnica repository. A Mobile/Web/
 | `balance` | Balance / Availability | Normative | [balance.md](balance.md) |
 | `asset-discovery` | Asset Discovery / Catalog | Defined | [asset-discovery.md](asset-discovery.md) |
 | `payment` | Payment | Normative | [payment.md](payment.md) |
+| `path-payment` | Path Payment / Swap | Normative | [path-payment.md](path-payment.md) |
 | `transaction` | Transaction | Normative | [transaction.md](transaction.md) |
 | `trustline` | Trustline | Normative | [trustline.md](trustline.md) |
 | `history` | History / Activity | Defined | [history.md](history.md) |

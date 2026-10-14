@@ -8,6 +8,8 @@ The SDEX Capability defines Fresnica's pair-relative Stellar DEX semantics for o
 
 Presentation is not standardized. A terminal order book, Mobile trading screen and Desktop market workspace may all conform to the same contract.
 
+Immediate bounded conversion belongs to the [Path Payment / Swap Capability](path-payment.md). SDEX offer semantics here are for persistent maker intent and market/account reads.
+
 ## Pair identity
 
 A market pair is always user-facing:

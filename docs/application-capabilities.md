@@ -25,6 +25,7 @@ Examples include:
 - Account;
 - Signer;
 - Payment;
+- Path Payment / Swap;
 - Transaction;
 - Trustline;
 - SDEX;
@@ -54,6 +55,7 @@ Example:
 | --- | --- |
 | amount input widget | Send Flow |
 | amount precision and asset identity | Payment Capability |
+| Path Payment quote/slippage/expiry meaning | Path Payment / Swap Capability |
 | review shown as screen vs modal | Send Flow |
 | review must match exact transaction | Transaction Capability |
 | BID/ASK layout | SDEX Flow/UI |
@@ -194,7 +196,7 @@ Examples include liquidity-pool portfolio projection under Balance, product-faci
 
 ## 6. Capability catalog
 
-The catalog is shared vocabulary, **not a mandatory product feature checklist**. It currently contains **19 Capabilities: 9 Normative and 10 Defined**.
+The catalog is shared vocabulary, **not a mandatory product feature checklist**. It currently contains **20 Capabilities: 10 Normative and 10 Defined**.
 
 | ID | Capability | Maturity | Detailed contract/reference |
 | --- | --- | --- | --- |
@@ -205,6 +207,7 @@ The catalog is shared vocabulary, **not a mandatory product feature checklist**.
 | `balance` | Balance / Availability | Normative | [Balance / Availability](capabilities/balance.md) |
 | `asset-discovery` | Asset Discovery / Catalog | Defined | [Asset Discovery / Catalog](capabilities/asset-discovery.md) |
 | `payment` | Payment | Normative | [Payment](capabilities/payment.md) |
+| `path-payment` | Path Payment / Swap | Normative | [Path Payment / Swap](capabilities/path-payment.md) |
 | `transaction` | Transaction | Normative | [Transaction](capabilities/transaction.md) |
 | `trustline` | Trustline | Normative | [Trustline](capabilities/trustline.md) |
 | `history` | History / Activity | Defined | [History / Activity](capabilities/history.md) |
@@ -360,6 +363,7 @@ reference/rust-client::storage      -> terminal Backup / Restore v1 reference im
 historical mobile-sdk-v0.1.0 portable-backup donor -> portable Backup / Restore v2 staging evidence
 reference/rust-client::service      -> Account / Balance / History reference accessors
 reference/rust-client::payment      -> Payment implementation
+Path Payment / Swap                  -> shared semantic contract; platform implementation remains local
 reference/rust-client::transaction  -> Transaction + part of Signing Coordination
 reference/rust-client::trustline    -> Trustline implementation
 reference/rust-client::dex          -> SDEX implementation
