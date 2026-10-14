@@ -1,0 +1,116 @@
+{
+  "schema": "fresnica-path-payment-v1",
+  "quote_ttl": {
+    "maximum_seconds": 30,
+    "expires_when_now_equals_expires_at": true,
+    "expiry_gates_preparation": true,
+    "prepared_transaction_uses_transaction_capability_timebounds": true,
+    "monotonic_elapsed_time_is_authoritative_when_available": true
+  },
+  "path": {
+    "endpoints_are_excluded_from_intermediate_path": true,
+    "maximum_intermediate_assets": 5
+  },
+  "slippage": [
+    {
+      "name": "strict-send-50bps-rounds-destination-min-down",
+      "mode": "strict_send",
+      "quoted_destination": "12.3456789",
+      "slippage_bps": 50,
+      "expected_destination_min": "12.2839505"
+    },
+    {
+      "name": "strict-receive-50bps-rounds-source-max-up",
+      "mode": "strict_receive",
+      "quoted_source": "3.1415926",
+      "slippage_bps": 50,
+      "expected_source_max": "3.1573006"
+    },
+    {
+      "name": "zero-slippage-preserves-strict-send-quote",
+      "mode": "strict_send",
+      "quoted_destination": "5",
+      "slippage_bps": 0,
+      "expected_destination_min": "5"
+    },
+    {
+      "name": "reject-slippage-above-cap",
+      "mode": "strict_receive",
+      "quoted_source": "5",
+      "slippage_bps": 1001,
+      "expected_error": "slippage_out_of_range"
+    }
+  ],
+  "selection": [
+    {
+      "name": "strict-send-prefers-more-destination",
+      "mode": "strict_send",
+      "candidates": [
+        {
+          "source": "5",
+          "destination": "9.9",
+          "path": [
+            "XLM"
+          ]
+        },
+        {
+          "source": "5",
+          "destination": "10",
+          "path": [
+            "USD:GISSUER"
+          ]
+        }
+      ],
+      "expected_index": 1
+    },
+    {
+      "name": "strict-receive-prefers-less-source",
+      "mode": "strict_receive",
+      "candidates": [
+        {
+          "source": "5.1",
+          "destination": "10",
+          "path": []
+        },
+        {
+          "source": "5",
+          "destination": "10",
+          "path": [
+            "XLM"
+          ]
+        }
+      ],
+      "expected_index": 1
+    },
+    {
+      "name": "equal-rate-prefers-shorter-path",
+      "mode": "strict_send",
+      "candidates": [
+        {
+          "source": "5",
+          "destination": "10",
+          "path": [
+            "XLM",
+            "USD:GISSUER"
+          ]
+        },
+        {
+          "source": "5",
+          "destination": "10",
+          "path": [
+            "XLM"
+          ]
+        }
+      ],
+      "expected_index": 1
+    }
+  ],
+  "swap": {
+    "source_account": "GACCOUNT",
+    "destination_account": "GACCOUNT",
+    "source_asset": "XLM",
+    "destination_asset": "USDC:GISSUER",
+    "strict_send_meaning": "sell_exact",
+    "strict_receive_meaning": "buy_exact"
+  }
+}

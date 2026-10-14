@@ -31,7 +31,7 @@ Implementations may additionally accept a contact/destination alias through the 
 
 ## Destination and operation selection
 
-The current Normative payment scope uses Classic `G...` destinations. Muxed-account, contract-payment and path-payment semantics should be added deliberately rather than inferred from this contract. A platform SDK accepting `M...` or Path Payment does not expand this contract; unsupported forms must fail explicitly and must not be silently demuxed/reinterpreted into the current `G...` path.
+The current Normative payment scope uses Classic `G...` destinations. Muxed-account and contract-payment semantics must be added deliberately rather than inferred from this contract. Cross-asset Path Payment and same-account Swap semantics are defined separately by the [Path Payment / Swap Capability](path-payment.md); they must not be silently treated as ordinary `Payment`.
 
 For Classic payments:
 
