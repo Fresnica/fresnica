@@ -14,6 +14,8 @@ Before Mobile-specific implementation documents, read the common contracts in th
 
 Then read the independent Mobile project's Feature-first architecture.
 
+For Mobile Path Payment / Swap work, the shared semantic contract is [`../../capabilities/path-payment.md`](../../capabilities/path-payment.md). Implement quote/path/slippage/expiry semantics in Mobile's Application Capability layer; do not add Horizon/path-finding or swap orchestration to Native SDK/FFI.
+
 The vocabulary mapping is:
 
 ```text
