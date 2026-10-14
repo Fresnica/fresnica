@@ -4,7 +4,8 @@
     "maximum_seconds": 30,
     "expires_when_now_equals_expires_at": true,
     "expiry_gates_preparation": true,
-    "prepared_transaction_uses_transaction_capability_timebounds": true
+    "prepared_transaction_uses_transaction_capability_timebounds": true,
+    "monotonic_elapsed_time_is_authoritative_when_available": true
   },
   "path": {
     "endpoints_are_excluded_from_intermediate_path": true,
