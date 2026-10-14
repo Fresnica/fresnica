@@ -79,9 +79,9 @@ A live quote expires within 30 seconds:
 expires_at <= quoted_at + 30 seconds
 ```
 
-Implementations may shorten this window but must not extend it without a new quote.
+Implementations may shorten this window but must not extend it without a new quote. Local expiry enforcement should use monotonic elapsed time when the platform provides it; wall-clock `quoted_at` / `expires_at` remain review and audit fields and must not let a device-clock rollback extend the quote.
 
-At or after `expires_at`, preparation returns `quote_expired`. Re-quoting may change amounts or path and requires a new review.
+At or after `expires_at` (or when the monotonic lifetime is exhausted), preparation returns `quote_expired`. Re-quoting may change amounts or path and requires a new review.
 
 Quote expiry gates **preparation**, not the lifetime of an already prepared transaction.
 
