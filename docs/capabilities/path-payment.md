@@ -100,7 +100,7 @@ Observed ledger sequence is provenance, not a replacement for the expiry rule.
 100 bps = 1%
 ```
 
-The Capability has no hidden default. Product Flows may choose a default, but the selected value must enter preparation and review.
+The Capability has no hidden default. Product Flows may choose a lower default or maximum, but 1000 bps is Fresnica's cross-product safety ceiling, not a Stellar protocol limit. Raising that ceiling is a contract change, not a UI bypass. The selected value must enter preparation and review.
 
 Limits are derived with integer stroop arithmetic.
 
