@@ -99,7 +99,7 @@ underlying_reserve_amount = pool_reserve_amount * share_ratio
 
 Pool details are cached by network + pool identity. If a live pool-detail lookup fails after a prior successful lookup, the reference can still build a position from cached pool state rather than dropping the position entirely.
 
-These are promising portfolio semantics but are not yet part of the Normative Balance contract. Mobile/Web/Desktop evidence should determine whether liquidity-pool position projection becomes a normative extension of Balance or a separate Capability. Liquidity-pool shares must not silently become normal payment/trustline/SDEX asset identity merely because they appear in an account balance response.
+These portfolio projection semantics remain non-normative. Transaction-producing exit semantics are defined separately by the [Liquidity Pool Capability](liquidity-pool.md), which requires live pool/account state and does not permit cached portfolio data to authorize a withdrawal. Liquidity-pool shares must not silently become normal payment/trustline/SDEX asset identity merely because they appear in an account balance response.
 
 ## Reference evidence
 

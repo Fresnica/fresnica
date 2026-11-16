@@ -26,6 +26,7 @@ Examples include:
 - Signer;
 - Payment;
 - Path Payment / Swap;
+- Liquidity Pool;
 - Transaction;
 - Trustline;
 - SDEX;
@@ -56,6 +57,7 @@ Example:
 | amount input widget | Send Flow |
 | amount precision and asset identity | Payment Capability |
 | Path Payment quote/slippage/expiry meaning | Path Payment / Swap Capability |
+| LP exit shares/minimums/cleanup meaning | Liquidity Pool Capability |
 | review shown as screen vs modal | Send Flow |
 | review must match exact transaction | Transaction Capability |
 | BID/ASK layout | SDEX Flow/UI |
@@ -196,7 +198,7 @@ Examples include liquidity-pool portfolio projection under Balance, product-faci
 
 ## 6. Capability catalog
 
-The catalog is shared vocabulary, **not a mandatory product feature checklist**. It currently contains **20 Capabilities: 10 Normative and 10 Defined**.
+The catalog is shared vocabulary, **not a mandatory product feature checklist**. It currently contains **21 Capabilities: 11 Normative and 10 Defined**.
 
 | ID | Capability | Maturity | Detailed contract/reference |
 | --- | --- | --- | --- |
@@ -205,6 +207,7 @@ The catalog is shared vocabulary, **not a mandatory product feature checklist**.
 | `wallet` | Wallet | Defined | [Wallet](capabilities/wallet.md) |
 | `backup-restore` | Backup / Restore | Defined | [Backup / Restore](capabilities/backup-restore.md) |
 | `balance` | Balance / Availability | Normative | [Balance / Availability](capabilities/balance.md) |
+| `liquidity-pool` | Liquidity Pool | Normative | [Liquidity Pool](capabilities/liquidity-pool.md) |
 | `asset-discovery` | Asset Discovery / Catalog | Defined | [Asset Discovery / Catalog](capabilities/asset-discovery.md) |
 | `payment` | Payment | Normative | [Payment](capabilities/payment.md) |
 | `path-payment` | Path Payment / Swap | Normative | [Path Payment / Swap](capabilities/path-payment.md) |

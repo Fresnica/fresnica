@@ -6,7 +6,7 @@ Maturity: **Normative**
 
 The Trustline Capability defines add, limit-change and remove semantics for ordinary Classic Stellar issued-asset trustlines.
 
-Product UI may call this **Manage Assets**; the chain semantics remain `ChangeTrust`. Liquidity-pool-share `ChangeTrustAsset` is outside the current Normative product scope and must not be enabled merely because a platform Stellar SDK exposes it.
+Product UI may call this **Manage Assets**; the chain semantics remain `ChangeTrust`. Ordinary issued-asset rules here do not apply to liquidity-pool-share `ChangeTrustAsset`. Optional pool-share cleanup after a full exit is defined narrowly by the [Liquidity Pool Capability](liquidity-pool.md); other pool-share trustline lifecycle behavior remains outside this Trustline contract.
 
 ## Asset identity
 

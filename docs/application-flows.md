@@ -102,6 +102,7 @@ Examples:
 | Send amount input widget | Flow |
 | Amount precision / stroop meaning | Payment Capability |
 | Path quote/slippage/expiry meaning | Path Payment / Swap Capability |
+| LP shares/minimum outputs/cleanup | Liquidity Pool Capability |
 | Show confirmation as screen vs modal | Flow |
 | Immutable review must match exact transaction | Transaction Capability |
 | BID/ASK panel layout | Flow/UI |
@@ -119,6 +120,7 @@ These names are shared vocabulary, not mandatory product checklists:
 - Swap Flow;
 - Trustline Flow;
 - Portfolio Flow;
+- Liquidity Pool Exit Flow;
 - History Flow;
 - SDEX Trading Flow;
 - Anchor Deposit Flow;
