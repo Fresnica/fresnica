@@ -127,7 +127,7 @@ LiquidityPoolWithdraw(all resolved shares, min A, min B)
 ChangeTrust(pool-share asset, limit = 0)
 ```
 
-The second operation is pool-share `ChangeTrust`, not ordinary issued-asset Trustline Capability removal.
+The second operation is pool-share `ChangeTrust`, not ordinary issued-asset Trustline Capability removal. Construct its pool-share `ChangeTrustAsset` from the live canonical pool parameters (asset A, asset B and protocol fee), and verify that those parameters derive the selected `pool_id`. A mismatch fails closed.
 
 A pool-share trustline counts as two account subentries under the current protocol. Closing it releases that footprint, subject to sponsorship ownership. Review must list cleanup separately and include its fee plus current reserve/sponsorship effect. A second confirmation prompt is not required; explicit opt-in plus the immutable transaction review is sufficient.
 
@@ -174,6 +174,7 @@ Stable categories include:
 - `under_minimum`;
 - `close_requires_full_exit`;
 - `close_precondition_failed`;
+- `pool_identity_mismatch`;
 - common fee/authorization/signing/submission errors.
 
 Protocol result mapping:
