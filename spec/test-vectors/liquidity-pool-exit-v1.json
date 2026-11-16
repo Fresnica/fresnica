@@ -52,7 +52,7 @@
     {
       "name": "positive-one-stroop-minimum-does-not-drop-to-zero",
       "pool": {
-        "reserve_a": "0.0000001",
+        "reserve_a": "0.0000010",
         "reserve_b": "10.0000000",
         "total_shares": "10.0000000"
       },
@@ -61,9 +61,9 @@
       "withdraw_shares": "1.0000000",
       "slippage_bps": 100,
       "expected": {
-        "amount_a": "0.0000000",
+        "amount_a": "0.0000001",
         "amount_b": "1.0000000",
-        "min_amount_a": "0.0000000",
+        "min_amount_a": "0.0000001",
         "min_amount_b": "0.9900000"
       }
     }
@@ -107,7 +107,8 @@
         "operations": [
           "liquidity_pool_withdraw",
           "change_trust_pool_share_remove"
-        ]
+        ],
+        "pool_share_subentries_removed": 2
       }
     }
   ],
