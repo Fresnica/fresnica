@@ -129,7 +129,7 @@ ChangeTrust(pool-share asset, limit = 0)
 
 The second operation is pool-share `ChangeTrust`, not ordinary issued-asset Trustline Capability removal.
 
-Review must list cleanup separately and include its fee plus current reserve/sponsorship effect. A second confirmation prompt is not required; explicit opt-in plus the immutable transaction review is sufficient.
+A pool-share trustline counts as two account subentries under the current protocol. Closing it releases that footprint, subject to sponsorship ownership. Review must list cleanup separately and include its fee plus current reserve/sponsorship effect. A second confirmation prompt is not required; explicit opt-in plus the immutable transaction review is sufficient.
 
 After cleanup, a future deposit requires creating the pool-share trustline again. Deleting the last pool-share trustline for a pool may also remove the corresponding pool ledger entry; this is protocol state, not a separate user asset loss.
 
