@@ -34,8 +34,8 @@
     {
       "name": "protocol-floor-before-slippage",
       "pool": {
-        "reserve_a": "1.0000000",
-        "reserve_b": "2.0000000",
+        "reserve_a": "10.0000000",
+        "reserve_b": "20.0000000",
         "total_shares": "3.0000000"
       },
       "owned_shares": "1.0000000",
@@ -43,10 +43,10 @@
       "withdraw_shares": "1.0000000",
       "slippage_bps": 50,
       "expected": {
-        "amount_a": "0.3333333",
-        "amount_b": "0.6666666",
-        "min_amount_a": "0.3316666",
-        "min_amount_b": "0.6633332"
+        "amount_a": "3.3333333",
+        "amount_b": "6.6666666",
+        "min_amount_a": "3.3166666",
+        "min_amount_b": "6.6333332"
       }
     },
     {
@@ -54,11 +54,11 @@
       "pool": {
         "reserve_a": "0.0000010",
         "reserve_b": "10.0000000",
-        "total_shares": "10.0000000"
+        "total_shares": "0.0010000"
       },
-      "owned_shares": "1.0000000",
+      "owned_shares": "0.0001000",
       "mode": "exact_shares",
-      "withdraw_shares": "1.0000000",
+      "withdraw_shares": "0.0001000",
       "slippage_bps": 100,
       "expected": {
         "amount_a": "0.0000001",
