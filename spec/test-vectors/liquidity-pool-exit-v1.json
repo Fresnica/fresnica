@@ -155,6 +155,13 @@
       "name": "slippage-above-safety-ceiling",
       "slippage_bps": 1001,
       "expected_error": "slippage_out_of_range"
+    },
+    {
+      "name": "cleanup-pool-parameters-do-not-match-pool-id",
+      "mode": "all",
+      "close_pool_share_trustline": true,
+      "pool_parameters_match_pool_id": false,
+      "expected_error": "pool_identity_mismatch"
     }
   ]
 }
