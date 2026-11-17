@@ -16,6 +16,8 @@ Then read the independent Mobile project's Feature-first architecture.
 
 For Mobile Path Payment / Swap work, the shared semantic contract is [`../../capabilities/path-payment.md`](../../capabilities/path-payment.md). Implement quote/path/slippage/expiry semantics in Mobile's Application Capability layer; do not add Horizon/path-finding or swap orchestration to Native SDK/FFI.
 
+For Mobile liquidity-pool exit, use [`../../capabilities/liquidity-pool.md`](../../capabilities/liquidity-pool.md). Pool lookup, withdrawal estimation and `LiquidityPoolWithdraw` construction remain in Mobile's Application Capability/network layer; Native SDK/FFI remains the signing boundary.
+
 The vocabulary mapping is:
 
 ```text

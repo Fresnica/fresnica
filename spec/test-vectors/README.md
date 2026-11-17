@@ -9,6 +9,7 @@ Current sets:
 - `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
 - `message-signing-v1.json`: SEP-53 v1.0.0 prefixed-message payload, single SHA-256 digest, Ed25519 signature, UTF-8, and raw-binary compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
+- `liquidity-pool-exit-v1.json`: pool-share withdrawal rounding, minimum-output protection, full/partial exit, cleanup and failure semantics.
 - `asset-identity-v1.json`: exact Classic native/issued asset identity, including case-sensitive issued codes and `xlm:G...` constructor-normalization hazards.
 - `smart-account-auth-v1.json`: real Protocol 27 Testnet smart-account authorization captured after a confirmed WebAuthn/passkey transfer and accepted by the provider fixture verifier.
 - `portable-backup-v2.json`: portable Account/Signer graph shape and restore-activation classification; signer envelopes are opaque placeholders because cryptographic protection is already covered by protection vectors.

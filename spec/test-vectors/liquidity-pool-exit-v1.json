@@ -1,0 +1,167 @@
+{
+  "schema": "fresnica-liquidity-pool-exit-v1",
+  "snapshot_ttl": {
+    "maximum_seconds": 30,
+    "expiry_gates_preparation": true,
+    "prepared_transaction_uses_transaction_capability_timebounds": true,
+    "monotonic_elapsed_time_is_authoritative_when_available": true,
+    "cached_pool_state_is_not_valid_for_preparation": true
+  },
+  "slippage": {
+    "minimum_bps": 0,
+    "maximum_bps": 1000,
+    "no_hidden_default": true
+  },
+  "calculations": [
+    {
+      "name": "partial-exit-100bps",
+      "pool": {
+        "reserve_a": "100.0000000",
+        "reserve_b": "200.0000000",
+        "total_shares": "50.0000000"
+      },
+      "owned_shares": "5.0000000",
+      "mode": "exact_shares",
+      "withdraw_shares": "2.5000000",
+      "slippage_bps": 100,
+      "expected": {
+        "amount_a": "5.0000000",
+        "amount_b": "10.0000000",
+        "min_amount_a": "4.9500000",
+        "min_amount_b": "9.9000000"
+      }
+    },
+    {
+      "name": "protocol-floor-before-slippage",
+      "pool": {
+        "reserve_a": "10.0000000",
+        "reserve_b": "20.0000000",
+        "total_shares": "3.0000000"
+      },
+      "owned_shares": "1.0000000",
+      "mode": "exact_shares",
+      "withdraw_shares": "1.0000000",
+      "slippage_bps": 50,
+      "expected": {
+        "amount_a": "3.3333333",
+        "amount_b": "6.6666666",
+        "min_amount_a": "3.3166666",
+        "min_amount_b": "6.6333332"
+      }
+    },
+    {
+      "name": "positive-one-stroop-minimum-does-not-drop-to-zero",
+      "pool": {
+        "reserve_a": "0.0000010",
+        "reserve_b": "10.0000000",
+        "total_shares": "0.0010000"
+      },
+      "owned_shares": "0.0001000",
+      "mode": "exact_shares",
+      "withdraw_shares": "0.0001000",
+      "slippage_bps": 100,
+      "expected": {
+        "amount_a": "0.0000001",
+        "amount_b": "1.0000000",
+        "min_amount_a": "0.0000001",
+        "min_amount_b": "0.9900000"
+      }
+    }
+  ],
+  "full_exit": [
+    {
+      "name": "all-resolves-live-owned-shares",
+      "pool": {
+        "reserve_a": "100.0000000",
+        "reserve_b": "200.0000000",
+        "total_shares": "50.0000000"
+      },
+      "owned_shares": "5.0000000",
+      "mode": "all",
+      "slippage_bps": 50,
+      "close_pool_share_trustline": false,
+      "expected": {
+        "withdraw_shares": "5.0000000",
+        "amount_a": "10.0000000",
+        "amount_b": "20.0000000",
+        "min_amount_a": "9.9500000",
+        "min_amount_b": "19.9000000",
+        "operations": [
+          "liquidity_pool_withdraw"
+        ]
+      }
+    },
+    {
+      "name": "all-with-explicit-close-is-atomic-two-operation-transaction",
+      "pool": {
+        "reserve_a": "100.0000000",
+        "reserve_b": "200.0000000",
+        "total_shares": "50.0000000"
+      },
+      "owned_shares": "5.0000000",
+      "mode": "all",
+      "slippage_bps": 50,
+      "close_pool_share_trustline": true,
+      "expected": {
+        "withdraw_shares": "5.0000000",
+        "operations": [
+          "liquidity_pool_withdraw",
+          "change_trust_pool_share_remove"
+        ],
+        "pool_share_subentries_removed": 2
+      }
+    }
+  ],
+  "failures": [
+    {
+      "name": "partial-close-is-not-allowed",
+      "mode": "exact_shares",
+      "withdraw_shares": "4.0000000",
+      "owned_shares": "5.0000000",
+      "close_pool_share_trustline": true,
+      "expected_error": "close_requires_full_exit"
+    },
+    {
+      "name": "shares-exceed-position",
+      "mode": "exact_shares",
+      "withdraw_shares": "5.0000001",
+      "owned_shares": "5.0000000",
+      "expected_error": "insufficient_pool_shares"
+    },
+    {
+      "name": "stale-snapshot",
+      "snapshot_age_seconds": 31,
+      "expected_error": "pool_state_stale"
+    },
+    {
+      "name": "cached-only-state-cannot-prepare",
+      "live_state_available": false,
+      "cached_state_available": true,
+      "expected_error": "pool_state_unavailable"
+    },
+    {
+      "name": "receiving-capacity-too-small",
+      "expected_amount_a": "10.0000000",
+      "receiving_capacity_a": "9.9999999",
+      "expected_error": "receiving_capacity_insufficient"
+    },
+    {
+      "name": "both-protocol-rounded-outputs-zero",
+      "expected_amount_a": "0.0000000",
+      "expected_amount_b": "0.0000000",
+      "expected_error": "withdrawal_too_small"
+    },
+    {
+      "name": "slippage-above-safety-ceiling",
+      "slippage_bps": 1001,
+      "expected_error": "slippage_out_of_range"
+    },
+    {
+      "name": "cleanup-pool-parameters-do-not-match-pool-id",
+      "mode": "all",
+      "close_pool_share_trustline": true,
+      "pool_parameters_match_pool_id": false,
+      "expected_error": "pool_identity_mismatch"
+    }
+  ]
+}

@@ -26,6 +26,7 @@ Implementation evidence may come from another Fresnica repository. A Mobile/Web/
 | `wallet` | Wallet | Defined | [wallet.md](wallet.md) |
 | `backup-restore` | Backup / Restore | Defined | [backup-restore.md](backup-restore.md) |
 | `balance` | Balance / Availability | Normative | [balance.md](balance.md) |
+| `liquidity-pool` | Liquidity Pool | Normative | [liquidity-pool.md](liquidity-pool.md) |
 | `asset-discovery` | Asset Discovery / Catalog | Defined | [asset-discovery.md](asset-discovery.md) |
 | `payment` | Payment | Normative | [payment.md](payment.md) |
 | `path-payment` | Path Payment / Swap | Normative | [path-payment.md](path-payment.md) |
