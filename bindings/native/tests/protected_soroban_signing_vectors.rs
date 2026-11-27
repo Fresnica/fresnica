@@ -114,7 +114,10 @@ fn native_binding_signs_live_blend_transaction_without_rewriting_it() {
             .unwrap()
             .to_owned(),
     );
-    assert!(matches!(wrong_identity, Err(NativeSdkError::IdentityMismatch { .. })));
+    assert!(matches!(
+        wrong_identity,
+        Err(NativeSdkError::IdentityMismatch { .. })
+    ));
 }
 
 #[test]

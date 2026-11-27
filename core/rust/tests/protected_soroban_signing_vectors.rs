@@ -6,7 +6,9 @@ use fresnica_core::{
 };
 use serde_json::Value;
 use stellar_strkey::{ed25519::PublicKey as StrkeyPublicKey, Contract as StrkeyContract};
-use stellar_xdr::{ContractId, Hash, HostFunction, MuxedAccount, OperationBody, ScAddress, TransactionEnvelope};
+use stellar_xdr::{
+    ContractId, Hash, HostFunction, MuxedAccount, OperationBody, ScAddress, TransactionEnvelope,
+};
 
 fn vector() -> Value {
     serde_json::from_str(include_str!(
@@ -101,7 +103,9 @@ fn protected_signer_matches_live_blend_testnet_transaction() {
         expected_testnet_hash.as_slice()
     );
     assert_eq!(
-        transaction_hash(&envelope, wrong_network).unwrap().as_slice(),
+        transaction_hash(&envelope, wrong_network)
+            .unwrap()
+            .as_slice(),
         expected_wrong_network_hash.as_slice()
     );
     assert_ne!(expected_testnet_hash, expected_wrong_network_hash);
@@ -127,10 +131,11 @@ fn protected_signer_matches_live_blend_testnet_transaction() {
     )
     .unwrap();
 
-    assert_eq!(transaction_envelope_xdr(&envelope).unwrap(), expected_signed);
-    assert!(
-        transaction_envelope_has_valid_signature(&envelope, network, expected_public).unwrap()
+    assert_eq!(
+        transaction_envelope_xdr(&envelope).unwrap(),
+        expected_signed
     );
+    assert!(transaction_envelope_has_valid_signature(&envelope, network, expected_public).unwrap());
     assert!(
         !transaction_envelope_has_valid_signature(&envelope, wrong_network, expected_public)
             .unwrap()
@@ -165,7 +170,10 @@ fn protected_signer_rejects_wrong_expected_identity_for_blend_transaction() {
         fixture["wrong_signer_public_key"].as_str().unwrap(),
     )
     .unwrap_err();
-    assert_eq!(error.to_string(), "decrypted wallet identity does not match metadata");
+    assert_eq!(
+        error.to_string(),
+        "decrypted wallet identity does not match metadata"
+    );
 
     let envelope = parse_transaction_envelope_xdr(&unsigned).unwrap();
     assert_eq!(
