@@ -29,37 +29,26 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - name: Download published Native SDK AAR
         run: |
           curl --fail --location --retry 3 \
             "https://github.com/Fresnica/fresnica/releases/download/native-sdk-v${NATIVE_SDK_VERSION}/fresnica-native-sdk-${NATIVE_SDK_VERSION}.aar" \
             --output /tmp/fresnica-native-sdk.aar
           test -s /tmp/fresnica-native-sdk.aar
-      - name: Extract published x86_64 Native SDK library
-        run: |
-          rm -rf /tmp/fresnica-native-lib
-          mkdir -p /tmp/fresnica-native-lib
-          python3 -c 'import zipfile; z=zipfile.ZipFile("/tmp/fresnica-native-sdk.aar"); open("/tmp/fresnica-native-lib/libfresnica_native_sdk.so","wb").write(z.read("jni/x86_64/libfresnica_native_sdk.so"))'
-          test -s /tmp/fresnica-native-lib/libfresnica_native_sdk.so
-      - name: Cache Robolectric Android 11 runtime
-        run: |
-          rm -rf /tmp/robolectric-jars
-          mkdir -p /tmp/robolectric-jars
-          curl --fail --location --retry 3 \
-            "https://repo1.maven.org/maven2/org/robolectric/android-all-instrumented/11-robolectric-6757853-i7/android-all-instrumented-11-robolectric-6757853-i7.jar" \
-            --output /tmp/robolectric-jars/android-all-instrumented-11-robolectric-6757853-i7.jar
-          test -s /tmp/robolectric-jars/android-all-instrumented-11-robolectric-6757853-i7.jar
-      - name: Run passcode signing through published Android helper
+      - name: Run passcode signing on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
         env:
           FRESNICA_NATIVE_AAR: /tmp/fresnica-native-sdk.aar
-          FRESNICA_NATIVE_LIB_DIR: /tmp/fresnica-native-lib
-          FRESNICA_VECTOR_DIR: ${{ github.workspace }}/spec/test-vectors
-          ROBOLECTRIC_DEPENDENCY_DIR: /tmp/robolectric-jars
-        run: |
-          gradle -p bindings/native/tests/android-consumer \
-            testDebugUnitTest \
-            --tests com.fresnica.sdk.smoke.ProtectedSorobanSigningRobolectricTest \
-            --stacktrace
+        with:
+          api-level: 34
+          arch: x86_64
+          disable-animations: true
+          script: gradle -p bindings/native/tests/android-consumer connectedDebugAndroidTest --stacktrace
 
   ios-release-signing:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false

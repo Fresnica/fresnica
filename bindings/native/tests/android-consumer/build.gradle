@@ -29,29 +29,6 @@ android {
         androidTest {
             assets.srcDir '../../../../spec/test-vectors'
         }
-        test {
-            assets.srcDir '../../../../spec/test-vectors'
-        }
-    }
-
-    testOptions {
-        unitTests {
-            includeAndroidResources = true
-            all {
-                def nativeLibDir = System.getenv('FRESNICA_NATIVE_LIB_DIR')
-                if (nativeLibDir) {
-                    systemProperty 'jna.library.path', nativeLibDir
-                }
-                def vectorDir = System.getenv('FRESNICA_VECTOR_DIR')
-                if (vectorDir) {
-                    systemProperty 'fresnica.vector.dir', vectorDir
-                }
-                def robolectricDependencyDir = System.getenv('ROBOLECTRIC_DEPENDENCY_DIR')
-                if (robolectricDependencyDir) {
-                    systemProperty 'robolectric.dependency.dir', robolectricDependencyDir
-                }
-            }
-        }
     }
 }
 
@@ -70,8 +47,4 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test:core:1.6.1'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
-
-    testImplementation 'junit:junit:4.13.2'
-    testImplementation 'androidx.test:core:1.6.1'
-    testImplementation 'org.robolectric:robolectric:4.16'
 }
