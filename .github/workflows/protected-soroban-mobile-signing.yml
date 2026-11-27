@@ -39,10 +39,12 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         env:
           FRESNICA_NATIVE_AAR: /tmp/fresnica-native-sdk.aar
+          ANDROID_I_WANT_MY_TCG: "yes"
         with:
-          api-level: 34
+          api-level: 30
           arch: x86_64
           disable-animations: true
+          emulator-boot-timeout: 1200
           script: gradle -p bindings/native/tests/android-consumer connectedDebugAndroidTest --stacktrace
 
   ios-release-signing:
