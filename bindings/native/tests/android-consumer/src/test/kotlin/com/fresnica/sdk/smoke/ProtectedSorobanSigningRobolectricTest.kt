@@ -13,6 +13,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 import java.util.Arrays
 
 @RunWith(RobolectricTestRunner::class)
@@ -75,6 +76,9 @@ class ProtectedSorobanSigningRobolectricTest {
         authorization.close()
     }
 
-    private fun assetJson(name: String): JSONObject =
-        context.assets.open(name).bufferedReader().use { JSONObject(it.readText()) }
+    private fun assetJson(name: String): JSONObject {
+        val vectorDir = System.getProperty("fresnica.vector.dir")
+            ?: error("fresnica.vector.dir is required")
+        return JSONObject(File(vectorDir, name).readText())
+    }
 }
