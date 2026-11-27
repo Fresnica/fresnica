@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.fresnica.sdk.FresnicaSdkApi
 import com.fresnica.sdk.security.FresnicaSignerAuthorization
 import com.fresnica.sdk.security.WalletUnlockKeyStore
@@ -18,6 +19,7 @@ import java.util.Arrays
 @RunWith(AndroidJUnit4::class)
 class ProtectedSorobanSigningInstrumentedTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
+    private val fixtureContext: Context = InstrumentationRegistry.getInstrumentation().context
 
     @Test
     fun releasedNativeSdkSignsLiveBlendTransactionWithPasscode() {
@@ -76,5 +78,5 @@ class ProtectedSorobanSigningInstrumentedTest {
     }
 
     private fun assetJson(name: String): JSONObject =
-        context.assets.open(name).bufferedReader().use { JSONObject(it.readText()) }
+        fixtureContext.assets.open(name).bufferedReader().use { JSONObject(it.readText()) }
 }
