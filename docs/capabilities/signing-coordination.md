@@ -53,6 +53,32 @@ A source Account may be watch-only while separate same-network signer records su
 
 Classic SEP-10 reuses the same coordination primitive but requires at least one actual client challenge signature, excludes the anchor server key and does not treat preauthorization as proof of client control. Soroban uses the same protected-software authorization source for detached Classic G-address authorization entries and for the final Classic transaction envelope; the SDK's existing unlock-key Soroban signing API remains the cryptographic boundary. Fresnica still does not collect Hash-X, signed-payload or other unsupported authorization material itself.
 
+## Protected software transaction XDR
+
+Routine protected-software transaction signing accepts the exact tuple:
+
+```text
+protected signer envelope
+expected signer public key
+transaction envelope XDR
+network passphrase
+```
+
+The transaction signing path is not restricted by operation type. A reviewed Classic `TransactionV1Envelope` containing Soroban `InvokeHostFunction` is valid input to the same protected Ed25519 transaction signer used for other Classic transaction envelopes.
+
+The signer must preserve these bindings:
+
+- the decrypted signing material must match `expected signer public key`; mismatch fails before signing;
+- the transaction hash is computed from the exact input envelope and the supplied network passphrase;
+- changing the network passphrase changes the signature preimage;
+- signing may append the signer's `DecoratedSignature`, but must not rewrite the transaction body, source account, operations, preconditions, Soroban data or authorization entries.
+
+The source account is therefore covered by the signed transaction bytes. It is **not** required to equal the signer public key: Stellar multisig can authorize an account with another Ed25519 signer. Ledger Authorization decides whether the expected signer is authorized for the prepared account/transaction; protected signing only proves that the requested key signed the reviewed bytes.
+
+Soroban `SorobanAuthorizationEntry` signatures are a separate signing domain. When a contract invocation needs detached G-address authorization entries, those entries are authorized separately before the final transaction envelope is signed.
+
+The cross-platform regression fixture is [`../../spec/test-vectors/protected-soroban-signing-v1.json`](../../spec/test-vectors/protected-soroban-signing-v1.json). It is a live Blend Testnet `InvokeHostFunction` transaction and fixes the source account, contract/function, exact unsigned XDR, Testnet hash, wrong-network hash and expected final signed XDR.
+
 ## External signer authorization
 
 Hardware/provider confirmation belongs to the provider/platform implementation. Signing Coordination still binds the provider result to the expected signer and transaction through SDK/Core verification.
