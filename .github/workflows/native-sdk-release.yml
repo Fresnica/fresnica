@@ -221,7 +221,7 @@ jobs:
   apple:
     if: needs.prepare.outputs.publish == 'true'
     needs: prepare
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
       FRESNICA_MACOS_DEPLOYMENT_TARGET: "12.0"
