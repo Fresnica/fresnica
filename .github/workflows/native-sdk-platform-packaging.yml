@@ -72,7 +72,7 @@ jobs:
 
   apple:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       FRESNICA_IOS_DEPLOYMENT_TARGET: "13.4"
       FRESNICA_MACOS_DEPLOYMENT_TARGET: "12.0"
