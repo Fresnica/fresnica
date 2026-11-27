@@ -13,10 +13,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 import java.util.Arrays
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
 class ProtectedSorobanSigningRobolectricTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 

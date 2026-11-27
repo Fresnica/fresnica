@@ -46,6 +46,10 @@ android {
                 if (vectorDir) {
                     systemProperty 'fresnica.vector.dir', vectorDir
                 }
+                def robolectricDependencyDir = System.getenv('ROBOLECTRIC_DEPENDENCY_DIR')
+                if (robolectricDependencyDir) {
+                    systemProperty 'robolectric.dependency.dir', robolectricDependencyDir
+                }
             }
         }
     }

@@ -41,11 +41,20 @@ jobs:
           mkdir -p /tmp/fresnica-native-lib
           python3 -c 'import zipfile; z=zipfile.ZipFile("/tmp/fresnica-native-sdk.aar"); open("/tmp/fresnica-native-lib/libfresnica_native_sdk.so","wb").write(z.read("jni/x86_64/libfresnica_native_sdk.so"))'
           test -s /tmp/fresnica-native-lib/libfresnica_native_sdk.so
+      - name: Cache Robolectric Android 11 runtime
+        run: |
+          rm -rf /tmp/robolectric-jars
+          mkdir -p /tmp/robolectric-jars
+          curl --fail --location --retry 3 \
+            "https://repo1.maven.org/maven2/org/robolectric/android-all-instrumented/11-robolectric-6757853-i7/android-all-instrumented-11-robolectric-6757853-i7.jar" \
+            --output /tmp/robolectric-jars/android-all-instrumented-11-robolectric-6757853-i7.jar
+          test -s /tmp/robolectric-jars/android-all-instrumented-11-robolectric-6757853-i7.jar
       - name: Run passcode signing through published Android helper
         env:
           FRESNICA_NATIVE_AAR: /tmp/fresnica-native-sdk.aar
           FRESNICA_NATIVE_LIB_DIR: /tmp/fresnica-native-lib
           FRESNICA_VECTOR_DIR: ${{ github.workspace }}/spec/test-vectors
+          ROBOLECTRIC_DEPENDENCY_DIR: /tmp/robolectric-jars
         run: |
           gradle -p bindings/native/tests/android-consumer \
             testDebugUnitTest \
