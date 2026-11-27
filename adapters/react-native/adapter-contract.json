@@ -14,5 +14,6 @@
   ],
   "appleHostLinkerFlags": [
     "-ObjC"
-  ]
+  ],
+  "protectedSoftwareTransactionSigningContract": "fresnica-protected-software-transaction-signing-v1"
 }

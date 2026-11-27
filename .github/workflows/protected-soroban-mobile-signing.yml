@@ -1,0 +1,107 @@
+name: Protected Soroban mobile signing
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "core/rust/**"
+      - "sdk/rust/**"
+      - "bindings/native/**"
+      - "adapters/react-native/**"
+      - "spec/test-vectors/protected-soroban-signing-v1.json"
+      - "spec/test-vectors/transaction-signing-v1.json"
+      - ".github/workflows/protected-soroban-mobile-signing.yml"
+
+env:
+  NATIVE_SDK_VERSION: "0.3.1"
+
+jobs:
+  android-release-signing:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Download published Native SDK AAR
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/Fresnica/fresnica/releases/download/native-sdk-v${NATIVE_SDK_VERSION}/fresnica-native-sdk-${NATIVE_SDK_VERSION}.aar" \
+            --output /tmp/fresnica-native-sdk.aar
+          test -s /tmp/fresnica-native-sdk.aar
+      - name: Run passcode signing on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FRESNICA_NATIVE_AAR: /tmp/fresnica-native-sdk.aar
+        with:
+          api-level: 34
+          arch: x86_64
+          disable-animations: true
+          script: gradle -p bindings/native/tests/android-consumer connectedDebugAndroidTest --stacktrace
+
+  ios-release-signing:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download published Apple Native SDK
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/Fresnica/fresnica/releases/download/native-sdk-v${NATIVE_SDK_VERSION}/FresnicaSDK-${NATIVE_SDK_VERSION}-apple.zip" \
+            --output /tmp/fresnica-apple.zip
+          test -s /tmp/fresnica-apple.zip
+      - name: Prepare iOS Simulator test package
+        run: |
+          set -euo pipefail
+          TEST_ROOT="$GITHUB_WORKSPACE/bindings/native/tests/apple-release-signing"
+          rm -rf "$TEST_ROOT/Vendor" "$TEST_ROOT/Tests/ProtectedSorobanSigningTests/Fixtures"
+          mkdir -p "$TEST_ROOT/Vendor" "$TEST_ROOT/Tests/ProtectedSorobanSigningTests/Fixtures" /tmp/fresnica-apple
+          ditto -x -k /tmp/fresnica-apple.zip /tmp/fresnica-apple
+          cp -R /tmp/fresnica-apple/FresnicaSDK.xcframework "$TEST_ROOT/Vendor/"
+          cp -R /tmp/fresnica-apple/FresnicaSDKFFI.xcframework "$TEST_ROOT/Vendor/"
+          cp spec/test-vectors/protected-soroban-signing-v1.json "$TEST_ROOT/Tests/ProtectedSorobanSigningTests/Fixtures/"
+          cp spec/test-vectors/transaction-signing-v1.json "$TEST_ROOT/Tests/ProtectedSorobanSigningTests/Fixtures/"
+      - name: Run passcode signing on iOS Simulator
+        run: |
+          set -euo pipefail
+          TEST_ROOT="$GITHUB_WORKSPACE/bindings/native/tests/apple-release-signing"
+          DEVICE_ID="$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          data=json.load(sys.stdin)
+          for runtime, devices in data["devices"].items():
+              if "iOS" not in runtime:
+                  continue
+              for device in devices:
+                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      raise SystemExit
+          raise SystemExit("no available iPhone simulator")
+          ')"
+          xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          cd "$TEST_ROOT"
+          xcodebuild -list -json > /tmp/fresnica-package-list.json
+          SCHEME="$(python3 -c '
+          import json
+          data=json.load(open("/tmp/fresnica-package-list.json"))
+          container=data.get("workspace") or data.get("project")
+          schemes=container.get("schemes", [])
+          if not schemes:
+              raise SystemExit("no Swift package scheme")
+          print(schemes[0])
+          ')"
+          xcodebuild test \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            CODE_SIGNING_ALLOWED=NO

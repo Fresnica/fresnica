@@ -1,0 +1,30 @@
+{
+  "schema": "fresnica-protected-soroban-signing-v1",
+  "source": "Live Blend Testnet contract sample captured and simulated with Stellar CLI 28.0.0 on 2026-11-27",
+  "network_passphrase": "Test SDF Network ; September 2015",
+  "wrong_network_passphrase": "Public Global Stellar Network ; September 2015",
+  "source_account": "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR",
+  "signer_fixture": "transaction-signing-v1.json#cases[0]",
+  "wrong_signer_public_key": "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY",
+  "blend": {
+    "deployment": "TestnetV2",
+    "contract_id": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+    "function": "get_config",
+    "live_simulation_result": {
+      "bstop_rate": 1000000,
+      "max_positions": 8,
+      "min_collateral": "0",
+      "oracle": "CAZOKR2Y5E2OSWSIBRVZMJ47RUTQPIGVWSAQ2UISGAVC46XKPGDG5PKI",
+      "status": 0
+    }
+  },
+  "transaction": {
+    "envelope_type": "tx",
+    "operation_type": "invoke_host_function",
+    "unsigned_xdr_base64": "AAAAAgAAAADXWpgBgrEKt9VL/tPJZAc6DuFy89qmIyWvAhpo9wdRGgAAG4AAOmwcAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAGIGo8M3rDcCq2N4KGUr0SSkVe9+IeSIiEhONFXijvhzgAAAApnZXRfY29uZmlnAAAAAAAAAAAAAAAAAAEAAAAAAAAAAgAAAAYAAAABiBqPDN6w3AqtjeChlK9EkpFXvfiHkiIhITjRV4o74c4AAAAUAAAAAQAAAAekH8U9Z1O2wE6xWwIcVQUjZqTI4OIbxycA9GEmTsE1DgAAAAAAC8cgAAAAAAAAAAAAAAAAAAAbHAAAAAA=",
+    "testnet_transaction_hash_hex": "6ee4f347330721c82082809332ea8b00814e2f4a007c4077b5cbb400fa87e235",
+    "wrong_network_transaction_hash_hex": "f144089348b9ea19d4326d471e9a696b2f9a2832a1ee2610ca611391c81036b0",
+    "expected_signed_xdr_base64": "AAAAAgAAAADXWpgBgrEKt9VL/tPJZAc6DuFy89qmIyWvAhpo9wdRGgAAG4AAOmwcAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAGIGo8M3rDcCq2N4KGUr0SSkVe9+IeSIiEhONFXijvhzgAAAApnZXRfY29uZmlnAAAAAAAAAAAAAAAAAAEAAAAAAAAAAgAAAAYAAAABiBqPDN6w3AqtjeChlK9EkpFXvfiHkiIhITjRV4o74c4AAAAUAAAAAQAAAAekH8U9Z1O2wE6xWwIcVQUjZqTI4OIbxycA9GEmTsE1DgAAAAAAC8cgAAAAAAAAAAAAAAAAAAAbHAAAAAH3B1EaAAAAQHsBE5/VgQV2oBJLBvrppt4VmTSIpHE7KCoKKFWMw8O1VogEm3VkFWM+GzYG+zYWKSaLFC1KvLa3dGUMVpVkpwA=",
+    "soroban_transaction_data": true
+  }
+}

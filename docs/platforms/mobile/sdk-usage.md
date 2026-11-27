@@ -1,6 +1,6 @@
 # Fresnica Mobile SDK 使用指南
 
-Status: **Mobile integration baseline — Native SDK v0.2.1**.
+Status: **Mobile integration baseline — Native SDK v0.3.1**.
 
 本文件是独立 `fresnica-mobile` 项目的开工入口。Mobile 不应复制或重新编译 Fresnica Rust Core；它消费已发布的 Native SDK，并在自己的 React Native/toolchain 环境中一次性编译 canonical React Native adapter。
 
@@ -8,13 +8,13 @@ Status: **Mobile integration baseline — Native SDK v0.2.1**.
 
 当前 generalized Native SDK / Mobile security 基线：
 
-- Native SDK release/tag: `native-sdk-v0.2.1`
+- Native SDK release/tag: `native-sdk-v0.3.1`
 - Release target commit: recorded in the release manifest (`git_commit`)
-- Native SDK package: `0.2.1`
-- Native Binding API: `2`
-- Universal SDK API: `3`
-- Core Client API: `3`
-- React Native adapter source: `0.2.1`
+- Native SDK package: `0.3.1`
+- Native Binding API: `3`
+- Universal SDK API: `5`
+- Core Client API: `5`
+- React Native adapter source: `0.3.0`
 - Android: `minSdk 26`, `armeabi-v7a`, `x86`, `x86_64`, `arm64-v8a`
 - Apple: iOS `13.4+`, macOS `12.0+`
 - React Native real-consumer validation baseline: RN `0.87` with CocoaPods on macOS/Xcode
@@ -23,7 +23,7 @@ New Mobile work MUST NOT use the legacy `mobile-sdk-v0.1.0` artifact or the supe
 
 Pre-1.0 consumers should pin exact SDK and React Native versions. Do not use floating SDK versions or React Native semver ranges for the adapter build.
 
-> **SEP-53 development note:** the shared repository now contains Native SDK / RN adapter source `0.3.0` (Native Binding API 3 / SDK API 5 / Core Client API 5) with dapp message signing. It is not a published Mobile dependency yet. A Mobile branch that needs SEP-53 must wait for or explicitly adopt the reviewed `native-sdk-v0.3.0` release and rebuild the canonical adapter against that exact release; do not pretend the published `0.2.1` artifact has the new methods.
+> Native SDK v0.3.1 is the published Mobile baseline. It includes the v0.3 message-signing surface and the protected transaction-signing primitives used by the canonical adapter. Protected Classic/Soroban transaction signing follows [the Mobile signing contract](protected-software-signing.md).
 
 ## 2. Mobile 消费的边界
 
@@ -58,15 +58,15 @@ Fresnica owns cryptography, signer identity checks, protected-envelope semantics
 Release page:
 
 ```text
-https://github.com/manran/fresnica/releases/tag/native-sdk-v0.2.1
+https://github.com/Fresnica/fresnica/releases/tag/native-sdk-v0.3.1
 ```
 
 Consumer-facing files are:
 
 ```text
-fresnica-native-sdk-0.2.1.aar
-FresnicaSDK-0.2.1-apple.zip
-fresnica-native-sdk-0.2.1-manifest.json
+fresnica-native-sdk-0.3.1.aar
+FresnicaSDK-0.3.1-apple.zip
+fresnica-native-sdk-0.3.1-manifest.json
 SHA256SUMS
 ```
 
@@ -77,7 +77,7 @@ Recommended Mobile-owned layout:
 ```text
 vendor/fresnica/
   native/
-    fresnica-native-sdk-0.2.1.aar
+    fresnica-native-sdk-0.3.1.aar
     FresnicaSDK.xcframework
     FresnicaSDKFFI.xcframework
   adapter/
@@ -108,7 +108,7 @@ Values such as `^0.87.0`, `~0.87.0`, `latest` or workspace ranges are rejected b
 Copy:
 
 ```text
-fresnica-native-sdk-0.2.1.aar
+fresnica-native-sdk-0.3.1.aar
 ```
 
 into the Mobile-controlled native artifact location.
@@ -117,7 +117,7 @@ Because the GitHub release is a raw AAR rather than a Maven publication, the And
 
 ```gradle
 dependencies {
-    implementation files("path/to/fresnica-native-sdk-0.2.1.aar")
+    implementation files("path/to/fresnica-native-sdk-0.3.1.aar")
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
     implementation "net.java.dev.jna:jna:5.12.1@aar"
     implementation "androidx.annotation:annotation:1.8.2"
@@ -139,7 +139,7 @@ The Native SDK AAR itself contains:
 Extract:
 
 ```text
-FresnicaSDK-0.2.1-apple.zip
+FresnicaSDK-0.3.1-apple.zip
 ```
 
 which contains:
@@ -168,7 +168,7 @@ node adapters/react-native/tooling/fresnica-adapter.mjs \
   build react-native \
   --platform android \
   --project /path/to/fresnica-mobile \
-  --native-android-aar /path/to/fresnica-native-sdk-0.2.1.aar \
+  --native-android-aar /path/to/fresnica-native-sdk-0.3.1.aar \
   --out /path/to/fresnica-mobile/vendor/fresnica/adapter/react-native
 ```
 
@@ -337,6 +337,8 @@ The canonical adapter exposes:
 - `signWithSystemAuth`
 - `signWithPasscode`
 
+`signWithPasscode` and `signWithSystemAuth` MUST follow [Protected Software Transaction Signing](protected-software-signing.md). The same reviewed method is used for Classic and Soroban final transaction envelopes; Mobile must not add a second Soroban transaction signer.
+
 It intentionally does **not** expose routine low-level operations such as:
 
 - `deriveUnlockKey`
@@ -485,7 +487,7 @@ Mobile should upgrade by pinning a newer Native SDK release and rebuilding the f
 Mobile integration baseline is considered established when its CI proves:
 
 - exact React Native version is pinned;
-- `native-sdk-v0.2.1` artifacts are checksum-verified and stored/pinned;
+- `native-sdk-v0.3.1` artifacts are checksum-verified and stored/pinned;
 - Android adapter binary is built once and stored;
 - Apple adapter binary is built once and stored;
 - `adapter-manifest.json` passes compatibility checking;

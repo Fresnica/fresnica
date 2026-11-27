@@ -17,6 +17,7 @@ android {
         targetSdk 34
         versionCode 1
         versionName '1.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
     compileOptions {
@@ -24,6 +25,11 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
+    sourceSets {
+        androidTest {
+            assets.srcDir '../../../../spec/test-vectors'
+        }
+    }
 }
 
 def nativeSdkAar = System.getenv('FRESNICA_NATIVE_AAR')
@@ -36,4 +42,9 @@ dependencies {
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
     implementation 'net.java.dev.jna:jna:5.12.1@aar'
     implementation 'androidx.annotation:annotation:1.8.2'
+
+    androidTestImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:core:1.6.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

@@ -49,14 +49,14 @@ The independent Mobile application owns:
 The latest **published** Mobile integration baseline uses these independent compatibility numbers:
 
 ```text
-Native package version:       0.3.0
+Native package version:       0.3.1
 NATIVE_BINDING_API_VERSION:   3
 SDK_API_VERSION:              5
 CLIENT_API_VERSION:           5
 RN adapter source version:    0.3.0
 ```
 
-The 0.3.0 release adds the SEP-53 message-signing domain needed by Mobile dapp challenges. Mobile should pin the exact pre-1.0 `native-sdk-v0.3.0` release plus the matching adapter manifest rather than consuming moving development source. A package-version update is not automatically an API break; the API constants are the machine-readable compatibility boundary.
+Native SDK v0.3.1 is the current published Mobile package; the canonical RN adapter source remains v0.3.0. Mobile should pin `native-sdk-v0.3.1` plus the matching adapter manifest rather than consuming moving development source. A package-version update is not automatically an API break; the API constants and published semantic contracts are the compatibility boundary.
 
 ## Native API
 
@@ -114,6 +114,13 @@ The canonical JavaScript module remains `FresnicaCore`. It exposes the reviewed 
 - `signWithPasscode`
 
 The adapter performs only argument/result conversion, React Native registration/lifecycle work and the platform UI steps needed to drive SDK-owned native authorization.
+
+The transaction `signWithPasscode` / `signWithSystemAuth` methods accept base64-encoded Stellar `TransactionEnvelope` XDR from JavaScript, decode it in the native adapter, and pass the exact bytes plus `expectedSignerPublicKey` and `networkPassphrase` into the SDK-owned native authorization helper. This includes `TransactionV1Envelope` values containing Soroban `InvokeHostFunction`; the adapter does not reinterpret the contract call or maintain a separate Soroban transaction signer.
+
+This behavior is the Normative [`fresnica-protected-software-transaction-signing-v1`](protected-software-signing.md) contract. Mobile must treat that contract ID as part of the adapter compatibility manifest.
+
+Signing support does not make a transaction approved. Mobile must complete semantic review and Ledger/Soroban authorization before requesting the final transaction signature. Detached Soroban authorization entries remain a separate signing domain.
+
 
 The v0.2 security boundary adds two important high-level semantics:
 

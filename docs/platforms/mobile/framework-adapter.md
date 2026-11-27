@@ -182,15 +182,16 @@ React Native old -> new
 
 ## Compatibility manifest
 
-Every generated adapter binary set should have a machine-readable manifest. For example, the latest published 0.2.1 baseline records:
+Every generated adapter binary set should have a machine-readable manifest. For example, the current published 0.3.1 baseline records:
 
 ```json
 {
   "framework": "react-native",
   "frameworkVersion": "0.87.0",
-  "fresnicaNativeSdkVersion": "0.2.1",
-  "nativeBindingApiVersion": 2,
-  "adapterSourceVersion": "0.2.1"
+  "fresnicaNativeSdkVersion": "0.3.1",
+  "nativeBindingApiVersion": 3,
+  "adapterSourceVersion": "0.3.0",
+  "protectedSoftwareTransactionSigningContract": "fresnica-protected-software-transaction-signing-v1"
 }
 ```
 
@@ -251,10 +252,7 @@ Consumer application
   = pinned Native SDK + generated adapter binaries + compatibility manifest
 ```
 
-The first generalized release was `native-sdk-v0.1.0`. The latest published Mobile security/HD baseline is `native-sdk-v0.2.1`: Native Binding API 2 over SDK API 3 / Core Client API 3, with React Native adapter source 0.2.1. Adapter 0.2.1 is a build-tooling compatibility patch: it keeps the same framework/API surface while removing Fresnica-owned Android Gradle/AGP/Kotlin version selection. v0.2 intentionally changes the framework/native contract to add mnemonic-source HD derivation and the device-level System Auth Protection Domain. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION` and the adapter manifest.
-
-
-The current development source is 0.3.0 / Native Binding API 3 / SDK API 5 / Core Client API 5 with React Native adapter source 0.3.0. It adds `signMessageWithSystemAuth` and `signMessageWithPasscode` for SEP-53 dapp challenges. This source version must not be treated as a published binary baseline until the matching Native SDK release exists.
+The first generalized release was `native-sdk-v0.1.0`. The current published Mobile baseline is `native-sdk-v0.3.1`: Native Binding API 3 over SDK API 5 / Core Client API 5, with React Native adapter source 0.3.0. It includes mnemonic-source HD derivation, the device-level System Auth Protection Domain, SEP-53 message signing, and the protected transaction-signing primitives used by the canonical adapter. Compatibility remains explicit through `NATIVE_BINDING_API_VERSION`, the adapter manifest, and published semantic contract IDs.
 
 The transitional `bindings/mobile` source is retired from `main`; #81-#84 semantics remain migration acceptance criteria and history remains in Git/tags.
 
@@ -263,7 +261,7 @@ The transitional `bindings/mobile` source is retired from `main`; #81-#84 semant
 The independent `fresnica-mobile` project should use this document as its integration starting point:
 
 1. choose and pin its React Native version;
-2. pin `native-sdk-v0.2.1` / Native Binding API 2 and matching adapter source 0.2.1;
+2. pin `native-sdk-v0.3.1` / Native Binding API 3 and adapter source 0.3.0;
 3. generate its RN adapter binaries once from the matching canonical adapter source;
 4. store the adapter binaries and manifest under Mobile ownership;
 5. run a native/framework smoke test such as `parseAccount`;

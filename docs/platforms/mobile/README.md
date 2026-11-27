@@ -38,6 +38,7 @@ A Mobile Feature is a local product/code-organization unit. It is not the cross-
 - [Native bindings](bindings.md) - Native SDK/UniFFI boundary and compatibility history.
 - [Framework adapter](framework-adapter.md) - React Native adapter source/binary contract.
 - [System authentication](system-auth.md) - Mobile system-auth lifecycle.
+- [Protected software transaction signing](protected-software-signing.md) - required Mobile contract for `signWithPasscode` / `signWithSystemAuth`, including Soroban transaction XDR.
 - [Security vault mapping](security-vault-contract.md) - detailed Mobile persistence/native security mapping.
 
 ## Migration/reference material

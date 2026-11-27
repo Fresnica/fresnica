@@ -7,6 +7,7 @@ Current sets:
 - `wallet-v1.json`: deterministic SEP-0005 mnemonic/passphrase/account-index derivation to Stellar public keys.
 - `protection-v1.json`: password and system-key wallet-secret encryption compatibility.
 - `transaction-signing-v1.json`: Classic transaction hashing, Ed25519 signature, signature hint, and signed-envelope compatibility.
+- `protected-soroban-signing-v1.json`: live Blend Testnet `InvokeHostFunction` transaction used to prove protected-software final-envelope signing, signer identity binding and network binding through Mobile/native surfaces.
 - `message-signing-v1.json`: SEP-53 v1.0.0 prefixed-message payload, single SHA-256 digest, Ed25519 signature, UTF-8, and raw-binary compatibility.
 - `sdex-v1.json`: pair-relative SDEX intent, offer projection, fill projection, and compression behavior.
 - `liquidity-pool-exit-v1.json`: pool-share withdrawal rounding, minimum-output protection, full/partial exit, cleanup and failure semantics.
