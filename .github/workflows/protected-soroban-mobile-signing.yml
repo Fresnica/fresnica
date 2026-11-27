@@ -35,17 +35,21 @@ jobs:
             "https://github.com/Fresnica/fresnica/releases/download/native-sdk-v${NATIVE_SDK_VERSION}/fresnica-native-sdk-${NATIVE_SDK_VERSION}.aar" \
             --output /tmp/fresnica-native-sdk.aar
           test -s /tmp/fresnica-native-sdk.aar
-      - name: Run passcode signing on Android emulator
-        uses: reactivecircus/android-emulator-runner@v2
+      - name: Extract published x86_64 Native SDK library
+        run: |
+          rm -rf /tmp/fresnica-native-lib
+          mkdir -p /tmp/fresnica-native-lib
+          python3 -c 'import zipfile; z=zipfile.ZipFile("/tmp/fresnica-native-sdk.aar"); open("/tmp/fresnica-native-lib/libfresnica_native_sdk.so","wb").write(z.read("jni/x86_64/libfresnica_native_sdk.so"))'
+          test -s /tmp/fresnica-native-lib/libfresnica_native_sdk.so
+      - name: Run passcode signing through published Android helper
         env:
           FRESNICA_NATIVE_AAR: /tmp/fresnica-native-sdk.aar
-          ANDROID_I_WANT_MY_TCG: "yes"
-        with:
-          api-level: 30
-          arch: x86_64
-          disable-animations: true
-          emulator-boot-timeout: 1200
-          script: gradle -p bindings/native/tests/android-consumer connectedDebugAndroidTest --stacktrace
+          FRESNICA_NATIVE_LIB_DIR: /tmp/fresnica-native-lib
+        run: |
+          gradle -p bindings/native/tests/android-consumer \
+            testDebugUnitTest \
+            --tests com.fresnica.sdk.smoke.ProtectedSorobanSigningRobolectricTest \
+            --stacktrace
 
   ios-release-signing:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
