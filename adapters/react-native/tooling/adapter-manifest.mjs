@@ -95,6 +95,7 @@ export async function createManifest({ projectDir, artifacts = {}, contractPath 
     nativeBindingApiVersion: contract.nativeBindingApiVersion,
     adapterSourceVersion: contract.adapterSourceVersion,
     jsModuleName: contract.jsModuleName,
+    protectedSoftwareTransactionSigningContract: contract.protectedSoftwareTransactionSigningContract,
     androidHostDependencies: (contract.androidHostDependencies ?? []).map((dependency) =>
       dependency.replace('<frameworkVersion>', frameworkVersion),
     ),
@@ -112,6 +113,7 @@ const COMPATIBILITY_FIELDS = [
   'nativeBindingApiVersion',
   'adapterSourceVersion',
   'jsModuleName',
+  'protectedSoftwareTransactionSigningContract',
   'androidHostDependencies',
   'appleHostLinkerFlags',
 ];
@@ -153,6 +155,7 @@ export async function verifyManifest({ projectDir, manifestPath, contractPath = 
     nativeBindingApiVersion: contract.nativeBindingApiVersion,
     adapterSourceVersion: contract.adapterSourceVersion,
     jsModuleName: contract.jsModuleName,
+    protectedSoftwareTransactionSigningContract: contract.protectedSoftwareTransactionSigningContract,
     androidHostDependencies: (contract.androidHostDependencies ?? []).map((dependency) =>
       dependency.replace('<frameworkVersion>', frameworkVersion),
     ),

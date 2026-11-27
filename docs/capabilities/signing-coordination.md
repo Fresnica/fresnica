@@ -55,6 +55,8 @@ Classic SEP-10 reuses the same coordination primitive but requires at least one 
 
 ## Protected software transaction XDR
 
+Mobile implementations MUST conform to [Protected Software Transaction Signing](../platforms/mobile/protected-software-signing.md), contract ID `fresnica-protected-software-transaction-signing-v1`.
+
 Routine protected-software transaction signing accepts the exact tuple:
 
 ```text

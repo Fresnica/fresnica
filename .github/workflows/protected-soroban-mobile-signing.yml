@@ -40,11 +40,6 @@ jobs:
             "https://github.com/Fresnica/fresnica/releases/download/native-sdk-v${NATIVE_SDK_VERSION}/fresnica-native-sdk-${NATIVE_SDK_VERSION}.aar" \
             --output /tmp/fresnica-native-sdk.aar
           test -s /tmp/fresnica-native-sdk.aar
-      - name: Stage canonical signing vectors for Android instrumentation
-        run: |
-          mkdir -p bindings/native/tests/android-consumer/src/androidTest/assets
-          cp spec/test-vectors/protected-soroban-signing-v1.json bindings/native/tests/android-consumer/src/androidTest/assets/
-          cp spec/test-vectors/transaction-signing-v1.json bindings/native/tests/android-consumer/src/androidTest/assets/
       - name: Run passcode signing on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:

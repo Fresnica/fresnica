@@ -56,6 +56,7 @@ test('Android adapter targets Native SDK and preserves the reviewed JS surface',
   }
   assert.match(source, /message\.toByteArray\(Charsets\.UTF_8\)/, 'Android must encode the reviewed dapp message as explicit UTF-8');
   assert.match(source, /authorization\.verifyProtectedSignerPassphrase\(/, 'Android passphrase verification must stay behind the native authorization facade');
+  assert.match(source, /authorization\.signWithPasscode\(\s*envelopeJson,\s*appPasscode,\s*expectedSignerPublicKey,\s*transactionXdr,\s*networkPassphrase,/s, 'Android must forward the exact signer, transaction bytes and network to Native SDK');
 });
 
 
@@ -94,6 +95,7 @@ test('Apple adapter targets Native SDK and preserves the reviewed bridge surface
   }
   assert.match(source, /Data\(message\.utf8\)/, 'Apple must encode the reviewed dapp message as explicit UTF-8');
   assert.match(source, /authorization\.verifyProtectedSignerPassphrase\(/, 'Apple passphrase verification must stay behind the native authorization facade');
+  assert.match(source, /authorization\.signWithPasscode\(\s*envelopeJson: envelopeJson,\s*appPasscode: appPasscode,\s*expectedSignerPublicKey: expectedSignerPublicKey,\s*transactionXdr: transactionXdr,\s*networkPassphrase: networkPassphrase/s, 'Apple must forward the exact signer, transaction bytes and network to Native SDK');
 });
 
 
