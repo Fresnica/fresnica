@@ -45,6 +45,7 @@ jobs:
         env:
           FRESNICA_NATIVE_AAR: /tmp/fresnica-native-sdk.aar
           FRESNICA_NATIVE_LIB_DIR: /tmp/fresnica-native-lib
+          FRESNICA_VECTOR_DIR: ${{ github.workspace }}/spec/test-vectors
         run: |
           gradle -p bindings/native/tests/android-consumer \
             testDebugUnitTest \
