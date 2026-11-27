@@ -42,6 +42,10 @@ android {
                 if (nativeLibDir) {
                     systemProperty 'jna.library.path', nativeLibDir
                 }
+                def vectorDir = System.getenv('FRESNICA_VECTOR_DIR')
+                if (vectorDir) {
+                    systemProperty 'fresnica.vector.dir', vectorDir
+                }
             }
         }
     }
