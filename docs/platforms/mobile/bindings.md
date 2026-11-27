@@ -115,6 +115,11 @@ The canonical JavaScript module remains `FresnicaCore`. It exposes the reviewed 
 
 The adapter performs only argument/result conversion, React Native registration/lifecycle work and the platform UI steps needed to drive SDK-owned native authorization.
 
+The transaction `signWithPasscode` / `signWithSystemAuth` methods accept base64-encoded Stellar `TransactionEnvelope` XDR from JavaScript, decode it in the native adapter, and pass the exact bytes plus `expectedSignerPublicKey` and `networkPassphrase` into the SDK-owned native authorization helper. This includes `TransactionV1Envelope` values containing Soroban `InvokeHostFunction`; the adapter does not reinterpret the contract call or maintain a separate Soroban transaction signer.
+
+Signing support does not make a transaction approved. Mobile must complete semantic review and Ledger/Soroban authorization before requesting the final transaction signature. Detached Soroban authorization entries remain a separate signing domain.
+
+
 The v0.2 security boundary adds two important high-level semantics:
 
 - `deriveMnemonicSigner` derives another explicit HD index from an existing mnemonic-backed protected source without returning the mnemonic to JavaScript; the normal first index is `0`.
