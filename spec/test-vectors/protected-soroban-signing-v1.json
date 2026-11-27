@@ -1,0 +1,29 @@
+{
+  "schema": "fresnica-protected-soroban-signing-v1",
+  "source": "Live Blend Testnet contract sample captured with Stellar CLI 28.0.0 on 2026-11-27",
+  "network_passphrase": "Test SDF Network ; September 2015",
+  "wrong_network_passphrase": "Public Global Stellar Network ; September 2015",
+  "source_account": "GDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRVHUR",
+  "signer_fixture": "transaction-signing-v1.json#cases[0]",
+  "wrong_signer_public_key": "GAXUGZINCMWFE5WPBMF4H75RYIH522TEGLZHGI7QXRDNGLEUFZJ4RWNY",
+  "blend": {
+    "deployment": "TestnetV2",
+    "contract_id": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+    "function": "get_config",
+    "live_simulation_result": {
+      "bstop_rate": 1000000,
+      "max_positions": 8,
+      "min_collateral": "0",
+      "oracle": "CAZOKR2Y5E2OSWSIBRVZMJ47RUTQPIGVWSAQ2UISGAVC46XKPGDG5PKI",
+      "status": 0
+    }
+  },
+  "transaction": {
+    "envelope_type": "tx",
+    "operation_type": "invoke_host_function",
+    "unsigned_xdr_base64": "AAAAAgAAAADXWpgBgrEKt9VL/tPJZAc6DuFy89qmIyWvAhpo9wdRGgAAAGQAOmwcAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAGIGo8M3rDcCq2N4KGUr0SSkVe9+IeSIiEhONFXijvhzgAAAApnZXRfY29uZmlnAAAAAAAAAAAAAAAAAAAAAAAA",
+    "testnet_transaction_hash_hex": "9013e48cb1b04794bdb3e04b36582fda31f1ede3aa04ed11b45cb866aaa17e27",
+    "wrong_network_transaction_hash_hex": "ad44e0ae47d7bc3009d3ee7dac4ba1221c3d32d70b66832a52aa67793af63dc0",
+    "expected_signed_xdr_base64": "AAAAAgAAAADXWpgBgrEKt9VL/tPJZAc6DuFy89qmIyWvAhpo9wdRGgAAAGQAOmwcAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAGIGo8M3rDcCq2N4KGUr0SSkVe9+IeSIiEhONFXijvhzgAAAApnZXRfY29uZmlnAAAAAAAAAAAAAAAAAAAAAAAB9wdRGgAAAEDtvZIyrJ1Px0JXk9ItHaT2eLWe3bSS435CenDWCzvZUoZkAHNcaeTq4RbMwl0haVThYJ5spKUV3Ejjcb8XMcEO"
+  }
+}
